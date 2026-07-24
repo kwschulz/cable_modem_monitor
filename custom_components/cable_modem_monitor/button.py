@@ -18,6 +18,8 @@ from __future__ import annotations
 import functools
 import logging
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.const import CONF_HOST, EntityCategory
@@ -42,7 +44,7 @@ from .const import (
     CONF_VARIANT,
     DOMAIN,
 )
-from .coordinator import CableModemConfigEntry
+from .coordinator import ActiveOperation, CableModemConfigEntry
 from .lib.utils import get_device_name
 from .services import async_request_modem_refresh
 
@@ -55,6 +57,47 @@ PARALLEL_UPDATES = 0
 _NOTIFY_RESTART = "cable_modem_restart"
 _NOTIFY_RESET = "cable_modem_reset"
 _NOTIFY_UPDATE = "cable_modem_update"
+
+
+# ------------------------------------------------------------------
+# Operation mutex
+# ------------------------------------------------------------------
+
+
+class OperationInProgressError(HomeAssistantError):
+    """Raised when a destructive button operation is already running."""
+
+    def __init__(self, active: ActiveOperation) -> None:
+        """Store which operation holds the mutex."""
+        super().__init__(f"operation '{active}' already in progress")
+        self.active: ActiveOperation = active
+
+
+class OperationUnavailableError(HomeAssistantError):
+    """Raised when runtime_data is gone; the entry is unloading."""
+
+
+@contextmanager
+def hold_active_operation(
+    entry: CableModemConfigEntry,
+    op: ActiveOperation,
+) -> Iterator[None]:
+    """Hold the destructive-operation mutex for the handler's duration."""
+    # See HA_ADAPTER_SPEC.md § Operation Mutex. Sync contextmanager on
+    # purpose: set/clear is synchronous, the body is where awaits happen.
+    runtime = entry.runtime_data
+    if runtime is None:
+        raise OperationUnavailableError("runtime_data unavailable; entry is unloading")
+    if runtime.active_operation is not None:
+        raise OperationInProgressError(runtime.active_operation)
+    runtime.active_operation = op
+    try:
+        yield
+    finally:
+        # Re-read; the entry may have unloaded or reloaded during the body.
+        runtime = entry.runtime_data
+        if runtime is not None:
+            runtime.active_operation = None
 
 
 # ------------------------------------------------------------------
@@ -155,37 +198,23 @@ class RestartModemButton(_ButtonBase):
         orchestrator = runtime.orchestrator
         model = runtime.modem_identity.model
 
-        # Refuse overlapping destructive operations. ``active_operation``
-        # is the only gate — no ``recovery_active`` check. A user who
-        # sees a flakey modem after a restart is allowed to retry once
-        # this press finishes; Core's recovery window doesn't block
-        # the button.
-        if runtime.active_operation is not None:
+        # No state writes in this handler: a ButtonEntity's state is its
+        # last-pressed timestamp, and every write during a press renders
+        # in the logbook as another "Pressed" entry attributed to the
+        # pressing user. The mutex alone refuses overlapping presses;
+        # no ``recovery_active`` check. A user who sees a flakey modem
+        # after a restart is allowed to retry once this press finishes.
+        try:
+            with hold_active_operation(self._entry, "restart"):
+                _LOGGER.info("Modem restart initiated [%s]", model)
+                result: RestartResult = await self.hass.async_add_executor_job(orchestrator.restart)
+        except OperationInProgressError as err:
             _LOGGER.warning(
                 "Operation '%s' already in progress [%s] — ignoring restart press",
-                runtime.active_operation,
+                err.active,
                 model,
             )
             return
-
-        _LOGGER.info("Modem restart initiated [%s]", model)
-
-        # Claim the mutex and mark the button busy. Clear both in
-        # finally so the button recovers even if restart raises.
-        runtime.active_operation = "restart"
-        self._attr_available = False
-        self.async_write_ha_state()
-
-        try:
-            result: RestartResult = await self.hass.async_add_executor_job(orchestrator.restart)
-        finally:
-            # Re-read runtime_data — the entry may have unloaded
-            # during the await. If unloaded, nothing to clear.
-            current_runtime = self._entry.runtime_data
-            if current_runtime is not None:
-                current_runtime.active_operation = None
-            self._attr_available = True
-            self.async_write_ha_state()
 
         if result.success:
             _LOGGER.info("Restart command sent [%s] in %.1fs", model, result.elapsed_seconds)
@@ -234,6 +263,16 @@ class UpdateModemDataButton(_ButtonBase):
         runtime = self._entry.runtime_data
         model = runtime.modem_identity.model
 
+        # Refuse while a destructive operation runs; never sets the
+        # mutex itself (a refresh is not destructive).
+        if runtime.active_operation is not None:
+            _LOGGER.warning(
+                "Operation '%s' already in progress [%s] — ignoring update press",
+                runtime.active_operation,
+                model,
+            )
+            return
+
         _LOGGER.info("Manual data update triggered [%s]", model)
 
         await async_request_modem_refresh(runtime)
@@ -262,6 +301,24 @@ class ResetEntitiesButton(_ButtonBase):
 
     async def async_press(self) -> None:
         """Handle button press — re-detect probes, remove entities, reload."""
+        model = self._entry.runtime_data.modem_identity.model
+
+        # A second press while the first is still tearing down entities
+        # would fire coordinator updates against unloaded entities
+        # (UC-80). Same no-state-writes rule as the restart button.
+        try:
+            with hold_active_operation(self._entry, "reset"):
+                await self._reset_entities(model)
+        except OperationInProgressError as err:
+            _LOGGER.warning(
+                "Operation '%s' already in progress [%s] — ignoring reset press",
+                err.active,
+                model,
+            )
+            return
+
+    async def _reset_entities(self, model: str) -> None:
+        """Re-detect probes, remove entities, reload, notify."""
         # Re-detect probe capabilities
         updated = await self._redetect_probes()
 
@@ -274,7 +331,6 @@ class ResetEntitiesButton(_ButtonBase):
         ]
         entities_to_remove = [entry.entity_id for entry in entries_to_remove]
 
-        model = self._entry.runtime_data.modem_identity.model
         # Breakdown by platform so the count reconciles with each
         # platform's own "Created N entities" log on re-init.
         breakdown = Counter(entry.domain for entry in entries_to_remove)

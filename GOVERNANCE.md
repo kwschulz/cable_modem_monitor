@@ -4,7 +4,7 @@ This document outlines the governance model for the Cable Modem Monitor project.
 
 ## Project Overview
 
-Cable Modem Monitor is a community-driven open-source project that provides Home Assistant integration for monitoring cable modem statistics. The project is maintained by volunteers who contribute their time and expertise.
+Cable Modem Monitor is an open-source project that provides a Home Assistant integration for monitoring cable modem statistics. It has a single maintainer; community contributors add modem support, fixes, and improvements.
 
 ## Roles and Responsibilities
 
@@ -205,6 +205,6 @@ This project would not be possible without:
 
 ---
 
-**Last Updated:** 2025-11-06
+**Last Updated:** 2026-07-23
 **Effective Date:** 2025-11-06
 **Maintainer:** @kwschulz

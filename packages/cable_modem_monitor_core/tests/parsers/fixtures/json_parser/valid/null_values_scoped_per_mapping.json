@@ -1,0 +1,16 @@
+{
+  "_description": "null_values is per-mapping; undeclared uncoercible shapes on other fields still WARN",
+  "_json": {"channels": [{"id": "---", "snr": "n/a"}]},
+  "_resource": "/api/data",
+  "_config": {
+    "format": "json",
+    "resource": "/api/data",
+    "array_path": "channels",
+    "fields": [
+      {"key": "id", "field": "channel_id", "type": "integer", "null_values": ["---"]},
+      {"key": "snr", "field": "snr", "type": "float"}
+    ]
+  },
+  "_expected": [],
+  "_expected_warnings": ["n/a"]
+}

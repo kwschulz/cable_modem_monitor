@@ -94,10 +94,21 @@ upstream:
 | `array_path` | string | yes* | Dot-notation path to the channel array |
 | `fields` | list | yes* | Key-to-field mappings within each JSON object |
 | `fields[].key` | string | yes | JSON key name in the source object |
+| `fields[].field` | string | yes | Canonical channel field name (FIELD_REGISTRY.md) |
+| `fields[].type` | string | yes | Field type (one of `FIELD_TYPES`) |
 | `fields[].fallback_key` | string | no | Alternative key if primary is missing |
 | `fields[].format` | string | no | Input format for types that require it (e.g., `seconds` for `uptime`). |
 | `fields[].scale` | number | no | Multiplier applied after type conversion. Whole-number results cast to int. |
+| `fields[].unit` | string | no | Unit suffix stripped (case-insensitive) from the raw text before conversion (e.g. `"3.2 dBmV"` yields `3.2`). |
+| `fields[].map` | map | no | Exact-match value translation on the stripped raw text before type conversion (e.g. `{"Locked": "locked"}`); unmapped values pass through unchanged. |
+| `fields[].truthy` | any | no | Declares the raw value meaning true; the field becomes the boolean `raw == truthy`, bypassing type conversion. |
+| `fields[].separator` | string | no | Splits a compound string value on a delimiter before conversion (e.g. `"0.3/60.3"`). |
+| `fields[].separator_index` | integer | no | Which split segment to convert (default 0 = first; out-of-range falls back to the unsplit value). |
+| `fields[].range` | string | no | `span` only: emits `last - first` from the separator-split parts (band-edge string to `channel_width`). Requires `separator`. Values not carrying the separator skip silently (mixed SC-QAM/OFDM arrays sharing a key). |
+| `fields[].null_values` | list | no | Firmware no-value sentinels (e.g. `"---"` on inactive channel slots). Matching raw values (compared whitespace-trimmed) skip silently as sparse data; the cannot-coerce WARN stays reserved for undeclared shapes. |
+| `channel_type` | object | no | `fixed:`, per-row `field:` + `map:`, or `derive:` form (same semantics as other formats). Applied before `fixed_fields`; rows that already extracted a `channel_type` keep it. |
 | `fixed_fields` | map | no | Static field values for every channel. Applied after channel_type, before filter (same semantics as XML tables). |
+| `filter` | object | no | Keep/drop rules on converted field values: a plain value keeps only matching channels; `{not: value}` drops matching channels. Applied after `fixed_fields`. |
 | `arrays` | list | yes* | Multi-array form (alternative to array_path/fields) |
 
 \* Mutually exclusive: use either flat form (`array_path` + `fields`)

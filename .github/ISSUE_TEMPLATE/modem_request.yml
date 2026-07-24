@@ -88,7 +88,7 @@ body:
         4. If your modem requires login, **log out** before closing the browser
         5. Close the browser when done
 
-        **Before sharing:** Search the `.sanitized.har` file for your WiFi password and any other credentials — the sanitizer is best-effort. See the [Modem Request Guide](https://github.com/solentlabs/cable_modem_monitor/blob/main/docs/MODEM_REQUEST.md#important-about-pii-and-sanitization) for what to check.
+        **Before sharing:** Search the `.sanitized.har` file for your WiFi password and any other credentials — the sanitizer is best-effort. See the [Modem Request Guide](https://github.com/solentlabs/cable_modem_monitor/blob/main/docs/MODEM_REQUEST.md#step-2--review-for-pii) for what to check.
 
         Attach the `.sanitized.har.gz` file to this issue.
 

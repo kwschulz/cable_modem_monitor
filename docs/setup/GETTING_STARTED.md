@@ -56,7 +56,7 @@ slower and breaks file watchers.
 
 ```bash
 make validate       # Ruff + Black + quick tests (~30s)
-make validate-ci    # Full ruff + pytest (2–5 min) — run before push
+make validate-ci    # Local CI mirror: lint, types, tests, regression (2-5 min); run before push
 make test           # All three test suites (Core, Catalog, HA)
 ```
 

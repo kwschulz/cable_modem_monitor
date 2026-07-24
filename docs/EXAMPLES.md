@@ -75,7 +75,7 @@ dashboard's Raw Configuration Editor as a starting point.
 The example uses 24 downstream channels (typical for DOCSIS 3.0). If
 your modem has fewer or more, add/remove channel entries following the
 existing pattern. Entity IDs follow the [Entity Naming Pattern in the
-README](../README.md#available-sensors).
+README](https://github.com/solentlabs/cable_modem_monitor#available-sensors).
 
 ---
 

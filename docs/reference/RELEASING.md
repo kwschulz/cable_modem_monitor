@@ -19,10 +19,12 @@ Releases follow a PR-based workflow:
   `release.py` updates the version files only at release-prep time, so
   during development the manifest, startup banner, and downloaded
   diagnostics all report the previous tag's number (e.g. `beta.14`
-  while `beta.15` work is in flight, untagged). This is expected — the
-  version string is **not** evidence of which code is loaded. Confirm
-  loaded code by observable behavior (UI state, logs), never by the
-  reported version.
+  while `beta.15` work is in flight, untagged). This is expected. The
+  startup banner is still the tell: it appends `(local dev)` whenever
+  the `CMM_LOCAL_DEV` env var is set (`docker-compose.test.yml` sets
+  it for the local harness), so a dev-tree install self-identifies in
+  the log regardless of the version it reports. Whether a *specific*
+  change is live is confirmed by behavior, not the number.
 - **Never run `gh release create` manually.** Let CI handle it.
 - **Dogfood on local HA** before stable releases (maintainer launches,
   not automated).

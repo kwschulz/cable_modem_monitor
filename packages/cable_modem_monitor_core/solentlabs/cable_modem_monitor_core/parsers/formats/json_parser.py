@@ -197,11 +197,12 @@ def _extract_channel(
     Tries the primary ``key`` first, then ``fallback_key`` if present.
     Returns ``None`` if no fields could be extracted.
 
-    Raw values that are absent or whitespace-only are silently skipped
-    (sparse-data signal). Non-empty raw values that fail to coerce —
-    after any declared ``separator``/``range_op`` transform — surface
-    as WARN logs so catalog gaps don't go unnoticed when firmware
-    introduces a novel shape.
+    Raw values that are absent, whitespace-only, or listed in the
+    mapping's ``null_values`` are silently skipped (sparse-data
+    signal). Non-empty raw values that fail to coerce — after any
+    declared ``separator``/``range_op`` transform — surface as WARN
+    logs so catalog gaps don't go unnoticed when firmware introduces
+    a novel shape.
     """
     channel: dict[str, Any] = {}
 
@@ -215,6 +216,11 @@ def _extract_channel(
         if original_raw is None:
             continue
         if isinstance(original_raw, str) and not original_raw.strip():
+            continue
+        # Declared no-value sentinels are sparse data, same as absent or
+        # whitespace-only; the cannot-coerce WARN below stays reserved
+        # for shapes the catalog has not seen.
+        if isinstance(original_raw, str) and original_raw.strip() in mapping.null_values:
             continue
 
         # Boolean truthy check: compare against declared truthy value

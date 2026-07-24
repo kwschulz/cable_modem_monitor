@@ -234,7 +234,7 @@ Modem Model and Channel Identity are install-time choices, not editable here. Th
 
 ## Available Sensors
 
-All sensors use the `cable_modem_` prefix for consistent entity naming and easy identification.
+All sensors use the `cable_modem_` prefix for consistent entity naming and easy identification. Supporting entities (system information, error totals and rates, latency, LAN statistics) sit in the device page's Diagnostic section.
 
 **Entity Naming Pattern:**
 
@@ -266,20 +266,26 @@ Channel Identity is set when you add the integration. To switch, remove and re-a
 
 ### System Information
 
+- **Modem Info**: Detected model, with manufacturer, DOCSIS version, release date, and catalog status as attributes
 - `sensor.cable_modem_software_version`: Modem firmware/software version
 - `sensor.cable_modem_last_boot_time`: When the modem last rebooted (timestamp device class); Home Assistant renders it as relative age ("5 days ago"), which doubles as uptime
 - `sensor.cable_modem_ds_channel_count`: Number of active downstream channels
 - `sensor.cable_modem_us_channel_count`: Number of active upstream channels
 
+Firmware and hardware versions also appear on the device info card. Other system fields your modem reports (provisioned speeds, for example) become sensors automatically, and LAN interface statistics get per-interface sensors for bytes, packets, errors, and drops.
+
 ### Latency Monitoring
 
 - `sensor.cable_modem_ping_latency`: Ping response time in milliseconds
+- `sensor.cable_modem_tcp_latency`: TCP connect time in milliseconds
 - `sensor.cable_modem_http_latency`: HTTP response time in milliseconds
 
 ### Summary Sensors
 
 - `sensor.cable_modem_total_corrected_errors`: Total corrected errors across all downstream channels
 - `sensor.cable_modem_total_uncorrected_errors`: Total uncorrected errors across all downstream channels
+- `sensor.cable_modem_rate_corrected_errors`: Corrected errors per minute
+- `sensor.cable_modem_rate_uncorrected_errors`: Uncorrected errors per minute
 
 ### Per-Channel Downstream Sensors (for each channel)
 
@@ -312,6 +318,7 @@ The integration registers three buttons under the modem device:
 - **`cable_modem_monitor.request_refresh`**: Triggers an immediate data poll for the selected device.
 - **`cable_modem_monitor.request_health_check`**: Runs an immediate health probe (ICMP / TCP / HTTP) outside the regular cadence.
 - **`cable_modem_monitor.convert_channel_identity`**: Renames recorder statistics from the previous Channel Identity mode to the current one, so historical graphs survive a remove-and-re-add in the other mode. Modem must be online.
+- **`cable_modem_monitor.orphaned_statistics`**: Lists recorder statistics left behind by a mode switch, channel rebonding, or a prefix change; call again with `execute: true` to purge them. See [Ghost Statistics in History](https://github.com/solentlabs/cable_modem_monitor/blob/main/docs/TROUBLESHOOTING.md#ghost-statistics-in-history).
 
 ## Understanding the Values
 
@@ -415,6 +422,10 @@ Please see the [Contributing Guide](https://github.com/solentlabs/cable_modem_mo
 MIT License - see LICENSE file for details
 
 ## Support
+
+Cable Modem Monitor is maintained by one person, in the evenings, around a day job. I read every issue, and replies are best effort; a few days is normal. Fixes land as time allows.
+
+Catalog contributions are welcome and are the fastest way to get a new modem supported. If you have AI access, you can do most of the intake yourself: see [AI-Assisted Catalog Contribution](https://github.com/solentlabs/cable_modem_monitor/blob/main/CONTRIBUTING.md#ai-assisted-catalog-contribution).
 
 - [GitHub Issues](https://github.com/solentlabs/cable_modem_monitor/issues)
 - [Home Assistant Community Forum](https://community.home-assistant.io/)

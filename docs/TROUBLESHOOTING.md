@@ -322,7 +322,7 @@ See [ORCHESTRATION_SPEC.md § Logging Contract](../packages/cable_modem_monitor_
 
 **Symptoms:**
 
-- You see `sensor.cable_modem_upstream_channel_count` showing 4-8 channels
+- You see `sensor.cable_modem_us_channel_count` showing 4-8 channels
 - But individual upstream sensors (`US Ch X Power`, `US Ch X Frequency`) are missing
 - Only downstream sensors are created
 
@@ -513,12 +513,12 @@ Channel sensors include channel type for DOCSIS 3.1 compatibility:
 | Downstream SNR | `sensor.cable_modem_ds_qam_ch_32_snr` | DS QAM Ch 32 SNR |
 | Upstream ATDMA Power | `sensor.cable_modem_us_atdma_ch_3_power` | US ATDMA Ch 3 Power |
 | Upstream OFDMA Power | `sensor.cable_modem_us_ofdma_ch_1_power` | US OFDMA Ch 1 Power |
-| Channel Count | `sensor.cable_modem_downstream_channel_count` | DS Channel Count |
+| Channel Count | `sensor.cable_modem_ds_channel_count` | DS Channel Count |
 
 **Note:**
 
 - Entity IDs always include `cable_modem_` prefix
-- Channel type is included: `qam`, `ofdm`, `atdma`, `ofdma`
+- The examples show Channel ID mode, which includes the channel type: `qam`, `ofdm`, `atdma`, `ofdma`. Channel Number mode (the recommended default) omits it: `sensor.cable_modem_ds_ch_32_power`
 - DS = Downstream, US = Upstream
 
 ### DOCSIS Channel Types

@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.16] - 2026-07-24
+
+### Added
+
+- **`null_values` parser.yaml option.** JSON field mappings can declare
+  firmware no-value sentinels, which then skip silently as sparse data
+  while undeclared shapes keep their warning. The DM1000 declares `---`
+  for its inactive upstream slots, removing four warning lines per
+  poll. (Related to #92)
+
+### Changed
+
+- **har-capture floor raised to 0.10.3.** The 0.10.3 sanitizer closes
+  a credential-leak gap (the Sercomm `pws` login field) found during
+  the DM1000 intake; catalog tooling now requires it. (Related to #92)
+
+### Fixed
+
+- **One button press, one logbook entry.** The restart button's
+  availability toggle wrote state during the press, so a single press
+  rendered as three "Pressed" logbook entries. The toggle is dropped in
+  favor of the frontend's native in-flight feedback, and all three
+  buttons now share the operation mutex the adapter spec defines:
+  restart converts to it, Reset Entities gains the double-click guard
+  it was missing, and Update Modem Data refuses presses during
+  destructive operations.
+
+- **DM1000 polling failed on every cycle since beta.10.** Channels
+  built by parser.py hooks (the DM1000 OFDMA upstream) missed Core's
+  channel_number pass and failed event payload validation, leaving all
+  entities unavailable. Core now numbers hook-built channels after
+  hooks run, and a new fleet test validates every catalog golden
+  against the event payload schema, so this class of gap fails CI
+  instead of production polls. (Related to #92)
+
 ## [3.14.0-beta.15] - 2026-07-22
 
 ### Added

@@ -101,6 +101,11 @@ class JsonChannelMapping(BaseModel):
     instead of a positional pick. ``range: span`` computes
     ``last - first`` (used to derive ``channel_width`` from a band-edge
     range like ``"751~860"``). Requires ``separator`` to be set.
+
+    ``null_values`` declares firmware no-value sentinels (e.g. ``"---"``
+    on inactive channel slots). Matching raw values are skipped silently
+    as sparse data instead of raising the cannot-coerce WARN, which
+    stays reserved for genuinely novel shapes.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -116,6 +121,7 @@ class JsonChannelMapping(BaseModel):
     separator_index: int = 0
     range: Literal["span"] | None = None
     scale: int | float | None = None
+    null_values: list[str] = []
 
     @model_validator(mode="after")
     def validate_field_type(self) -> JsonChannelMapping:

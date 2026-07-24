@@ -48,8 +48,8 @@ body:
       label: Modem Model Selection in Config
       description: In the integration settings, which modem model did you select?
       options:
-        - auto (automatic detection)
-        - Manually selected my specific model
+        - Selected my exact model from the picker
+        - Selected a similar model (mine isn't listed)
         - Not sure / Don't remember
     validations:
       required: false
