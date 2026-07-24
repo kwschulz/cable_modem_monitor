@@ -1,0 +1,55 @@
+{
+  "_description": "Coordinator applies channel_type derive:from_modulation direction-aware (qam/atdma vs ofdm/ofdma); generic OFDM modulation labels feed derivation, then strip",
+  "_json": {
+    "/api/downstream": {
+      "channels": [
+        {"id": 1, "mod": "QAM256", "freq": 507000000},
+        {"id": 33, "mod": "OFDM PLC", "freq": 850000000}
+      ]
+    },
+    "/api/upstream": {
+      "channels": [
+        {"id": 4, "mod": "QAM64", "freq": 25900000},
+        {"id": 9, "mod": "OFDMA", "freq": 36000000}
+      ]
+    }
+  },
+  "_parser_config": {
+    "downstream": {
+      "format": "json",
+      "resource": "/api/downstream",
+      "array_path": "channels",
+      "fields": [
+        {"key": "id", "field": "channel_id", "type": "integer"},
+        {"key": "mod", "field": "modulation", "type": "modulation"},
+        {"key": "freq", "field": "frequency", "type": "frequency", "unit": "Hz"}
+      ],
+      "channel_type": {"derive": "from_modulation"}
+    },
+    "upstream": {
+      "format": "json",
+      "resource": "/api/upstream",
+      "array_path": "channels",
+      "fields": [
+        {"key": "id", "field": "channel_id", "type": "integer"},
+        {"key": "mod", "field": "modulation", "type": "modulation"},
+        {"key": "freq", "field": "frequency", "type": "frequency", "unit": "Hz"}
+      ],
+      "channel_type": {"derive": "from_modulation"}
+    }
+  },
+  "_expected": {
+    "downstream": [
+      {"channel_id": 1, "channel_number": 1, "channel_type": "qam", "modulation": "QAM256", "frequency": 507000000},
+      {"channel_id": 33, "channel_number": 2, "channel_type": "ofdm", "frequency": 850000000}
+    ],
+    "upstream": [
+      {"channel_id": 4, "channel_number": 1, "channel_type": "atdma", "modulation": "QAM64", "frequency": 25900000},
+      {"channel_id": 9, "channel_number": 2, "channel_type": "ofdma", "frequency": 36000000}
+    ],
+    "system_info": {
+      "downstream_channel_count": 2,
+      "upstream_channel_count": 2
+    }
+  }
+}

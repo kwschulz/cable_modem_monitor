@@ -144,18 +144,30 @@ class ModemParserCoordinator:
         """
         section = getattr(self._config, section_name, None)
         if section is None:
-            return self._apply_hook(section_name, [], resources), AnchorCount(), None
+            channels: list[dict[str, Any]] = []
+            anchors = AnchorCount()
+            resource_path: str | None = None
+        else:
+            parser_fn = CHANNEL_PARSERS.get(type(section))
+            if parser_fn is None:
+                raise NotImplementedError(f"{type(section).__name__} has no registered channel parser")
 
-        parser_fn = CHANNEL_PARSERS.get(type(section))
-        if parser_fn is None:
-            raise NotImplementedError(f"{type(section).__name__} has no registered channel parser")
+            channels, anchors = parser_fn(section, resources)
+            # HNAP and arrays-mode JSON sections lack a single section-level
+            # `resource` — they don't participate in per-resource stub
+            # detection (the wrapper already aggregates per-array internally).
+            resource_path = getattr(section, "resource", None) or None
 
-        channels, anchors = parser_fn(section, resources)
-        # HNAP and arrays-mode JSON sections lack a single section-level
-        # `resource` — they don't participate in per-resource stub
-        # detection (the wrapper already aggregates per-array internally).
-        resource_path = getattr(section, "resource", None) or None
-        return self._apply_hook(section_name, channels, resources), anchors, resource_path
+        channels = self._apply_hook(section_name, channels, resources)
+        # Post-hook numbering: format parsers auto-assign before hooks
+        # run, so channels a hook appends (or builds for an unconfigured
+        # section) would otherwise ship without the channel_number every
+        # channel MUST carry. See CHANNEL_IDENTIFICATION_SPEC §10.
+        if isinstance(channels, list):
+            for idx, channel in enumerate(channels, start=1):
+                if "channel_number" not in channel:
+                    channel["channel_number"] = idx
+        return channels, anchors, resource_path
 
     def _extract_system_info(
         self,

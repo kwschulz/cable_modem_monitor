@@ -75,6 +75,9 @@ upstream:
     - key: upstream
       field: channel_id
       type: integer
+      # Inactive slots report '---' for the channel id (alongside
+      # modulation QAM_NONE, which the filter below drops).
+      null_values: ["---"]
     - key: Freq
       field: frequency
       type: frequency

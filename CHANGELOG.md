@@ -7,11 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`null_values` parser.yaml option.** JSON field mappings can declare
+  firmware no-value sentinels, which then skip silently as sparse data
+  while undeclared shapes keep their warning. The DM1000 declares `---`
+  for its inactive upstream slots, removing four warning lines per
+  poll. (Related to #92)
+
 ### Changed
 
 - **har-capture floor raised to 0.10.3.** The 0.10.3 sanitizer closes
   a credential-leak gap (the Sercomm `pws` login field) found during
   the DM1000 intake; catalog tooling now requires it. (Related to #92)
+
+### Fixed
+
+- **DM1000 polling failed on every cycle since beta.10.** Channels
+  built by parser.py hooks (the DM1000 OFDMA upstream) missed Core's
+  channel_number pass and failed event payload validation, leaving all
+  entities unavailable. Core now numbers hook-built channels after
+  hooks run, and a new fleet test validates every catalog golden
+  against the event payload schema, so this class of gap fails CI
+  instead of production polls. (Related to #92)
 
 ## [3.14.0-beta.15] - 2026-07-22
 

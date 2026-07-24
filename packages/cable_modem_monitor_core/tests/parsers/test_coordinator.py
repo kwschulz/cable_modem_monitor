@@ -174,6 +174,26 @@ class _ReplacingPostProcessor:
         return [{"channel_id": 99, "channel_type": "qam", "custom": True}]
 
 
+class _AppendingPostProcessor:
+    """Post-processor that appends a channel without channel_number (issue #92 pattern)."""
+
+    def parse_downstream(self, channels: list[dict[str, Any]], resources: dict[str, Any]) -> list[dict[str, Any]]:
+        """Append a hook-built channel, as the DM1000 OFDMA hook does."""
+        channels.append({"channel_id": 0, "channel_type": "ofdma", "lock_status": "locked"})
+        return channels
+
+
+class _UpstreamHookOnlyPostProcessor:
+    """Post-processor supplying upstream channels for a section with no parser.yaml config."""
+
+    def parse_upstream(self, channels: list[dict[str, Any]], resources: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return hook-built channels for an unconfigured section."""
+        return [
+            {"channel_id": 4, "channel_type": "ofdma", "lock_status": "locked"},
+            {"channel_id": 5, "channel_type": "ofdma", "lock_status": "locked"},
+        ]
+
+
 class TestPostProcessorHooks:
     """Tests for parser.py post-processing hook invocation."""
 
@@ -199,7 +219,9 @@ class TestPostProcessorHooks:
         coordinator = ModemParserCoordinator(config, _ReplacingPostProcessor())
         result, _ = coordinator.parse(resources)
 
-        assert result["downstream"] == [{"channel_id": 99, "channel_type": "qam", "custom": True}]
+        # channel_number is coordinator-assigned post-hook; replacement
+        # output is subject to the same numbering as any other channel.
+        assert result["downstream"] == [{"channel_id": 99, "channel_type": "qam", "custom": True, "channel_number": 1}]
 
     def test_no_hook_for_section(self) -> None:
         """Section without a hook uses BaseParser output as-is."""
@@ -228,6 +250,31 @@ class TestPostProcessorHooks:
         assert result["system_info"]["custom_key"] == "custom_value"
         assert result["system_info"]["downstream_channel_count"] == 1
         assert result["system_info"]["upstream_channel_count"] == 0
+
+    def test_hook_appended_channel_gets_channel_number(self, ds_fixture: dict[str, Any]) -> None:
+        """Channels appended by a hook are numbered by final list position.
+
+        CHANNEL_IDENTIFICATION_SPEC §10: every channel in Core's output
+        MUST have a channel_number. Format parsers number before hooks
+        run, so the coordinator numbers whatever the hook added.
+        """
+        resources = _build_resources(ds_fixture["_html"])
+        config = ParserConfig.model_validate(ds_fixture["_parser_config"])
+        coordinator = ModemParserCoordinator(config, _AppendingPostProcessor())
+        result, _ = coordinator.parse(resources)
+
+        assert result["downstream"][0]["channel_number"] == 1
+        assert result["downstream"][1]["channel_number"] == 2
+
+    def test_hook_only_section_gets_channel_numbers(self, ds_fixture: dict[str, Any]) -> None:
+        """Hook-supplied channels for an unconfigured section are numbered."""
+        resources = _build_resources(ds_fixture["_html"])
+        config = ParserConfig.model_validate(ds_fixture["_parser_config"])
+        # Config declares downstream only; the hook supplies upstream.
+        coordinator = ModemParserCoordinator(config, _UpstreamHookOnlyPostProcessor())
+        result, _ = coordinator.parse(resources)
+
+        assert [ch["channel_number"] for ch in result["upstream"]] == [1, 2]
 
     def test_no_post_processor(self, ds_fixture: dict[str, Any]) -> None:
         """Coordinator with no post-processor uses BaseParser output."""

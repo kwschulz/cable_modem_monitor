@@ -1,0 +1,23 @@
+{
+  "_description": "Declared no-value sentinels skip silently as sparse data; no WARN, row survives with its other fields",
+  "_json": {"channels": [
+    {"id": "---", "freq": "507000000", "power": "3.1"},
+    {"id": "7", "freq": "513000000", "power": "2.9"}
+  ]},
+  "_resource": "/api/data",
+  "_config": {
+    "format": "json",
+    "resource": "/api/data",
+    "array_path": "channels",
+    "fields": [
+      {"key": "id", "field": "channel_id", "type": "integer", "null_values": ["---"]},
+      {"key": "freq", "field": "frequency", "type": "frequency", "unit": "Hz"},
+      {"key": "power", "field": "power", "type": "float"}
+    ]
+  },
+  "_expected": [
+    {"frequency": 507000000, "power": 3.1},
+    {"channel_id": 7, "frequency": 513000000, "power": 2.9}
+  ],
+  "_expected_warnings": []
+}

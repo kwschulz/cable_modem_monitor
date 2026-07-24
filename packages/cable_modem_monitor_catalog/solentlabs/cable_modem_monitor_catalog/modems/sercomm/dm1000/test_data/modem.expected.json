@@ -457,6 +457,7 @@
     },
     {
       "channel_id": 0,
+      "channel_number": 5,
       "channel_type": "ofdma",
       "lock_status": "locked",
       "power": 58.391663

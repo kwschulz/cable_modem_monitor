@@ -524,6 +524,15 @@ The rule: map `channel_number` from modem-provided data when
 available; auto-assign from position when not. Either way, every
 channel in Core's output MUST have a `channel_number`.
 
+The format-level auto-assign runs before parser.py hooks, so the
+coordinator applies a final numbering pass after hooks: any channel
+still lacking `channel_number` (hook-appended, or hook-built for a
+section with no parser.yaml config) is assigned its 1-based position
+in the final list. Mapped or format-assigned numbers are never
+overwritten. This closes the gap where a hook-appended channel
+shipped without the field and failed event payload validation on
+every poll (#92, DM1000 OFDMA).
+
 See PARSING_SPEC.md § Field Guarantees for the output guarantee.
 
 ### Modules affected
