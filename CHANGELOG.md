@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.16] - 2026-07-24
+
 ### Added
 
 - **`null_values` parser.yaml option.** JSON field mappings can declare
