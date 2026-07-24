@@ -37,7 +37,7 @@ Core, it should.
 | [Restart Lifecycle](#restart-lifecycle) | Button → executor → one-shot command → return |
 | [Recovery Adapter](#recovery-adapter) | Observer + cadence listener that reacts to Core's `recovery_active` flag |
 | [Operation Mutex](#operation-mutex) | `active_operation` field — mutex between destructive buttons (restart, reset) |
-| [Reset Entities Concurrency Guard](#reset-entities-concurrency-guard) | `active_operation` guard, `_attr_available` toggle, null-safety |
+| [Reset Entities Concurrency Guard](#reset-entities-concurrency-guard) | `active_operation` guard, null-safety |
 | [Reauth Flow](#reauth-flow) | Circuit breaker → `async_step_reauth` |
 | [Diagnostics Platform](#diagnostics-platform) | Core diagnostics + HA-side data |
 | [Services](#services) | `generate_dashboard`, `request_refresh`, `request_health_check` |
@@ -91,7 +91,9 @@ flag. The two answer different questions:
   recovery window? (True for the duration of
   `_RECOVERY_WINDOW_SECONDS` after any recovery trigger.)
 
-The button is disabled when *either* is set. During a button-press
+Only `active_operation` gates the buttons: a press while it is set
+is refused (logged, no dispatch). `recovery_active` never gates
+anything — it only drives polling cadence. During a button-press
 restart both are True briefly; after `restart()` returns,
 `active_operation` clears while `recovery_active` continues for
 the rest of the window.
@@ -506,7 +508,7 @@ the button itself does not observe the reboot.
 ```text
 User presses "Restart Modem"
  │
- ├─ 1. Acquire active_operation = "restart" via context manager
+ ├─ 1. Acquire active_operation = "restart" via hold_active_operation
  │     (refuses if another destructive operation is already running).
  │     No gate on recovery_active — a user who sees a flakey modem
  │     after a restart is allowed to try again.
@@ -515,21 +517,34 @@ User presses "Restart Modem"
  │     orchestrator.restart()
  │     (returns in 2–5 s; triggers a recovery window internally)
  │
- ├─ 3. Send persistent notification:
+ ├─ 3. Context manager exits → active_operation cleared. A new press
+ │     is accepted from here on; the user may retry if the dashboard
+ │     shows a flakey state.
+ │
+ ├─ 4. Send persistent notification:
  │     success → "Restart command sent"
  │     failure → "Restart command failed: <error>"
  │
- └─ 4. Context manager exits → active_operation cleared. Button is
-       immediately available again; the user may press it once more
-       if the dashboard shows a flakey state they want to retry.
+ └─ 5. Trigger one immediate data refresh so the dashboard reacts to
+       the post-dispatch state (typically UNREACHABLE while the modem
+       reboots). On failure, raise HomeAssistantError after the
+       refresh so the caller sees the action fail.
 ```
 
-The restart button returns its "busy" state after step 4. Scheduled
-data polls run at recovery cadence (driven by § Recovery Adapter)
-and surface actual modem state — UNREACHABLE while the modem is
-down, transitional docsis states while it ranges, ONLINE once it
-returns. The dashboard reflects truth throughout; no synthetic
-label.
+**No state writes during the press.** A `ButtonEntity`'s state is
+its last-pressed timestamp, and every state write during the press
+renders in the logbook as another "Pressed" entry attributed to the
+pressing user — the former `_attr_available` grey-out made one press
+log three times. The frontend already shows in-flight feedback while
+the press service call is pending; overlap protection is the
+`active_operation` mutex alone. This matches HA core convention: no
+core button platform writes state inside `async_press`.
+
+After step 5, scheduled data polls run at recovery cadence (driven
+by § Recovery Adapter) and surface actual modem state — UNREACHABLE
+while the modem is down, transitional docsis states while it ranges,
+ONLINE once it returns. The dashboard reflects truth throughout; no
+synthetic label.
 
 ### Sensor Behavior During a Recovery Window
 
@@ -543,7 +558,7 @@ observed outage, heuristic).
 | Health sensors (ICMP, HTTP, health_status) | Independent coordinator. Continue updating on their own cadence — probes naturally report UNRESPONSIVE while the modem is down and recover when the modem does. |
 | Data sensors (channel counts, SNR, power, uptime, system_info fields) | Available when the snapshot's `modem_data` is not None. Unavailable when `modem_data is None` (poll failed — typically UNREACHABLE during the reboot itself). This is the same rule as any non-recovery period; no recovery-specific special case. |
 | Per-channel sensors | Same as data sensors. |
-| Restart button | Disabled only while `active_operation == "restart"` (during the ~2–5 s command dispatch). After that it's clickable again — the user may choose to retry after observing the dashboard. |
+| Restart button | Always available (never greys out). A second press is refused only while `active_operation == "restart"` (during the ~2–5 s command dispatch). After that a press dispatches again — the user may choose to retry after observing the dashboard. |
 | Update Modem Data button | Press is refused when `active_operation` is set. Normal polling at recovery cadence already refreshes the dashboard; extra manual refreshes would be wasted. |
 | Reset Entities button | Press is refused when `active_operation` is set. |
 
@@ -726,7 +741,7 @@ Distinct from Core's `recovery_active`:
 | — (no active_operation) | restart | Allowed; `active_operation = "restart"` for the handler's duration (~2–5 s). |
 | — (no active_operation) | reset | Allowed; `active_operation = "reset"`. |
 | — (no active_operation) | refresh (user) | Allowed — runs normally. |
-| `active_operation` set | any button | Refused (button disabled in UI; direct invocation logs and returns). |
+| `active_operation` set | any button | Refused — the press logs a warning and returns without dispatching. |
 
 `recovery_active` has no row because it doesn't participate in
 gating. A button press during a recovery window is allowed; the
@@ -745,14 +760,14 @@ def hold_active_operation(
 ) -> Iterator[None]:
     runtime = entry.runtime_data
     if runtime is None:
-        raise OperationUnavailableError("runtime_data unavailable — entry is unloading")
+        raise OperationUnavailableError("runtime_data unavailable; entry is unloading")
     if runtime.active_operation is not None:
         raise OperationInProgressError(runtime.active_operation)
     runtime.active_operation = op
     try:
         yield
     finally:
-        # Re-read — entry may have unloaded during the body.
+        # Re-read; the entry may have unloaded or reloaded during the body.
         runtime = entry.runtime_data
         if runtime is not None:
             runtime.active_operation = None
@@ -814,39 +829,34 @@ still running can fire `_handle_coordinator_update()` against
 already-unloaded entities — observed symptom is an `AttributeError`
 on `entry.runtime_data` after the entry is partially torn down.
 
-The Reset button uses the shared `_hold_active_operation` context
-manager (see § Operation Mutex) for its mutex discipline. The
-button-specific availability toggle lives inside the `with` body:
+The Reset button uses the shared `hold_active_operation` context
+manager (see § Operation Mutex) for its mutex discipline. No state
+writes inside the handler — same logbook rule as § Restart
+Lifecycle:
 
 ```python
 async def async_press(self) -> None:
     try:
-        with _hold_active_operation(self._entry, "reset"):
-            self._attr_available = False
-            self.async_write_ha_state()
-            try:
-                # existing reset body — remove data-dependent entities,
-                # re-register deferred listener, trigger refresh
-                ...
-            finally:
-                self._attr_available = True
-                self.async_write_ha_state()
-    except OperationInProgressError:
+        with hold_active_operation(self._entry, "reset"):
+            # reset body — re-detect probes, remove entities,
+            # update config entry, reload, notify
+            ...
+    except OperationInProgressError as err:
+        _LOGGER.warning(...)
         return  # another destructive operation is running
 ```
 
-Three defences, all required:
+Two defences, both required:
 
 1. **`active_operation` check at entry** (via the context manager) —
    a second click while any destructive operation is running refuses
    immediately. The field lives on `RuntimeData`, not the button
    instance, so it survives the temporary teardown of data-dependent
    entities during reset.
-2. **`_attr_available = False` during the work** — the UI visibly
-   disables the button so the user isn't tempted to hammer it.
-3. **Null-safety** — the context manager re-reads `runtime_data` on
-   exit because `async_unload_entry` can fire concurrently and clear
-   it to `None`. The reset flow must not assume the entry is still
+2. **Null-safety** — the context manager re-reads `runtime_data` on
+   exit because `async_unload_entry` can fire concurrently (and the
+   reset body itself reloads the entry, replacing `runtime_data`).
+   The reset flow must not assume the entry it started with is still
    loaded when it returns.
 
 ---

@@ -133,6 +133,26 @@ async def test_update_button_press_no_health(
     mock_data_coordinator.async_request_refresh.assert_awaited_once()
 
 
+async def test_update_button_refuses_when_operation_in_progress(
+    mock_orchestrator: MagicMock,
+    mock_data_coordinator: MagicMock,
+    mock_runtime_data: CableModemRuntimeData,
+):
+    """Update press is refused while a destructive operation runs."""
+    mock_runtime_data.active_operation = "restart"
+    entry = _make_entry(mock_runtime_data)
+    button = UpdateModemDataButton(entry)
+    button.hass = MagicMock()
+    mock_data_coordinator.async_request_refresh = AsyncMock()
+
+    await button.async_press()
+
+    mock_orchestrator.reset_connectivity.assert_not_called()
+    mock_data_coordinator.async_request_refresh.assert_not_awaited()
+    # Mutex value is unchanged — the update button never sets it.
+    assert mock_runtime_data.active_operation == "restart"
+
+
 # -----------------------------------------------------------------------
 # RestartModemButton
 # -----------------------------------------------------------------------
@@ -205,11 +225,16 @@ async def test_restart_button_press_failure(
     mock_data_coordinator.async_request_refresh.assert_awaited()
 
 
-async def test_restart_button_unavailable_during_dispatch(
+async def test_restart_button_no_state_writes_during_dispatch(
     mock_data_coordinator: MagicMock,
     mock_runtime_data: CableModemRuntimeData,
 ):
-    """Button shows unavailable in HA during command dispatch, available after."""
+    """Button stays available and writes no state during dispatch.
+
+    Any state write during a press renders in the logbook as another
+    "Pressed" entry attributed to the pressing user; one press must
+    produce exactly one entry.
+    """
     entry = _make_entry(mock_runtime_data)
     button = RestartModemButton(entry)
     button.hass = MagicMock()
@@ -231,19 +256,18 @@ async def test_restart_button_unavailable_during_dispatch(
 
     await button.async_press()
 
-    # During dispatch: unavailable
-    assert available_during_restart == [False]
-    # After dispatch: available again
+    # Available throughout — overlap protection is the mutex alone.
+    assert available_during_restart == [True]
     assert button._attr_available is True
-    # State pushed to HA twice (before + after)
-    assert button.async_write_ha_state.call_count == 2
+    # No state writes from the handler.
+    assert button.async_write_ha_state.call_count == 0
 
 
-async def test_restart_button_available_restored_on_exception(
+async def test_restart_button_no_state_writes_on_exception(
     mock_data_coordinator: MagicMock,
     mock_runtime_data: CableModemRuntimeData,
 ):
-    """Button restores availability even when restart raises."""
+    """Button stays available and writes no state when restart raises."""
     entry = _make_entry(mock_runtime_data)
     button = RestartModemButton(entry)
     button.hass = MagicMock()
@@ -257,9 +281,8 @@ async def test_restart_button_available_restored_on_exception(
     with pytest.raises(ConnectionError):
         await button.async_press()
 
-    # finally block restores availability
     assert button._attr_available is True
-    assert button.async_write_ha_state.call_count == 2
+    assert button.async_write_ha_state.call_count == 0
 
 
 async def test_restart_button_sets_and_clears_active_operation(
@@ -309,6 +332,38 @@ async def test_restart_button_clears_active_operation_on_exception(
         await button.async_press()
 
     assert mock_runtime_data.active_operation is None
+
+
+async def test_restart_button_tolerates_unload_during_dispatch(
+    mock_data_coordinator: MagicMock,
+    mock_runtime_data: CableModemRuntimeData,
+):
+    """Mutex cleanup tolerates runtime_data going None mid-dispatch.
+
+    Pins the second of the two defences in HA_ADAPTER_SPEC § Reset
+    Entities Concurrency Guard: the context manager re-reads
+    runtime_data on exit and must not raise when a concurrent unload
+    cleared it.
+    """
+    entry = _make_entry(mock_runtime_data)
+    button = RestartModemButton(entry)
+    button.hass = MagicMock()
+    button.hass.services.async_call = AsyncMock()
+    mock_data_coordinator.async_request_refresh = AsyncMock()
+
+    async def _unload_during_dispatch(*args, **kwargs):
+        entry.runtime_data = None
+        return RestartResult(success=True, elapsed_seconds=2.0)
+
+    button.hass.async_add_executor_job = AsyncMock(side_effect=_unload_during_dispatch)
+
+    await button.async_press()
+
+    # The orphaned runtime is left untouched — there was nothing to
+    # clear on the entry — and the handler still completes normally.
+    assert mock_runtime_data.active_operation == "restart"
+    button.hass.services.async_call.assert_awaited()
+    mock_data_coordinator.async_request_refresh.assert_awaited_once()
 
 
 async def test_restart_button_refuses_when_operation_in_progress(
@@ -433,6 +488,93 @@ async def test_reset_button_press_probes_failed(
 
     # Still reloads
     button.hass.config_entries.async_reload.assert_awaited_once()
+
+
+async def test_reset_button_sets_and_clears_active_operation(
+    mock_runtime_data: CableModemRuntimeData,
+):
+    """Reset press holds the mutex for the handler and clears it on exit."""
+    entry = _make_entry(mock_runtime_data)
+    button = ResetEntitiesButton(entry)
+    button.hass = MagicMock()
+    button.hass.services.async_call = AsyncMock()
+    button.hass.config_entries.async_update_entry = MagicMock()
+
+    observed_during_press: list[str | None] = []
+
+    async def _capture_reload(entry_id):
+        observed_during_press.append(mock_runtime_data.active_operation)
+
+    button.hass.config_entries.async_reload = AsyncMock(side_effect=_capture_reload)
+
+    mock_entity_reg = MagicMock()
+    mock_entity_reg.entities.values.return_value = []
+
+    assert mock_runtime_data.active_operation is None
+
+    with (
+        patch(
+            "custom_components.cable_modem_monitor.button.er.async_get",
+            return_value=mock_entity_reg,
+        ),
+        patch.object(button, "_redetect_probes", new=AsyncMock(return_value=None)),
+    ):
+        await button.async_press()
+
+    # Mutex was held during the reload...
+    assert observed_during_press == ["reset"]
+    # ...and cleared on exit.
+    assert mock_runtime_data.active_operation is None
+
+
+async def test_reset_button_refuses_when_operation_in_progress(
+    mock_runtime_data: CableModemRuntimeData,
+):
+    """A reset press while a restart is running is refused."""
+    mock_runtime_data.active_operation = "restart"
+    entry = _make_entry(mock_runtime_data)
+    button = ResetEntitiesButton(entry)
+    button.hass = MagicMock()
+    button.hass.config_entries.async_reload = AsyncMock()
+
+    redetect = AsyncMock()
+    with patch.object(button, "_redetect_probes", new=redetect):
+        await button.async_press()
+
+    # Handler returned early — nothing ran.
+    redetect.assert_not_awaited()
+    button.hass.config_entries.async_reload.assert_not_awaited()
+    # Mutex value is unchanged.
+    assert mock_runtime_data.active_operation == "restart"
+
+
+async def test_reset_button_clears_active_operation_on_exception(
+    mock_runtime_data: CableModemRuntimeData,
+):
+    """active_operation is cleared even when the reset body raises."""
+    entry = _make_entry(mock_runtime_data)
+    button = ResetEntitiesButton(entry)
+    button.hass = MagicMock()
+    button.hass.services.async_call = AsyncMock()
+    button.hass.config_entries.async_update_entry = MagicMock()
+    button.hass.config_entries.async_reload = AsyncMock(
+        side_effect=RuntimeError("reload failed"),
+    )
+
+    mock_entity_reg = MagicMock()
+    mock_entity_reg.entities.values.return_value = []
+
+    with (
+        patch(
+            "custom_components.cable_modem_monitor.button.er.async_get",
+            return_value=mock_entity_reg,
+        ),
+        patch.object(button, "_redetect_probes", new=AsyncMock(return_value=None)),
+        pytest.raises(RuntimeError),
+    ):
+        await button.async_press()
+
+    assert mock_runtime_data.active_operation is None
 
 
 async def test_redetect_probes_success(

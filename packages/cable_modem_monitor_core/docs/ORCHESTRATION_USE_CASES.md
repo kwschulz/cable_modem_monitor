@@ -1323,7 +1323,7 @@ sequenceDiagram
         Note over O: Returns in 2–5s
         O-->>C: RestartResult
         C->>U: Persistent notification — "Restart command sent"
-        C->>C: active_operation cleared; button re-enabled
+        C->>C: active_operation cleared; new presses accepted
         Note over O: recovery_active is True; observer fired
         Note over C: Adapter switches coordinator to recovery cadence
     end
@@ -1331,14 +1331,16 @@ sequenceDiagram
 
 **Assertions:**
 
-- Restart button is disabled only while `active_operation` is held
-  (~2–5 s). It is NOT gated on `recovery_active` — the user may
-  retry after observing the dashboard.
+- A second restart press is refused only while `active_operation`
+  is held (~2–5 s). The button never greys out and is NOT gated on
+  `recovery_active` — the user may retry after observing the
+  dashboard.
 - `restart()` runs in a thread (keeps HA's event loop free) but
   returns quickly
 - User notified that the command was sent — not that it succeeded
-- No "immediate data refresh after restart" — the recovery window
-  handles that by polling at a faster cadence
+- The consumer triggers one immediate data refresh after dispatch so
+  its dashboard reflects the post-dispatch state; beyond that, the
+  recovery window handles updates by polling at a faster cadence
 - The dashboard reflects real modem state throughout (Unreachable,
   transitional, Operational) — no synthetic label
 
@@ -1517,7 +1519,7 @@ sequenceDiagram
   recovery state.
 - Core does not push extra updates during recovery. The coordinator
   just polls faster; each poll drives its own update.
-- Restart button is disabled only for the duration of the
+- Restart presses are refused only for the duration of the
   `active_operation` mutex (~2–5 s per press). A user who observes
   a flakey modem mid-window may re-press restart; see UC-42.
 - Snapshots during ranging may report reduced channel bonding
