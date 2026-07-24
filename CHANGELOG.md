@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **One button press, one logbook entry.** The restart button's
+  availability toggle wrote state during the press, so a single press
+  rendered as three "Pressed" logbook entries. The toggle is dropped in
+  favor of the frontend's native in-flight feedback, and all three
+  buttons now share the operation mutex the adapter spec defines:
+  restart converts to it, Reset Entities gains the double-click guard
+  it was missing, and Update Modem Data refuses presses during
+  destructive operations.
+
 - **DM1000 polling failed on every cycle since beta.10.** Channels
   built by parser.py hooks (the DM1000 OFDMA upstream) missed Core's
   channel_number pass and failed event payload validation, leaving all
