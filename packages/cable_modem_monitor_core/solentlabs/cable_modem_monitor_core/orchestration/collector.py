@@ -34,6 +34,7 @@ from .actions import execute_action
 from .auth_failure import (
     _auth_failure_hint,
     _build_auth_failed_event,
+    _build_http_status_error_event,
     _should_detect_login_pages,
     _strategy_name,
 )
@@ -45,7 +46,6 @@ from .events import (
     HnapConnectionFailed,
     HnapLoadError as HnapLoadErrorEvent,
     HnapSessionExpired,
-    HttpStatusError,
     LogoutExecuted,
     LogoutFailed,
     ParseError,
@@ -196,11 +196,15 @@ class ModemDataCollector:
                 hint = _auth_failure_hint(self._modem_config)
                 log_event(
                     _logger,
-                    HttpStatusError(
+                    _build_http_status_error_event(
                         model=self._modem_config.model,
                         path=exc.path,
                         status_code=exc.status_code,
                         reason=hint,
+                        request_line=exc.request_line,
+                        content_type=exc.content_type,
+                        response_body=exc.response_body,
+                        password=self._password,
                     ),
                 )
                 return ModemResult(

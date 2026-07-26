@@ -219,7 +219,15 @@ def _format(event: OrchestratorEvent) -> str:  # noqa: PLR0911, C901
         return f"Resource load error [{event.model}] — {event.path}: {event.reason}"
 
     if isinstance(event, HttpStatusError):
-        return f"HTTP {event.status_code} [{event.model}] — {event.path}: {event.reason}"
+        summary = f"HTTP {event.status_code} [{event.model}] — {event.path}: {event.reason}"
+        if not (event.request_line or event.response_body):
+            return summary
+        return (
+            f"{summary}"
+            f"\n  request: {event.request_line}"
+            f"\n  response: {event.status_code} {event.content_type}"
+            f"\n  body: {event.response_body}"
+        )
 
     if isinstance(event, ConnectionFailedDuringLoad):
         return f"Connection failed during load [{event.model}] — {event.path}: {event.reason}"

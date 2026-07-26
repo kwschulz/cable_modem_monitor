@@ -1,0 +1,17 @@
+{
+  "_description": "401 carrying a JSON error body and Content-Type — the wire detail the collector needs to diagnose a rejected data request",
+  "_entries": [
+    {
+      "request": { "method": "GET", "url": "http://192.168.100.1/status.html" },
+      "response": {
+        "status": 401,
+        "headers": [{ "name": "Content-Type", "value": "application/json" }],
+        "content": { "text": "{\"error\": \"error\", \"message\": \"Unauthorized\"}" }
+      }
+    }
+  ],
+  "_expected": {
+    "response_body": "{\"error\": \"error\", \"message\": \"Unauthorized\"}",
+    "content_type": "application/json"
+  }
+}

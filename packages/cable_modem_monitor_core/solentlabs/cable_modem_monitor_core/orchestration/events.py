@@ -309,12 +309,15 @@ class ResourceLoadError:
 
 @dataclass
 class HttpStatusError:
-    """HTTP 4xx/5xx on a resource."""
+    """HTTP 4xx/5xx on a resource; wire-detail fields are 401/403-only."""
 
     model: str
     path: str
     status_code: int | None
     reason: str
+    request_line: str = ""
+    content_type: str = ""
+    response_body: str = ""
     level: EventLevel = field(default=EventLevel.WARNING, init=False)
 
 

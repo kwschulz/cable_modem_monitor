@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -90,6 +92,18 @@ def _make_collector(modem_config=None):
     collector._session.cookies = RequestsCookieJar()
 
     return collector
+
+
+def _authenticated_collector():
+    """Build a collector whose auth phase succeeds, so execute() reaches the load phase."""
+    collector = _make_collector()
+    auth_result = MagicMock(success=True, response=None, response_url=None, auth_context=MagicMock())
+    cast(MagicMock, collector._auth_manager).authenticate.return_value = auth_result
+    collector._auth_context = MagicMock()
+    return collector
+
+
+_FIXTURES = Path(__file__).parent / "fixtures"
 
 
 # ---------------------------------------------------------------------------
@@ -216,11 +230,7 @@ def test_auth_failed_emitted_with_response_fields():
 def test_http_status_error_emitted_on_401():
     from solentlabs.cable_modem_monitor_core.loaders.http import ResourceLoadError as LoaderResourceLoadError
 
-    collector = _make_collector()
-
-    auth_result = MagicMock(success=True, response=None, response_url=None, auth_context=MagicMock())
-    cast(MagicMock, collector._auth_manager).authenticate.return_value = auth_result
-    collector._auth_context = MagicMock()
+    collector = _authenticated_collector()
 
     with (
         capture_events() as events,
@@ -238,6 +248,52 @@ def test_http_status_error_emitted_on_401():
     assert event.status_code == 401
     assert event.path == "/status.html"
     assert event.level == EventLevel.WARNING
+
+
+def test_http_status_error_401_carries_wire_detail():
+    """A 401 must surface the modem's response body and the request we sent (#120)."""
+    from solentlabs.cable_modem_monitor_core.loaders.http import ResourceLoadError as LoaderResourceLoadError
+
+    collector = _authenticated_collector()
+    fixture = json.loads((_FIXTURES / "http_401_wire_detail.json").read_text())
+    expected = fixture["_expected"]
+
+    with (
+        capture_events() as events,
+        patch.object(
+            collector,
+            "_load_resources",
+            side_effect=LoaderResourceLoadError("401", **fixture["_load_error"]),
+        ),
+    ):
+        collector.execute()
+
+    event = next(e for e in events if isinstance(e, HttpStatusError))
+    assert event.response_body == expected["response_body"]
+    assert event.content_type == expected["content_type"]
+    assert event.request_line == expected["request_line"]
+
+
+def test_http_status_error_401_scrubs_password_from_body():
+    """The 401 body is modem-controlled text; scrub credentials before logging."""
+    from solentlabs.cable_modem_monitor_core.loaders.http import ResourceLoadError as LoaderResourceLoadError
+
+    fixture = json.loads((_FIXTURES / "http_401_body_echoes_password.json").read_text())
+    collector = _authenticated_collector()
+    collector._password = fixture["_password"]
+
+    with (
+        capture_events() as events,
+        patch.object(
+            collector,
+            "_load_resources",
+            side_effect=LoaderResourceLoadError("401", **fixture["_load_error"]),
+        ),
+    ):
+        collector.execute()
+
+    event = next(e for e in events if isinstance(e, HttpStatusError))
+    assert event.response_body == fixture["_expected"]["response_body"]
 
 
 # ---------------------------------------------------------------------------

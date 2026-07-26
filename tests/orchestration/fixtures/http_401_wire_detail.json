@@ -1,0 +1,15 @@
+{
+  "_description": "401 wire detail as the loader attaches it to ResourceLoadError — keys are the exception's keyword arguments",
+  "_load_error": {
+    "status_code": 401,
+    "path": "/status.html",
+    "request_line": "GET http://192.168.100.1/status.html [Cookie=<set, len=42>]",
+    "response_body": "{\"error\": \"error\", \"message\": \"Unauthorized\"}",
+    "content_type": "application/json"
+  },
+  "_expected": {
+    "request_line": "GET http://192.168.100.1/status.html [Cookie=<set, len=42>]",
+    "response_body": "{\"error\": \"error\", \"message\": \"Unauthorized\"}",
+    "content_type": "application/json"
+  }
+}

@@ -158,7 +158,16 @@ Fields — `CollectionComplete`: `model`, `ds_count: int`, `us_count: int`, `ela
 Fields — `ParseError`: `model`, `reason: str`
 Fields — `ResourceLoadError` / `HttpStatusError` / `ConnectionFailedDuringLoad`:
 `model`, `path: str`, `status_code: int | None`, `reason: str`
+Fields — `HttpStatusError` also carries `request_line: str`, `content_type: str`,
+`response_body: str`, populated for 401/403 only and empty otherwise.
 Fields — `HnapConnectionFailed` / `HnapLoadError`: `model`, `reason: str`
+
+A 401/403 during load renders multi-line, mirroring `AuthFailed` — summary,
+then `request:` (method, URL, and headers sent, with sensitive values masked
+as `<set, len=N>`), `response:`, and `body:`. A bare status line cannot tell a
+rejected session from a missing header or cookie. The collector constructs the
+event because it is the only layer that knows the password: it scrubs
+`response_body` and truncates it to the log-line budget first.
 
 | Event | Level | When |
 |---|---|---|

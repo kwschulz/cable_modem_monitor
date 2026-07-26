@@ -1,0 +1,13 @@
+{
+  "_description": "Bare 401 with no Content-Type — minimal case for status-code propagation",
+  "_entries": [
+    {
+      "request": { "method": "GET", "url": "http://192.168.100.1/status.html" },
+      "response": {
+        "status": 401,
+        "headers": [],
+        "content": { "text": "Unauthorized" }
+      }
+    }
+  ]
+}

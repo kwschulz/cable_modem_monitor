@@ -1,4 +1,4 @@
-"""Helpers that build and PII-sanitize ``AuthFailed`` events."""
+"""Helpers that build and PII-sanitize auth-failure events."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from urllib.parse import urlparse, urlunparse
 import requests
 
 from ..models.modem_config.auth import BasicAuth, NoneAuth
-from .events import AuthFailed
+from .events import AuthFailed, HttpStatusError
 
 # Maximum response body characters stored in auth-failure logs (log-line budget).
 _FAILURE_BODY_SNIPPET_MAX: Final[int] = 500
@@ -22,6 +22,32 @@ def _auth_failure_hint(modem_config: Any) -> str:
     if isinstance(modem_config.auth, BasicAuth):
         return "credentials rejected"
     return "session expired"
+
+
+def _build_http_status_error_event(
+    model: str,
+    path: str,
+    status_code: int | None,
+    reason: str,
+    request_line: str,
+    content_type: str,
+    response_body: str,
+    password: str,
+) -> HttpStatusError:
+    """Build a sanitized HttpStatusError carrying 401/403 wire detail."""
+    body = _scrub_password(response_body[:_FAILURE_BODY_SNIPPET_MAX], password)
+    if len(response_body) > _FAILURE_BODY_SNIPPET_MAX:
+        body = body + "... (truncated)"
+
+    return HttpStatusError(
+        model=model,
+        path=path,
+        status_code=status_code,
+        reason=reason,
+        request_line=request_line,
+        content_type=content_type,
+        response_body=body,
+    )
 
 
 def _should_detect_login_pages(modem_config: Any) -> bool:

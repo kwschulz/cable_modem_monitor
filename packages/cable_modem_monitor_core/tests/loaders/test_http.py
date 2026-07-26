@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64 as b64mod
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -17,6 +18,8 @@ from solentlabs.cable_modem_monitor_core.loaders.http import (
     _decode_response,
 )
 from solentlabs.cable_modem_monitor_core.test_harness import HARMockServer
+
+from tests._helpers import load_fixture
 
 
 def _build_entries(
@@ -45,6 +48,9 @@ def _build_entries(
             }
         )
     return entries
+
+
+_FIXTURES = Path(__file__).parent / "fixtures"
 
 
 # ---------------------------------------------------------------------------
@@ -494,24 +500,33 @@ class TestHTTPResourceLoader:
 
     def test_401_raises_resource_load_error(self) -> None:
         """401 response raises ResourceLoadError with status code."""
-        # Build a HAR entry that returns 401
-        entries = [
-            {
-                "request": {"method": "GET", "url": "http://192.168.100.1/status.html"},
-                "response": {
-                    "status": 401,
-                    "headers": [],
-                    "content": {"text": "Unauthorized"},
-                },
-            }
-        ]
+        fixture = load_fixture(_FIXTURES / "http_401_plain.json")
 
-        with HARMockServer(entries) as server:
+        with HARMockServer(fixture["_entries"]) as server:
             session = requests.Session()
             loader = HTTPResourceLoader(session, server.base_url, timeout=10)
             targets = [ResourceTarget(path="/status.html", format="table")]
             with pytest.raises(ResourceLoadError, match="401"):
                 loader.fetch(targets)
+
+    def test_401_carries_response_body_and_request_line(self) -> None:
+        """401 attaches the wire detail the collector needs to diagnose it (#120)."""
+        fixture = load_fixture(_FIXTURES / "http_401_json_body.json")
+        expected = fixture["_expected"]
+
+        with HARMockServer(fixture["_entries"]) as server:
+            session = requests.Session()
+            session.headers.update({"X-Requested-With": "XMLHttpRequest"})
+            loader = HTTPResourceLoader(session, server.base_url, timeout=10)
+            targets = [ResourceTarget(path="/status.html", format="table")]
+            with pytest.raises(ResourceLoadError) as exc_info:
+                loader.fetch(targets)
+
+        exc = exc_info.value
+        assert exc.response_body == expected["response_body"]
+        assert exc.content_type == expected["content_type"]
+        assert "X-Requested-With=XMLHttpRequest" in exc.request_line
+        assert "GET" in exc.request_line
 
     def test_query_params_appended(self) -> None:
         """Session query_params are appended to fetch URLs."""
