@@ -15,13 +15,13 @@ See CHANNEL_IDENTIFICATION_SPEC.md.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from custom_components.cable_modem_monitor.const import ChannelIdentity
 from custom_components.cable_modem_monitor.mapping_manager import build_channel_map
+from tests.fixture_helpers import load_fixture
 
 _CATALOG_ROOT = (
     Path(__file__).resolve().parents[2]
@@ -58,7 +58,7 @@ def test_catalog_modem_data_survives_mapping(expected_path: Path, mode: ChannelI
     entries; missing-``lock_status`` modems are treated as locked per
     Core's contract and must also produce slot entries.
     """
-    data = json.loads(expected_path.read_text())
+    data = load_fixture(expected_path)
     downstream = data.get("downstream", [])
     upstream = data.get("upstream", [])
 

@@ -9,7 +9,6 @@ HNAP auth handler and HNAP server integration tests live in
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -29,12 +28,14 @@ from solentlabs.cable_modem_monitor_core.test_harness.routes import (
 )
 from solentlabs.cable_modem_monitor_core.test_harness.server import HARMockServer, _find_route
 
+from tests._helpers import load_fixture
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def _load_entries(name: str) -> list[dict[str, Any]]:
     """Load HAR entries from a fixture file."""
-    data = json.loads((FIXTURES_DIR / name).read_text())
+    data = load_fixture(FIXTURES_DIR / name)
     return list(data["_entries"])
 
 

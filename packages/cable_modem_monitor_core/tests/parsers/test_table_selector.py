@@ -9,9 +9,7 @@ Adding a test case = drop a JSON file in fixtures/table_selector/.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 from bs4 import BeautifulSoup
@@ -20,13 +18,10 @@ from solentlabs.cable_modem_monitor_core.models.parser_config.common import (
 )
 from solentlabs.cable_modem_monitor_core.parsers.table_selector import find_table
 
+from tests._helpers import collect_fixtures, load_fixture
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "table_selector"
-FIXTURES = sorted(FIXTURES_DIR.glob("*.json"))
-
-
-def _load_fixture(path: Path) -> dict[str, Any]:
-    """Load a JSON fixture file."""
-    return dict(json.loads(path.read_text()))
+FIXTURES = collect_fixtures(FIXTURES_DIR)
 
 
 @pytest.mark.parametrize(
@@ -36,7 +31,7 @@ def _load_fixture(path: Path) -> dict[str, Any]:
 )
 def test_find_table(fixture_path: Path) -> None:
     """Find table using configured selector and verify match criteria."""
-    data = _load_fixture(fixture_path)
+    data = load_fixture(fixture_path)
 
     soup = BeautifulSoup(data["_html"], "html.parser")
     selector = TableSelector(**data["_selector"])

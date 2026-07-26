@@ -25,12 +25,14 @@ from solentlabs.cable_modem_monitor_core.test_harness.auth import (
 )
 from solentlabs.cable_modem_monitor_core.test_harness.server import HARMockServer
 
+from tests._helpers import load_fixture
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def _load_entries(name: str) -> list[dict[str, Any]]:
     """Load HAR entries from a fixture file."""
-    data = json.loads((FIXTURES_DIR / name).read_text())
+    data = load_fixture(FIXTURES_DIR / name)
     return list(data["_entries"])
 
 

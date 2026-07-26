@@ -8,7 +8,6 @@ Adding a test case = drop a JSON file in fixtures/xml_parser/valid/.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -21,13 +20,10 @@ from solentlabs.cable_modem_monitor_core.parsers.formats.xml_parser import (
     XMLChannelParser,
 )
 
+from tests._helpers import collect_fixtures, load_fixture
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "xml_parser"
-VALID_FIXTURES = sorted((FIXTURES_DIR / "valid").glob("*.json"))
-
-
-def _load_fixture(path: Path) -> dict[str, Any]:
-    """Load a JSON fixture file."""
-    return dict(json.loads(path.read_text()))
+VALID_FIXTURES = collect_fixtures(FIXTURES_DIR / "valid")
 
 
 def _build_resources(data: dict[str, Any]) -> dict[str, Any]:
@@ -54,7 +50,7 @@ def _build_resources(data: dict[str, Any]) -> dict[str, Any]:
 )
 def test_extraction(fixture_path: Path) -> None:
     """Parse XML data and verify extracted channels match expected."""
-    data = _load_fixture(fixture_path)
+    data = load_fixture(fixture_path)
     config = XMLSection.model_validate(data["_config"])
     resources = _build_resources(data)
     expected = data["_expected"]

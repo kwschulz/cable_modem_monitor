@@ -15,6 +15,8 @@ from solentlabs.cable_modem_monitor_core.test_harness.discovery import (
     discover_restart_tests,
 )
 
+from tests._helpers import load_fixture
+
 # ---------------------------------------------------------------------------
 # Fixture paths
 # ---------------------------------------------------------------------------
@@ -24,8 +26,8 @@ _PIPELINE_FIXTURES = Path(__file__).parent.parent / "fixtures" / "pipeline"
 _MODEM_YAML = (_PIPELINE_FIXTURES / "modem.yaml").read_text()
 _MODEM_WITH_ACTIONS_YAML = (_PIPELINE_FIXTURES / "modem_with_restart.yaml").read_text()
 _PARSER_YAML = (_PIPELINE_FIXTURES / "modem.yaml").read_text()  # content irrelevant
-_MINIMAL_HAR: dict = json.loads((_PIPELINE_FIXTURES / "har_minimal.json").read_text())
-_MINIMAL_GOLDEN: dict = json.loads((_PIPELINE_FIXTURES / "golden_empty.json").read_text())
+_MINIMAL_HAR: dict = load_fixture(_PIPELINE_FIXTURES / "har_minimal.json")
+_MINIMAL_GOLDEN: dict = load_fixture(_PIPELINE_FIXTURES / "golden_empty.json")
 
 
 # ---------------------------------------------------------------------------

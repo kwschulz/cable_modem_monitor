@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -18,6 +17,8 @@ from solentlabs.cable_modem_monitor_core.auth import (
 )
 from solentlabs.cable_modem_monitor_core.auth.form_sjcl import FormSjclAuthManager
 from solentlabs.cable_modem_monitor_core.models.modem_config import ModemConfig
+
+from tests._helpers import load_fixture
 
 FIXTURES_DIR = Path(__file__).parent.parent / "models" / "fixtures" / "modem_config" / "valid"
 
@@ -60,7 +61,7 @@ def test_factory_selects_correct_manager(
 ) -> None:
     """Factory returns the correct manager type for each auth strategy."""
     fixture_path = FIXTURES_DIR / fixture_name
-    data = json.loads(fixture_path.read_text())
+    data = load_fixture(fixture_path)
     config = ModemConfig.model_validate(data)
     manager = create_auth_manager(config)
     assert isinstance(manager, expected_type)

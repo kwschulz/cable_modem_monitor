@@ -8,9 +8,7 @@ Adding a test case = drop a JSON file in fixtures/html_table/valid/.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 from bs4 import BeautifulSoup
@@ -19,13 +17,10 @@ from solentlabs.cable_modem_monitor_core.models.parser_config.table import (
 )
 from solentlabs.cable_modem_monitor_core.parsers.formats.html_table import HTMLTableParser
 
+from tests._helpers import collect_fixtures, load_fixture
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "html_table"
-VALID_FIXTURES = sorted((FIXTURES_DIR / "valid").glob("*.json"))
-
-
-def _load_fixture(path: Path) -> dict[str, Any]:
-    """Load a JSON fixture file."""
-    return dict(json.loads(path.read_text()))
+VALID_FIXTURES = collect_fixtures(FIXTURES_DIR / "valid")
 
 
 def _build_resources(html: str | None, resource_key: str) -> dict[str, BeautifulSoup]:
@@ -42,7 +37,7 @@ def _build_resources(html: str | None, resource_key: str) -> dict[str, Beautiful
 )
 def test_extraction(fixture_path: Path) -> None:
     """Parse HTML table and verify extracted channels match expected."""
-    data = _load_fixture(fixture_path)
+    data = load_fixture(fixture_path)
 
     resource_key = data["_resource"]
     resources = _build_resources(data.get("_html"), resource_key)

@@ -19,12 +19,13 @@ exercise that distinction directly.
 from __future__ import annotations
 
 import importlib.util
-import json
 import re
 import sys
 from pathlib import Path
 
 import pytest
+
+from tests.fixture_helpers import collect_fixtures, load_fixture
 
 # Load the scanner module by file path — it lives in scripts/, not
 # in any package, so we cannot import it normally.
@@ -105,7 +106,7 @@ def test_has_justification_rejects_free_text_without_hash() -> None:
 # _parse_diff_added_lines — fixture-driven (per docs/CODE_REVIEW.md § Test File Standards)
 # ---------------------------------------------------------------------------
 
-_DIFF_FIXTURES = sorted(_FIXTURES.glob("*.json"))
+_DIFF_FIXTURES = collect_fixtures(_FIXTURES)
 
 
 @pytest.mark.parametrize("fixture_path", _DIFF_FIXTURES, ids=[p.stem for p in _DIFF_FIXTURES])
@@ -113,7 +114,7 @@ def test_parse_diff_added_lines(fixture_path: Path) -> None:
     """Each fixture is a single JSON bundle: ``_diff`` (input) plus ``_expected``
     (output). Adding a case is adding one file. Mirrors the parser-coordinator
     fixture pattern under ``tests/parsers/fixtures/coordinator/valid/``."""
-    fixture = json.loads(fixture_path.read_text())
+    fixture = load_fixture(fixture_path)
     expected_tuples = [tuple(item) for item in fixture["_expected"]]
 
     actual = _mod._parse_diff_added_lines(fixture["_diff"])

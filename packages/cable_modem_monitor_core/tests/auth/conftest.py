@@ -6,12 +6,13 @@ a fixture loader for HAR entry data files.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 import requests
+
+from tests._helpers import load_fixture
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -62,7 +63,7 @@ def load_auth_fixture(
     from solentlabs.cable_modem_monitor_core.config_loader import validate_modem_config
 
     path = FIXTURES_DIR / name
-    data = json.loads(path.read_text())
+    data = load_fixture(path)
     entries: list[dict[str, Any]] = data["_entries"]
     raw_config: dict[str, Any] | None = data.get("_modem_config")
     if raw_config is None:

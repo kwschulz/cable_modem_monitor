@@ -28,6 +28,8 @@ from solentlabs.cable_modem_monitor_core.test_harness.runner import (
     run_modem_test_orchestrated,
 )
 
+from tests._helpers import load_fixture
+
 # ---------------------------------------------------------------------------
 # Fixture paths — shared pipeline fixtures
 # ---------------------------------------------------------------------------
@@ -42,11 +44,11 @@ _MODEM_URL_TOKEN_YAML = (_PIPELINE_FIXTURES / "modem_url_token.yaml").read_text(
 _MODEM_HNAP_YAML = (_PIPELINE_FIXTURES / "modem_hnap.yaml").read_text()
 _PARSER_YAML = (_PIPELINE_FIXTURES / "parser.yaml").read_text()
 _PARSER_HNAP_YAML = (_PIPELINE_FIXTURES / "parser_hnap.yaml").read_text()
-_HAR_DATA: dict[str, Any] = json.loads((_PIPELINE_FIXTURES / "har_2ch.json").read_text())
-_HAR_RESTART_DATA: dict[str, Any] = json.loads((_PIPELINE_FIXTURES / "har_restart.json").read_text())
-_HAR_HNAP_DATA: dict[str, Any] = json.loads((_PIPELINE_FIXTURES / "har_hnap_2ch.json").read_text())
-_GOLDEN_FILE: dict[str, Any] = json.loads((_PIPELINE_FIXTURES / "golden_2ch.json").read_text())
-_GOLDEN_HNAP_FILE: dict[str, Any] = json.loads((_PIPELINE_FIXTURES / "golden_hnap_2ch.json").read_text())
+_HAR_DATA: dict[str, Any] = load_fixture(_PIPELINE_FIXTURES / "har_2ch.json")
+_HAR_RESTART_DATA: dict[str, Any] = load_fixture(_PIPELINE_FIXTURES / "har_restart.json")
+_HAR_HNAP_DATA: dict[str, Any] = load_fixture(_PIPELINE_FIXTURES / "har_hnap_2ch.json")
+_GOLDEN_FILE: dict[str, Any] = load_fixture(_PIPELINE_FIXTURES / "golden_2ch.json")
+_GOLDEN_HNAP_FILE: dict[str, Any] = load_fixture(_PIPELINE_FIXTURES / "golden_hnap_2ch.json")
 
 
 # ---------------------------------------------------------------------------

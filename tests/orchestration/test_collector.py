@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -29,6 +28,8 @@ from solentlabs.cable_modem_monitor_core.orchestration.events import (
     SessionReused,
     StubPageDetected,
 )
+
+from tests.fixture_helpers import load_fixture
 
 from .event_capture import assert_event_emitted, capture_events
 
@@ -255,7 +256,7 @@ def test_http_status_error_401_carries_wire_detail():
     from solentlabs.cable_modem_monitor_core.loaders.http import ResourceLoadError as LoaderResourceLoadError
 
     collector = _authenticated_collector()
-    fixture = json.loads((_FIXTURES / "http_401_wire_detail.json").read_text())
+    fixture = load_fixture(_FIXTURES / "http_401_wire_detail.json")
     expected = fixture["_expected"]
 
     with (
@@ -278,7 +279,7 @@ def test_http_status_error_401_scrubs_password_from_body():
     """The 401 body is modem-controlled text; scrub credentials before logging."""
     from solentlabs.cable_modem_monitor_core.loaders.http import ResourceLoadError as LoaderResourceLoadError
 
-    fixture = json.loads((_FIXTURES / "http_401_body_echoes_password.json").read_text())
+    fixture = load_fixture(_FIXTURES / "http_401_body_echoes_password.json")
     collector = _authenticated_collector()
     collector._password = fixture["_password"]
 

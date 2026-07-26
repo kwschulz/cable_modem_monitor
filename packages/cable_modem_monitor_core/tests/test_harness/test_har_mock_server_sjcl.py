@@ -13,7 +13,6 @@ decryption fails and these tests catch it.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +26,8 @@ from solentlabs.cable_modem_monitor_core.test_harness.auth.form_sjcl import (
 )
 from solentlabs.cable_modem_monitor_core.test_harness.server import HARMockServer
 
+from tests._helpers import load_fixture
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 _TEST_PASSWORD = FormSjclAuthHandler._TEST_PASSWORD
@@ -34,7 +35,7 @@ _TEST_PASSWORD = FormSjclAuthHandler._TEST_PASSWORD
 
 def _load_entries(name: str) -> list[dict[str, Any]]:
     """Load HAR entries from a fixture file."""
-    data = json.loads((FIXTURES_DIR / name).read_text())
+    data = load_fixture(FIXTURES_DIR / name)
     return list(data["_entries"])
 
 

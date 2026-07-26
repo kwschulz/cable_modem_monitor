@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -23,8 +22,10 @@ from solentlabs.cable_modem_monitor_core.parsers.registries import (
     _merge_channels,
 )
 
+from tests._helpers import collect_fixtures, load_fixture
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "coordinator"
-VALID_FIXTURES = sorted((FIXTURES_DIR / "valid").glob("*.json"))
+VALID_FIXTURES = collect_fixtures(FIXTURES_DIR / "valid")
 
 
 def _build_resources(html_map: dict[str, str]) -> dict[str, BeautifulSoup]:
@@ -39,7 +40,7 @@ def _build_json_resources(json_map: dict[str, Any]) -> dict[str, Any]:
 
 def _load_fixture(name: str) -> dict[str, Any]:
     """Load a named fixture from the coordinator fixtures directory."""
-    return dict(json.loads((FIXTURES_DIR / "valid" / name).read_text()))
+    return load_fixture(FIXTURES_DIR / "valid" / name)
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +55,7 @@ def _load_fixture(name: str) -> dict[str, Any]:
 )
 def test_extraction(fixture_path: Path) -> None:
     """Coordinator produces expected ModemData from fixture."""
-    data = json.loads(fixture_path.read_text())
+    data = load_fixture(fixture_path)
 
     # Fixtures use either _html (HTML resources) or _json (JSON resources)
     if "_html" in data:

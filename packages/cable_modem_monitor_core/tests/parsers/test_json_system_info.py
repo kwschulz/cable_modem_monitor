@@ -9,7 +9,6 @@ Adding a test case = drop a JSON file in fixtures/json_system_info/valid/.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -21,13 +20,10 @@ from solentlabs.cable_modem_monitor_core.parsers.formats.json_system_info import
     JSONSystemInfoParser,
 )
 
+from tests._helpers import collect_fixtures, load_fixture
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "json_system_info"
-VALID_FIXTURES = sorted((FIXTURES_DIR / "valid").glob("*.json"))
-
-
-def _load_fixture(path: Path) -> dict[str, Any]:
-    """Load a JSON fixture file."""
-    return dict(json.loads(path.read_text()))
+VALID_FIXTURES = collect_fixtures(FIXTURES_DIR / "valid")
 
 
 def _build_resources(
@@ -47,7 +43,7 @@ def _build_resources(
 )
 def test_extraction(fixture_path: Path) -> None:
     """Parse JSON data and verify extracted system_info matches expected."""
-    data = _load_fixture(fixture_path)
+    data = load_fixture(fixture_path)
 
     resource_key = data["_resource"]
     resources = _build_resources(data.get("_json"), resource_key)

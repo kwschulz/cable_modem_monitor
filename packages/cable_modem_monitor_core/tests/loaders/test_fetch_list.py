@@ -8,7 +8,6 @@ defined at the top of the file with ASCII box-drawing comments.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -19,6 +18,8 @@ from solentlabs.cable_modem_monitor_core.loaders.fetch_list import (
     collect_fetch_targets,
 )
 from solentlabs.cable_modem_monitor_core.models.parser_config import ParserConfig
+
+from tests._helpers import load_fixture
 
 FIXTURES_DIR = Path(__file__).parent.parent / "models" / "fixtures" / "parser_config" / "valid"
 LOCAL_FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -72,7 +73,7 @@ def _make_post_processor(declared: Any) -> Any:
 
 def _table_single_config() -> ParserConfig:
     """Load the shared single-table parser config fixture."""
-    data = json.loads((FIXTURES_DIR / "table_single.json").read_text())
+    data = load_fixture(FIXTURES_DIR / "table_single.json")
     return ParserConfig.model_validate(data)
 
 
@@ -81,7 +82,7 @@ class TestCollectFetchTargets:
 
     def test_table_single_resource(self) -> None:
         """Single table section produces one resource target."""
-        data = json.loads((FIXTURES_DIR / "table_single.json").read_text())
+        data = load_fixture(FIXTURES_DIR / "table_single.json")
         config = ParserConfig.model_validate(data)
         targets = collect_fetch_targets(config)
 
@@ -91,7 +92,7 @@ class TestCollectFetchTargets:
 
     def test_downstream_and_upstream_same_resource(self) -> None:
         """Duplicate paths are deduplicated."""
-        data = json.loads((FIXTURES_DIR / "upstream_table.json").read_text())
+        data = load_fixture(FIXTURES_DIR / "upstream_table.json")
         config = ParserConfig.model_validate(data)
         targets = collect_fetch_targets(config)
 
@@ -101,7 +102,7 @@ class TestCollectFetchTargets:
 
     def test_system_info_resources_collected(self) -> None:
         """System info sources add to the fetch list."""
-        data = json.loads((FIXTURES_DIR / "system_info_html_fields.json").read_text())
+        data = load_fixture(FIXTURES_DIR / "system_info_html_fields.json")
         config = ParserConfig.model_validate(data)
         targets = collect_fetch_targets(config)
 
@@ -110,7 +111,7 @@ class TestCollectFetchTargets:
 
     def test_hnap_sections_skipped(self) -> None:
         """HNAP sections are excluded from HTTP fetch list."""
-        data = json.loads((FIXTURES_DIR / "hnap_downstream.json").read_text())
+        data = load_fixture(FIXTURES_DIR / "hnap_downstream.json")
         config = ParserConfig.model_validate(data)
         targets = collect_fetch_targets(config)
 
@@ -119,7 +120,7 @@ class TestCollectFetchTargets:
 
     def test_javascript_format(self) -> None:
         """JavaScript sections produce resource targets."""
-        data = json.loads((FIXTURES_DIR / "javascript_single_function.json").read_text())
+        data = load_fixture(FIXTURES_DIR / "javascript_single_function.json")
         config = ParserConfig.model_validate(data)
         targets = collect_fetch_targets(config)
 
@@ -129,7 +130,7 @@ class TestCollectFetchTargets:
 
     def test_json_format(self) -> None:
         """JSON sections produce resource targets."""
-        data = json.loads((FIXTURES_DIR / "json_downstream.json").read_text())
+        data = load_fixture(FIXTURES_DIR / "json_downstream.json")
         config = ParserConfig.model_validate(data)
         targets = collect_fetch_targets(config)
 
@@ -139,7 +140,7 @@ class TestCollectFetchTargets:
 
     def test_mixed_formats_deduplicated(self) -> None:
         """Multiple sections with same path keep first format."""
-        data = json.loads((LOCAL_FIXTURES_DIR / "parser_config_shared_resource.json").read_text())
+        data = load_fixture(LOCAL_FIXTURES_DIR / "parser_config_shared_resource.json")
         config = ParserConfig.model_validate(data)
         targets = collect_fetch_targets(config)
 
@@ -151,7 +152,7 @@ class TestCollectFetchTargets:
     def test_empty_config(self) -> None:
         """Config with no sections produces empty fetch list."""
         # system_info only, with HNAP source
-        data = json.loads((FIXTURES_DIR / "system_info_hnap.json").read_text())
+        data = load_fixture(FIXTURES_DIR / "system_info_hnap.json")
         config = ParserConfig.model_validate(data)
         targets = collect_fetch_targets(config)
 
@@ -160,7 +161,7 @@ class TestCollectFetchTargets:
 
     def test_xml_multi_table_resources(self) -> None:
         """XML tables[] produces one target per unique resource."""
-        data = json.loads((FIXTURES_DIR / "xml_multi_table.json").read_text())
+        data = load_fixture(FIXTURES_DIR / "xml_multi_table.json")
         config = ParserConfig.model_validate(data)
         targets = collect_fetch_targets(config)
 
@@ -170,7 +171,7 @@ class TestCollectFetchTargets:
 
     def test_xml_single_table_resource(self) -> None:
         """XML section with one table produces one target."""
-        data = json.loads((FIXTURES_DIR / "xml_downstream.json").read_text())
+        data = load_fixture(FIXTURES_DIR / "xml_downstream.json")
         config = ParserConfig.model_validate(data)
         targets = collect_fetch_targets(config)
 
@@ -180,7 +181,7 @@ class TestCollectFetchTargets:
 
     def test_json_per_array_resources(self) -> None:
         """JSON arrays with per-array resources produce one target per unique resource."""
-        data = json.loads((FIXTURES_DIR / "json_multi_resource_arrays.json").read_text())
+        data = load_fixture(FIXTURES_DIR / "json_multi_resource_arrays.json")
         config = ParserConfig.model_validate(data)
         targets = collect_fetch_targets(config)
 

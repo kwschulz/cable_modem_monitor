@@ -16,7 +16,6 @@ Use case coverage (collector level):
 
 from __future__ import annotations
 
-import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
@@ -52,6 +51,8 @@ from solentlabs.cable_modem_monitor_core.parsers.diagnostics import (
     AnchorCount,
     ParseDiagnostics,
 )
+
+from tests._helpers import load_fixture
 
 # ------------------------------------------------------------------
 # Helpers — minimal modem configs as plain objects
@@ -600,7 +601,7 @@ class TestPostProcessorResourcesFetch:
         )
 
         fixture = Path(__file__).parent.parent / "models" / "fixtures" / "parser_config" / "valid" / "table_single.json"
-        parser_config = ParserConfig.model_validate(json.loads(fixture.read_text()))
+        parser_config = ParserConfig.model_validate(load_fixture(fixture))
 
         class PostProcessor:
             resources = {"/extra.json": "json"}
