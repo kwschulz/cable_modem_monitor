@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import MagicMock
 
+import pytest
 from solentlabs.cable_modem_monitor_core.test_harness.auth.base import AuthHandler
 from solentlabs.cable_modem_monitor_core.test_harness.auth.factory import (
     create_auth_handler,
@@ -317,6 +318,24 @@ class TestFactoryFallback:
         config.auth = None
         handler = create_auth_handler(config)
         assert type(handler) is AuthHandler
+
+
+class TestFactoryMissingHandler:
+    """A strategy with no handler module raises rather than degrading."""
+
+    def test_missing_handler_module_raises(self) -> None:
+        """bearer has no handler module; dispatching to it must not silently no-auth."""
+        config = _make_config(
+            {
+                "auth": {
+                    "strategy": "bearer",
+                    "login_endpoint": "/rest/v1/user/login",
+                    "token_path": "created.token",
+                },
+            }
+        )
+        with pytest.raises(ModuleNotFoundError, match="bearer"):
+            create_auth_handler(config)
 
 
 # ------------------------------------------------------------------

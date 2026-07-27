@@ -7,11 +7,10 @@ channels with frequency, power, SNR, and error counts.
 
 The parsing system absorbs this variety through three distinct roles:
 
-- **`BaseParser` (ABC)** — the extraction interface. Seven format-specific
-  implementations (`HTMLTableParser`, `HTMLTableTransposedParser`,
-  `HTMLFieldsParser`, `JSEmbeddedParser`, `HNAPParser`, and
-  `StructuredParser` (ABC) → `JSONParser`, `XMLParser`),
-  each parameterized by parser.yaml section config.
+- **`BaseParser` (ABC)** — the extraction interface, one implementation
+  per format in `parsers/formats/`, each parameterized by parser.yaml
+  section config. The authoritative format list is
+  `ALL_FORMAT_MODELS` in `models/parser_config/config.py`.
 - **`ModemParserCoordinator`** — factory and orchestrator. Reads
   parser.yaml, creates `BaseParser` instances per section, runs them,
   chains parser.py post-processing, assembles `ModemData`.

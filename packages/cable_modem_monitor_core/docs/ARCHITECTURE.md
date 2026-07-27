@@ -542,15 +542,11 @@ batching details.
 
 Parsing has three distinct roles:
 
-**`BaseParser` (ABC)** — the extraction interface. Eight format-specific
-implementations: `HTMLTableParser`, `HTMLTableTransposedParser`,
-`HTMLFieldsParser`, `JSEmbeddedParser`, `JSJsonParser`, `HNAPParser`, and
-`StructuredParser` (ABC) with two subclasses — `JSONParser` and
-`XMLParser`. Both structured formats receive `dict` from the loader
-(via `json.loads()` or `xmltodict.parse()`); `StructuredParser` holds
-the shared dict-path extraction pipeline, while `XMLParser` adds
-normalization for xmltodict quirks (`@attribute` keys, `#text`
-unwrapping, single-element list coercion). `JSJsonParser` extracts
+**`BaseParser` (ABC)** — the extraction interface, one implementation
+per format in `parsers/formats/`. The authoritative format list is
+`ALL_FORMAT_MODELS` in `models/parser_config/config.py`. XML is the
+exception: `XMLChannelParser` and `XMLSystemInfoParser` are standalone
+classes rather than `BaseParser` subclasses. `JSJsonParser` extracts
 JSON arrays from JavaScript variable assignments
 (`varName = [{...}];`) inside `<script>` tags — distinct from
 `JSEmbeddedParser` which handles pipe-delimited `tagValueList` strings.

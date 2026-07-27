@@ -14,15 +14,12 @@ handler module fails the fleet test at CI time.
 from __future__ import annotations
 
 import importlib
-import logging
 from typing import TYPE_CHECKING, Any
 
 from .base import AuthHandler
 
 if TYPE_CHECKING:
     from ...models.modem_config import ModemConfig
-
-_logger = logging.getLogger(__name__)
 
 _HANDLER_PACKAGE = "solentlabs.cable_modem_monitor_core.test_harness.auth"
 
@@ -54,11 +51,15 @@ def create_auth_handler(
 
     try:
         module = importlib.import_module(f".{strategy}", package=_HANDLER_PACKAGE)
-    except ModuleNotFoundError:
-        _logger.warning(
-            "No auth handler module for strategy '%s', using no-auth",
-            strategy,
-        )
-        return AuthHandler()
+    except ModuleNotFoundError as exc:
+        # Falling back to no-auth here would let a HAR replay pass while
+        # simulating the wrong auth behaviour. A strategy declared as
+        # auth.strategy always needs a handler, so a missing one is a gap
+        # to surface, not a runtime condition to absorb. Mirrors
+        # create_auth_manager_for_action in Core's runtime factory.
+        raise ModuleNotFoundError(
+            f"No test-harness auth handler for strategy '{strategy}'. "
+            f"Add test_harness/auth/{strategy}.py with a create_handler() entry point."
+        ) from exc
 
     return module.create_handler(modem_config, har_entries)  # type: ignore[no-any-return]

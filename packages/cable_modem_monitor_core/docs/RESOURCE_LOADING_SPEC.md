@@ -58,7 +58,7 @@ structured data (dict).
 ```
 
 - Same key convention as HTML formats — path only
-- Values are `dict` from format-specific decoding (`json.loads()`, `xmltodict.parse()`, or `b64decode()` + `json.loads()`)
+- Values are `dict` from format-specific decoding (`json.loads()`, or `b64decode()` + `json.loads()`)
 - The value type is always `dict` regardless of the wire format
 - **Type enforcement:** If JSON decoding succeeds but the root value is not a
   `dict` (e.g., a JSON array, string, or scalar), the loader must treat it as a
@@ -109,7 +109,6 @@ For each unique `resource` path from parser.yaml:
 5. Parse the response (format-dependent):
    - HTML formats: `normalize_html(text)` → `BeautifulSoup(..., "html.parser")`
    - `json`: `json.loads(text)`
-   - `xml`: `xmltodict.parse(text)`
 6. Key the result by path (not by semantic name)
 
 **HTML normalization:** Before BS4 parsing, `normalize_html()` fixes known

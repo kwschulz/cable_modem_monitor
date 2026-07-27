@@ -768,12 +768,9 @@ in cookies managed by `requests.Session`.
 ### Three roles: BaseParser, ModemParserCoordinator, parser.py
 
 **Decision:** Parsing has three distinct roles instead of a single
-class hierarchy. `BaseParser` (ABC) is the extraction interface with
-seven format-specific implementations — including `StructuredParser`
-(ABC), an intermediate base for `JSONParser` and `XMLParser` that
-holds the shared dict-path extraction pipeline.
-`ModemParserCoordinator` is the factory and orchestrator. `parser.py`
-is an optional post-processor.
+class hierarchy. `BaseParser` (ABC) is the extraction interface, one
+implementation per format. `ModemParserCoordinator` is the factory and
+orchestrator. `parser.py` is an optional post-processor.
 
 **Rationale:** The original design conflated extraction, orchestration,
 and customization into one class — a god class risk. Separating them

@@ -71,8 +71,8 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 # │ b64("<html>...")         │ table             │ base64   │ soup      │ base64-encoded body              │
 # │ "!!!invalid"             │ table             │ base64   │ None      │ base64 decode failure            │
 # │ ""                       │ table             │ ""       │ None      │ empty body                       │
-# │ "<root/>"                │ xml               │ ""       │ None      │ XML not yet supported by loader  │
-# │ "<html>..."              │ unknown           │ ""       │ soup      │ unknown format fallback          │
+# │ "<root/>"                │ xml               │ ""       │ None      │ xml is CBN-only, not decoded here│
+# │ "<html>..."              │ unknown           │ ""       │ None      │ unregistered format rejected     │
 # └──────────────────────────┴───────────────────┴──────────┴───────────┴──────────────────────────────────┘
 
 _B64_HTML = b64mod.b64encode(b"<html><table></table></html>").decode()
@@ -91,8 +91,8 @@ _DECODE_CASES: list[tuple[str, str, str, str | None, str]] = [
     (_B64_HTML,                       "table",            "base64", "soup",   "base64-encoded body"),
     ("x",                             "table",            "base64", None,     "base64 decode failure"),
     ("",                              "table",            "",       None,     "empty body"),
-    ("<root/>",                       "xml",              "",       None,     "XML not yet supported"),
-    ("<html></html>",                 "unknown",          "",       "soup",   "unknown format fallback"),
+    ("<root/>",                       "xml",              "",       None,     "xml is CBN-only"),
+    ("<html></html>",                 "unknown",          "",       None,     "unregistered format rejected"),
 ]
 # fmt: on
 
@@ -139,9 +139,15 @@ class TestDecodeResponseBehaviors:
         assert reason == "base64 decode failed"
 
     def test_xml_returns_reason(self) -> None:
-        """XML format returns (None, reason) — not yet supported."""
+        """XML is CBN-only; the HTTP loader rejects it rather than decoding."""
         _, reason = _decode_response("<root/>", "xml", "")
-        assert reason == "XML format not yet supported"
+        assert reason == "unsupported decode kind 'xml' for format 'xml'"
+
+    def test_unregistered_format_returns_reason(self) -> None:
+        """An unregistered format is rejected, never coerced to BeautifulSoup."""
+        value, reason = _decode_response("<html></html>", "unknown", "")
+        assert value is None
+        assert reason == "unsupported decode kind '' for format 'unknown'"
 
 
 class TestHTTPResourceLoader:

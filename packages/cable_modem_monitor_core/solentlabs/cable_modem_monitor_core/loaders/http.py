@@ -318,11 +318,12 @@ def _decode_response(
             return {"_raw": data}, None
         return data, None
 
-    if kind == "xml":
-        return None, "XML format not yet supported"
-
-    _logger.warning("Unknown format '%s', returning as BeautifulSoup", fmt)
-    return BeautifulSoup(normalize_html(text), "html.parser"), None
+    # Only html and json reach here: every format whose transports include
+    # "http" declares one of those two decode kinds. XML is CBN-only and
+    # decodes in loaders/cbn.py. Reaching this means a config escaped
+    # cross-file validation, so fail rather than coerce to BeautifulSoup —
+    # a silent HTML coercion hands the parser structurally valid garbage.
+    return None, f"unsupported decode kind '{kind}' for format '{fmt}'"
 
 
 def _is_login_page(text: str) -> bool:
