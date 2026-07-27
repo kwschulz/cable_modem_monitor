@@ -604,9 +604,12 @@ single-session semantics.
 **Decision:** When the collector's auth phase fails, it emits one
 sanitized ``WARNING`` log carrying the modem's response — strategy
 name, request line, response status + Content-Type, and a short
-body snippet with the user's password scrubbed. There is no
-transport-layer adapter, no scoped capture, no separate entry
-point, no structured ``AuthExchange`` type, and no
+body snippet with the user's password scrubbed. A data page that
+returns 401 or 403 *after* a successful login emits the same detail
+as ``HttpStatusError``: it is the same diagnostic question one phase
+later, and answering it only for the login request is what stalled
+issue #120. There is no transport-layer adapter, no scoped capture,
+no separate entry point, no structured ``AuthExchange`` type, and no
 ``har-capture`` dependency.
 
 **Rationale:** The motivating issues (#86 Arris TG3442DE, #104
@@ -645,9 +648,8 @@ maintainer needs to confirm the strategy ran.
 ``LOAD_INTEGRITY`` signal (zero fulfilled anchors for an expected
 resource), the stub response body is captured in
 ``OrchestratorDiagnostics.last_stub_body`` — a ``dict[str, str]``
-keyed by resource path, value truncated to ≤500 characters. It
-persists across successful polls until the next ``LOAD_INTEGRITY``
-event.
+keyed by resource path, stored whole. It persists across successful
+polls until the next ``LOAD_INTEGRITY`` event.
 
 **Rationale:** ``LOAD_INTEGRITY`` means the session expired and the
 modem returned a JS redirect stub instead of channel data. This
@@ -964,13 +966,18 @@ valid sessions instead of re-authenticating every cycle.
 
 **Rationale:** HNAP modems have firmware anti-brute-force that can lock
 out or reboot the modem after repeated login attempts (HNAP modem
-firmware `LOCKUP` and `REBOOT` states). Session reuse
-is the primary defense. Backoff (3-poll suppression on lockout) is the
-safety net.
+firmware `LOCKUP` and `REBOOT` states). Session reuse is the primary
+defense. The safety net is the circuit breaker: a lockout signal stops
+polling outright rather than backing off, because a modem that is
+refusing logins to protect itself gains nothing from a slower retry.
 
 **Constrains:** Session state must be maintained across polls. Stale
 session detection requires a within-poll retry mechanism (zero channels
-on reused session → clear and retry once).
+on reused session → clear and retry once). Reuse also disables itself:
+after `stale_recovery_threshold` consecutive same-poll recoveries,
+`SignalPolicy` stops attempting it for the rest of the runtime, so
+firmware with a chronically short session TTL does not burn the first
+request of every poll on a session it has already expired.
 
 ### Two modem-side actions only
 
@@ -1135,9 +1142,12 @@ module then. Not now.
 **Decision:** `Orchestrator.set_recovery_observer(callback)` lets
 the HA adapter register a callable that fires when
 `recovery_active` flips (False→True on window entry, True→False on
-window exit). HA wires this to `dispatcher_send` so the data
-coordinator switches between normal and recovery cadence, and the
-restart button's enabled state updates promptly.
+window exit). HA wires this to `dispatcher_send`, and its one
+subscriber swaps the data coordinator between normal and recovery
+cadence. Consumers that only need to read the flag do so directly;
+the restart button is deliberately not among them — overlapping
+presses are refused by the operation mutex, not by recovery state,
+so a user whose modem is still flakey may retry.
 
 **Rationale:** Core cannot import `homeassistant.*` (principle #3).
 Polling `recovery_active` from HA would lag by a coordinator cycle
@@ -1269,18 +1279,21 @@ cannot prove how login works — see MODEM_INTAKE_WORKFLOW § Step 2.
 
 ## Onboarding
 
-### MCP tools for deterministic steps, Claude for judgment
+### Deterministic steps are code, Claude supplies judgment
 
-**Decision:** An MCP server provides structured tools for modem
-onboarding. Deterministic steps (HAR parsing, transport detection,
-config generation, validation, test execution) are code. Claude handles
-judgment calls (ambiguous HTML formats, metadata web search, test
-failure diagnosis). The user handles approval.
+**Decision:** Deterministic steps (HAR parsing, transport detection,
+config generation, validation, test execution) are ordinary importable
+modules in `catalog_tools`. Claude handles judgment calls (ambiguous
+HTML formats, metadata web search, test failure diagnosis), driven by
+the `modem-intake` skill. The user handles approval.
 
-**Rationale:** Deterministic logic in MCP tools is repeatable and
-testable — not dependent on LLM reasoning for correctness. The
-config constraints (transport, auth, format) form the decision framework.
-Ambiguity is a hard stop, not a guess.
+**Rationale:** Deterministic logic in code is repeatable and testable —
+not dependent on LLM reasoning for correctness. The config constraints
+(transport, auth, format) form the decision framework. Ambiguity is a
+hard stop, not a guess. The split is what matters, not the delivery
+mechanism: an earlier iteration exposed the same steps through an MCP
+server, and carving `catalog_tools` out of Core replaced it with plain
+modules a contributor can also call directly.
 
 **Constrains:** HAR validation is a gate — post-auth-only HARs,
 missing auth flows, and ambiguous transports halt analysis. No guessing.
@@ -1384,11 +1397,12 @@ editing format-list frozensets in multiple files.
 3. **`parsers/formats/{format}.py`** — implement the `BaseParser`
    subclass.
 4. **`parsers/registries.py`** — define the wrapper that adapts the
-   parser to `(section, resources) -> list[dict]` (or `dict` for
-   sysinfo) and add a `format_tag → wrapper` entry to
-   `_CHANNEL_WRAPPERS_BY_TAG` (or `_SYSINFO_WRAPPERS_BY_TAG`). The
-   model→callable dict is built by zipping the registry list with
-   this table — a missing entry raises at import time.
+   parser to `tuple[list[dict], AnchorCount]` (channels) or
+   `tuple[dict, AnchorCount, dict[str, str]]` (sysinfo), and add a
+   `format_tag → wrapper` entry to `_CHANNEL_WRAPPERS_BY_TAG` (or
+   `_SYSINFO_WRAPPERS_BY_TAG`). The model→callable dict is built by
+   looking each model's `format_tag` up in that table, so ordering
+   does not matter — a missing entry raises at import time.
 
 **Why ClassVars on the model.** Auth strategies already use this
 pattern (`AuthStrategyBase` with `display_name`/`transport` ClassVars +
