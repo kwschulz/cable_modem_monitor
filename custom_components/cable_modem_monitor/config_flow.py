@@ -96,6 +96,19 @@ _COOLOFF_TIMEOUT_SECONDS = 30.0
 # =============================================================================
 
 
+def _validation_error_key(exc: Exception) -> str:
+    """Map a validation exception to its strings.json error key."""
+    # _raise_validation_failure encodes the classified key as
+    # "{kind}:{key}:{message}". The per-type fallbacks cover exceptions
+    # raised before classification ran, e.g. protocol detection.
+    if isinstance(exc, ConnectionError):
+        return "network_unreachable"
+    parts = str(exc).split(":", 2)
+    if len(parts) >= 2:
+        return parts[1]
+    return "invalid_auth" if isinstance(exc, PermissionError) else "unknown"
+
+
 class _ValidationProgress:
     """Manages async validation state for HA's progress-spinner pattern.
 
@@ -135,18 +148,9 @@ class _ValidationProgress:
         try:
             self.result = await self.task
             return True
-        except ConnectionError as exc:
+        except (ConnectionError, PermissionError, RuntimeError) as exc:
             self.error = exc
-            self.error_key = "network_unreachable"
-        except PermissionError as exc:
-            self.error = exc
-            # Extract error key from "auth_error:{key}:{msg}" format
-            parts = str(exc).split(":", 2)
-            self.error_key = parts[1] if len(parts) >= 2 else "invalid_auth"
-        except RuntimeError as exc:
-            self.error = exc
-            parts = str(exc).split(":", 2)
-            self.error_key = parts[1] if len(parts) >= 2 else "unknown"
+            self.error_key = _validation_error_key(exc)
         except Exception as exc:
             _LOGGER.exception("Unexpected validation error")
             self.error = exc
@@ -729,10 +733,13 @@ class CableModemMonitorConfigFlow(config_entries.ConfigFlow):
                 )
             except (ConnectionError, PermissionError, RuntimeError) as exc:
                 _LOGGER.error("Reauth validation failed: %s", exc)
+                # Reauth is where a session-rejection lands for an already
+                # configured modem, so it must show the classified key —
+                # "check your password" is wrong when login succeeded (#120).
                 return self.async_show_form(
                     step_id="reauth_confirm",
                     data_schema=_build_reauth_schema(entry.data),
-                    errors={"base": "invalid_auth"},
+                    errors={"base": _validation_error_key(exc)},
                 )
 
             # Update entry with new credentials + validation results

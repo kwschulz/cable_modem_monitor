@@ -240,15 +240,20 @@ def restart_requires_credentials(modem_dir: Path, variant: str | None) -> bool:
 # Error classification
 # ---------------------------------------------------------------------------
 
-# Maps exceptions to strings.json error keys.  These keys are looked
-# up by HA's frontend in strings.json / translations/*.json.
+# Maps collector signals to strings.json error keys.  These keys are
+# looked up by HA's frontend in strings.json / translations/*.json.
 
 _SIGNAL_ERROR_MAP: dict[CollectorSignal, str] = {
     CollectorSignal.CONNECTIVITY: "cannot_connect",
     CollectorSignal.AUTH_FAILED: "invalid_auth",
     CollectorSignal.AUTH_LOCKOUT: "invalid_auth",
     CollectorSignal.LOAD_ERROR: "cannot_connect",
-    CollectorSignal.LOAD_AUTH: "invalid_auth",
+    # Not invalid_auth: login succeeded and the modem then refused the data
+    # request; blaming credentials sends users to re-check a working password.
+    CollectorSignal.LOAD_AUTH: "session_rejected",
+    # The HTTP 200 form of the same refusal (a stub page served in place of
+    # data); ORCHESTRATION_SPEC gives it LOAD_AUTH's handling.
+    CollectorSignal.LOAD_INTEGRITY: "session_rejected",
     CollectorSignal.PARSE_ERROR: "parse_failed",
 }
 
@@ -378,7 +383,7 @@ def _attempt_validation(
     password: str,
     legacy_ssl: bool,
 ) -> ModemResult:
-    """Run one validation attempt."""
+    """Run one validation attempt, always releasing the server-side session."""
     # Shared by initial setup, reauth, and options-flow re-validation —
     # no per-flow variation; the collector's sanitized WARNING covers all paths.
     collector = create_collector(
@@ -390,7 +395,13 @@ def _attempt_validation(
         password=password,
         legacy_ssl=legacy_ssl,
     )
-    return collector.execute()
+    try:
+        return collector.execute()
+    finally:
+        # execute() only reaches its logout phase on success, so a failed
+        # attempt would strand the session on single-session firmware and
+        # collide with the user's next try.
+        collector.close()
 
 
 def _run_validation(

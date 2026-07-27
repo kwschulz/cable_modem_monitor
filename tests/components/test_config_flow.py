@@ -1234,6 +1234,95 @@ async def test_reauth_failure_shows_error(hass: HomeAssistant):
     assert result["errors"]["base"] == "invalid_auth"
 
 
+async def test_reauth_surfaces_session_rejection_not_bad_credentials(hass: HomeAssistant):
+    """A post-login refusal keeps its own key instead of reading as a bad password (#120).
+
+    A LOAD_AUTH streak opens the breaker and prompts for reauth, so a user
+    whose credentials are correct lands on this form; telling them to check
+    their password sends them after one the modem already accepted.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        data=MOCK_ENTRY_DATA,
+        unique_id="192.168.100.1",
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch("custom_components.cable_modem_monitor.async_setup_entry", return_value=True),
+        patch(
+            "custom_components.cable_modem_monitor.config_flow.load_modem_catalog",
+            return_value=MOCK_SUMMARIES,
+        ),
+        patch(
+            "custom_components.cable_modem_monitor.config_flow.validate_connection",
+            side_effect=PermissionError("auth_error:session_rejected:401 on /api/v1/sta_docsis_status"),
+        ),
+    ):
+        await hass.config_entries.async_setup(entry.entry_id)
+
+        result: Any = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_REAUTH, "entry_id": entry.entry_id},
+            data=entry.data,
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                "host": "192.168.100.1",
+                "username": "admin",
+                "password": "correcthorse",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"]["base"] == "session_rejected"
+
+
+async def test_reauth_connection_error_shows_network_unreachable(hass: HomeAssistant):
+    """A pre-classification ConnectionError keeps its own key, not the auth fallback."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        data=MOCK_ENTRY_DATA,
+        unique_id="192.168.100.1",
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch("custom_components.cable_modem_monitor.async_setup_entry", return_value=True),
+        patch(
+            "custom_components.cable_modem_monitor.config_flow.load_modem_catalog",
+            return_value=MOCK_SUMMARIES,
+        ),
+        patch(
+            "custom_components.cable_modem_monitor.config_flow.validate_connection",
+            side_effect=ConnectionError("Cannot connect to 192.168.100.1"),
+        ),
+    ):
+        await hass.config_entries.async_setup(entry.entry_id)
+
+        result: Any = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_REAUTH, "entry_id": entry.entry_id},
+            data=entry.data,
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                "host": "192.168.100.1",
+                "username": "admin",
+                "password": "correcthorse",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"]["base"] == "network_unreachable"
+
+
 async def test_reauth_full_loop_recovers_to_online(hass: HomeAssistant):
     """UC-81 end to end: breaker-open lockout → reauth flow → reload → ONLINE."""
     # The one test that runs the REAL async_setup_entry — twice: the
