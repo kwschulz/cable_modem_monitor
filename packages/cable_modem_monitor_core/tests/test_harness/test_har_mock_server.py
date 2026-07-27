@@ -563,6 +563,30 @@ class TestHARMockServerNoAuth:
             assert resp.status_code == 200
             assert resp.text == "<html>DS data</html>"
 
+    def test_declared_post_login_endpoint_answered_when_absent_from_har(
+        self,
+        entries: list[dict[str, Any]],
+    ) -> None:
+        """A declared post-login path missing from the capture gets a synthesized 200.
+
+        Trimmed HARs routinely omit these side-effect calls, which would
+        otherwise 404 the replay for a modem that works in the field.
+        """
+        config = _make_config({"session": {"post_login_endpoints": ["/establish.html"]}})
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.get(f"{server.base_url}/establish.html")
+            assert resp.status_code == 200
+
+    def test_har_entry_wins_over_synthesized_post_login_response(
+        self,
+        entries: list[dict[str, Any]],
+    ) -> None:
+        """A captured response for a declared path is served, not the synthetic one."""
+        config = _make_config({"session": {"post_login_endpoints": ["/status.html"]}})
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.get(f"{server.base_url}/status.html")
+            assert resp.text == "<html>DS data</html>"
+
 
 class TestHARMockServerFormAuth:
     """Integration tests for mock server with form auth."""

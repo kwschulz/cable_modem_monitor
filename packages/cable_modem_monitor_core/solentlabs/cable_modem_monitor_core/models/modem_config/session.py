@@ -11,15 +11,17 @@ from pydantic import BaseModel, ConfigDict, Field
 class SessionConfig(BaseModel):
     """Post-login session lifecycle.
 
-    Session owns concurrency limits and static request headers.
-    Cookie names and token prefixes live on the auth strategy —
-    auth owns the cookie it produces. See ARCHITECTURE_DECISIONS.md
-    "Session is lifecycle, auth owns the cookie."
+    Session owns concurrency limits, static request headers, and
+    post-login lifecycle calls. Cookie names and token prefixes live
+    on the auth strategy — auth owns the cookie it produces. See
+    ARCHITECTURE_DECISIONS.md "Session is lifecycle, auth owns the
+    cookie."
     """
 
     model_config = ConfigDict(extra="forbid")
     headers: dict[str, str] = Field(default_factory=dict)
     query_params: dict[str, str] = Field(default_factory=dict)
+    post_login_endpoints: list[str] = Field(default_factory=list)
 
     def resolved_headers(self, *, base_url: str) -> dict[str, str]:
         """Return headers with ``{base_url}`` placeholder substituted.

@@ -174,6 +174,21 @@ class LogoutFailed:
 
 
 @dataclass
+class PostLoginFetchFailed:
+    """A declared post-login endpoint did not answer 2xx; collection continues.
+
+    status_code is None when the request raised before a response
+    arrived (connection error or timeout).
+    """
+
+    model: str
+    path: str
+    status_code: int | None
+    reason: str
+    level: EventLevel = field(default=EventLevel.WARNING, init=False)
+
+
+@dataclass
 class HnapSessionExpired:
     """HNAP HTTP error on a reused session — session likely expired server-side."""
 
@@ -573,6 +588,7 @@ type OrchestratorEvent = (
     | SessionCleared
     | LogoutExecuted
     | LogoutFailed
+    | PostLoginFetchFailed
     | HnapSessionExpired
     | StubPageDetected
     | SessionRetryStarted

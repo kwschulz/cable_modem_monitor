@@ -1100,10 +1100,16 @@ rows:
     field: channel_type
     type: string
     map:
-      "ATDMA": "atdma"
-      "TDMA": "atdma"
       "TDMA_AND_ATDMA": "atdma"
+      "ATDMA": "atdma"
+      # DOCS-IF31-MIB defines no channel type field, so this firmware
+      # renders the SC-QAM fallback "TDMA" for its OFDMA channels.
+      "TDMA": "ofdma"
 ```
+
+The `TDMA` row above is the Technicolor `.jst` platform's value set
+(XB6/XB7/XB8/XB10), where `TDMA` means OFDMA. Map what the capture
+shows; do not copy a mapping from another modem's page.
 
 **HNAP** (channel mapping):
 

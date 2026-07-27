@@ -25,6 +25,13 @@ session:
     # behavior as TG3442DE (#86). {base_url} resolves at session build.
     X-Requested-With: "XMLHttpRequest"
     Referer: "{base_url}/"
+  post_login_endpoints:
+    # First authenticated request the browser makes after login, and the
+    # only path in the contributor HAR that ever returns 401 (pre-login
+    # and post-logout). totev/vodafone-station-cli, a headless client
+    # with no menu to render, ends its Technicolor login with the same
+    # GET, so the call is session establishment rather than UI chrome.
+    - "/api/v1/session/menu"
 
 actions:
   logout:
@@ -60,6 +67,12 @@ sources:
   logout_action:
     "[#120 CGA6444VF](https://github.com/solentlabs/cable_modem_monitor/issues/120)
     — POST /api/v1/session/logout observed in the contributor HAR capture"
+  post_login_endpoints:
+    "[totev/vodafone-station-cli](https://github.com/totev/vodafone-station-cli)
+    (MIT) — headless Technicolor client whose login() ends with a GET to
+    /api/v1/session/menu; corroborated by the #120 contributor HAR, where
+    that path is the first authenticated request and the only one to
+    return 401"
   chipset: "[DeviWiki CGA4233](https://deviwiki.com/wiki/Technicolor_CGA4233) — same BCM3390 Technicolor gateway platform"
 
 attribution:

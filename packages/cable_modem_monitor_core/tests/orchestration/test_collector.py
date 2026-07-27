@@ -16,6 +16,7 @@ Use case coverage (collector level):
 
 from __future__ import annotations
 
+import logging
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
@@ -68,6 +69,8 @@ def _make_config(
     requires_session: bool = False,
     logout_action: HttpAction | CbnAction | None = None,
     timeout: int = 10,
+    post_login_endpoints: list[str] | None = None,
+    query_params: dict[str, str] | None = None,
 ) -> Any:
     """Build a minimal ModemConfig-like object for testing.
 
@@ -108,10 +111,11 @@ def _make_config(
     if hasattr(config.auth, "cookie_name") or isinstance(config.auth, MagicMock):
         config.auth.cookie_name = cookie_name
 
-    # Session (lifecycle only: headers, query_params)
+    # Session (lifecycle only: headers, query_params, post-login calls)
     config.session = MagicMock()
     config.session.headers = {}
-    config.session.query_params = {}
+    config.session.query_params = query_params or {}
+    config.session.post_login_endpoints = post_login_endpoints or []
 
     # Actions — logout_action wins; fall back to building HttpAction from endpoint.
     if logout_action is not None:
@@ -143,6 +147,9 @@ class _SimpleHandler(BaseHTTPRequestHandler):
         """Serve configured responses."""
         server: _SimpleServer = self.server  # type: ignore[assignment]
         path = self.path.split("?")[0]
+        # Record the full request target, query string included, so tests
+        # can assert session.query_params actually reach the wire.
+        server.requested_paths.append(self.path)
 
         response = server.responses.get(path)
         if response is None:
@@ -165,6 +172,8 @@ class _SimpleServer(HTTPServer):
 
     def __init__(self, responses: dict[str, tuple[int, str]]) -> None:
         self.responses = responses
+        # GET targets in arrival order — lets tests assert request sequencing.
+        self.requested_paths: list[str] = []
         super().__init__(("127.0.0.1", 0), _SimpleHandler)
 
     @property
@@ -589,6 +598,136 @@ class TestSuccessfulCollection:
         assert result.signal == CollectorSignal.OK
         assert result.modem_data is not None
         assert result.modem_data["downstream"] == []
+
+
+class TestPostLoginEndpoints:
+    """session.post_login_endpoints — lifecycle GETs issued after a fresh login."""
+
+    # Recorded into the server's path log by the stubbed load phase, so a
+    # single sequence proves the endpoints precede the data fetch.
+    _LOAD_MARKER = "<load>"
+
+    _ESTABLISH = "/establish.html"
+    _MENU = "/menu.html"
+
+    @staticmethod
+    def _make_collector(
+        server: _SimpleServer,
+        endpoints: list[str],
+        query_params: dict[str, str] | None = None,
+    ) -> ModemDataCollector:
+        """Collector against ``server`` whose login always succeeds."""
+        config = _make_config(
+            auth_type="form",
+            cookie_name="SID",
+            post_login_endpoints=endpoints,
+            query_params=query_params,
+        )
+        collector = ModemDataCollector(config, MagicMock(), None, server.base_url, "user", "pw")
+
+        def _login(session: Any, *_args: Any, **_kwargs: Any) -> AuthResult:
+            # Set the cookie the real login would — session_is_valid keys
+            # off it, so the second execute() takes the reuse path.
+            session.cookies.set("SID", "token")
+            return AuthResult(success=True, auth_context=AuthContext())
+
+        stub = MagicMock(side_effect=_login)
+        collector._auth_manager.authenticate = stub  # type: ignore[method-assign]  # stub must outlive this helper
+        return collector
+
+    def _execute(self, collector: ModemDataCollector, server: _SimpleServer) -> Any:
+        """Run execute() with the load and parse phases stubbed."""
+
+        def _load(_auth_result: Any) -> tuple[dict[str, Any], list[Any]]:
+            server.requested_paths.append(self._LOAD_MARKER)
+            return {"data": "ok"}, []
+
+        parsed = ({"downstream": [], "upstream": [], "system_info": {}}, ParseDiagnostics())
+        with (
+            patch.object(collector, "_load_resources", side_effect=_load),
+            patch.object(collector, "_parse", return_value=parsed),
+        ):
+            return collector.execute()
+
+    def test_endpoints_fetched_in_order_before_data(self) -> None:
+        """Declared endpoints are GET in order, ahead of the data fetch."""
+        responses = {self._ESTABLISH: (200, "{}"), self._MENU: (200, "{}")}
+        with _SimpleServer(responses) as server:
+            collector = self._make_collector(server, [self._ESTABLISH, self._MENU])
+            result = self._execute(collector, server)
+
+            assert result.success is True
+            assert server.requested_paths == [self._ESTABLISH, self._MENU, self._LOAD_MARKER]
+
+    def test_nothing_fetched_when_unconfigured(self) -> None:
+        """No extra request is made when no endpoint is declared."""
+        with _SimpleServer({}) as server:
+            collector = self._make_collector(server, [])
+            result = self._execute(collector, server)
+
+            assert result.success is True
+            assert server.requested_paths == [self._LOAD_MARKER]
+
+    def test_non_2xx_warns_without_failing_auth(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A failed post-login GET logs a WARNING and collection continues.
+
+        Login already succeeded — reporting AUTH_FAILED here would tell
+        the user their working credentials are wrong (#120).
+        """
+        with _SimpleServer({}) as server:  # every path 404s
+            collector = self._make_collector(server, [self._ESTABLISH])
+            with caplog.at_level(logging.WARNING):
+                result = self._execute(collector, server)
+
+            assert result.success is True
+            assert result.signal == CollectorSignal.OK
+            assert self._ESTABLISH in caplog.text
+            assert "404" in caplog.text
+
+    def test_transport_error_warns_without_failing_auth(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A connection error on a post-login GET is best-effort, like logout."""
+        with _SimpleServer({}) as server:
+            collector = self._make_collector(server, [self._ESTABLISH])
+            with (
+                caplog.at_level(logging.WARNING),
+                patch.object(collector._session, "get", side_effect=requests.ConnectionError("refused")),
+            ):
+                result = self._execute(collector, server)
+
+            assert result.success is True
+            assert self._ESTABLISH in caplog.text
+
+    def test_not_refetched_on_session_reuse(self) -> None:
+        """Endpoints fire on a fresh login only, not on a reused session."""
+        with _SimpleServer({self._ESTABLISH: (200, "{}")}) as server:
+            collector = self._make_collector(server, [self._ESTABLISH])
+            self._execute(collector, server)
+            self._execute(collector, server)
+
+            assert server.requested_paths.count(self._ESTABLISH) == 1
+
+    def test_fetched_by_bare_authenticate(self) -> None:
+        """A fresh login fetches them even when no collection follows.
+
+        restart.py authenticates and dispatches its action without ever
+        entering execute(), so firmware that needs the call to treat a
+        session as established needs it on that path too.
+        """
+        with _SimpleServer({self._ESTABLISH: (200, "{}")}) as server:
+            collector = self._make_collector(server, [self._ESTABLISH])
+
+            collector.authenticate()
+
+            assert server.requested_paths == [self._ESTABLISH]
+
+    def test_carries_session_query_params(self) -> None:
+        """Declared session.query_params ride along, as on every other fetch."""
+        with _SimpleServer({self._ESTABLISH: (200, "{}")}) as server:
+            collector = self._make_collector(server, [self._ESTABLISH], query_params={"_n": "42"})
+
+            collector.authenticate()
+
+            assert server.requested_paths == [f"{self._ESTABLISH}?_n=42"]
 
 
 class TestPostProcessorResourcesFetch:

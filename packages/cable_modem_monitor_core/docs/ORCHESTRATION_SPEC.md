@@ -83,6 +83,8 @@ class ModemDataCollector:
 
         Sequence:
         1. Auth Manager: validate session → reuse or authenticate
+           (a fresh login also GETs each session.post_login_endpoints
+            path, best-effort — see Post-login endpoints below)
         2. Resource Loader: fetch all resources (all-or-nothing)
         3. Parser: extract channels + system_info → ModemData
         4. Post-parse filter: apply restart-window filter if configured
@@ -283,6 +285,26 @@ This mirrors the existing `log_level` pattern used by action execution
 (both HTTP and HNAP actions). Auth managers use the level for all
 non-error log calls during `authenticate()`. Errors and warnings are
 always logged regardless of `log_level`.
+
+### Post-login endpoints
+
+`authenticate()` owns this, not `execute()`. On the fresh-login branch,
+after a successful result and before returning, the collector GETs each
+`session.post_login_endpoints` path in order. Responses are discarded.
+The calls carry `session.query_params` like every other fetch.
+
+Placing it in `authenticate()` rather than in `execute()`'s sequence is
+what makes it reach the restart path: `restart.py` calls
+`collector.authenticate()` and dispatches its action without ever
+entering `execute()`. Firmware that requires the call to establish a
+session requires it there too.
+
+Best-effort by design. A non-2xx response or a transport error emits
+`PostLoginFetchFailed` at WARNING and proceeds. Login already
+succeeded, so failing the collection here would report bad credentials
+for a working password; a genuinely required call surfaces anyway as
+the data fetch's own 401 alongside this warning. Config surface and
+evidence bar: MODEM_YAML_SPEC.md § Post-login endpoints.
 
 ### Auth-Failure Detail Log
 

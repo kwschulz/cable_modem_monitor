@@ -63,6 +63,7 @@ def _format(event: OrchestratorEvent) -> str:  # noqa: PLR0911, C901
         LogoutExecuted,
         LogoutFailed,
         ParseError,
+        PostLoginFetchFailed,
         RecoveryObserverException,
         RecoveryWindowClosed,
         RecoveryWindowOpened,
@@ -170,6 +171,10 @@ def _format(event: OrchestratorEvent) -> str:  # noqa: PLR0911, C901
 
     if isinstance(event, LogoutFailed):
         return f"Logout failed [{event.model}] — {event.reason}"
+
+    if isinstance(event, PostLoginFetchFailed):
+        detail = f"HTTP {event.status_code}" if event.status_code is not None else "no response"
+        return f"Post-login fetch failed [{event.model}] — {event.path}: {detail} {event.reason}".rstrip()
 
     if isinstance(event, HnapSessionExpired):
         return f"HNAP session expired [{event.model}] — HTTP {event.status_code}"

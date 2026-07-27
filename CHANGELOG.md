@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   constellation, so the unmappable modulation field is omitted, matching
   the XB7 and XB10). (Related to #111)
 
+- **`session.post_login_endpoints` in modem.yaml.** Some SPA firmware
+  treats the browser's first call after login as part of establishing
+  the session and rejects data requests until it has been made. A modem
+  can now declare those paths, and they are fetched in order on every
+  fresh login, ahead of any data request. Responses are discarded, and
+  a failure logs a warning rather than reporting an auth error, since
+  the login itself already succeeded. The Technicolor CGA6444VF declares
+  `/api/v1/session/menu` on this basis. (Related to #120)
+
 ### Changed
 
 - **Spec conformance now gates every modem, not just confirmed ones.**

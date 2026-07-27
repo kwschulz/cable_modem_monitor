@@ -599,6 +599,44 @@ TG3442DE — logout present in YAML but no logout request captured in HAR →
 single-session. There is no mechanism to configure logout without triggering
 single-session semantics.
 
+### Post-login endpoints are session lifecycle, not an auth hook
+
+**Decision:** `session.post_login_endpoints` lists paths Core GETs on
+every successful fresh login, from inside `authenticate()`. A non-2xx
+response or a transport error logs a WARNING and collection continues.
+
+Owned by `authenticate()` rather than by a step in `execute()`, because
+the calls establish the session rather than precede the data fetch. That
+placement is also what reaches the restart path, where `restart.py`
+authenticates and dispatches its action without entering `execute()` —
+firmware that needs the call to consider a session established needs it
+before a restart POST too.
+
+**Rationale:** This does not contradict "No per-modem auth hooks" above.
+Nothing here touches credentials: no secret is sent beyond the session
+cookie already on the wire, no token is read back, and the response is
+discarded. It is a lifecycle call the firmware expects between login and
+data, which is exactly what the session section owns.
+
+Log-and-continue rather than fail-fast, because login *did* succeed:
+`AUTH_FAILED` renders as "check username / password" and would send a
+user to re-verify working credentials. If the call really was required,
+the data fetch fails on its own and produces two log lines — this
+warning naming the missed call, plus the data-page 401 with its body
+(see § Auth-failure detail via single WARNING log). Making a discarded
+response fatal would also let a transient hiccup, or firmware moving the
+path, kill monitoring on a modem that was working.
+
+**Evidence:** #120 Technicolor CGA6444VF — `/api/v1/session/menu` is the
+first authenticated request in the contributor HAR and the only path in
+it that ever returns 401. The independent headless client
+totev/vodafone-station-cli (MIT) ends its Technicolor `login()` with the
+same GET, which a CLI has no UI reason to make.
+
+**Constrains:** Ordered, best-effort, fresh-login only. Carries
+`session.query_params` like every other fetch. No response parsing, no
+conditional or templated paths, no per-modem retry policy.
+
 ### Auth-failure detail via single WARNING log
 
 **Decision:** When the collector's auth phase fails, it emits one

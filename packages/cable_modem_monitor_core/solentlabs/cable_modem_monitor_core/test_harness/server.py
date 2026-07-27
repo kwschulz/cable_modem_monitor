@@ -117,6 +117,11 @@ class _MockHandler(BaseHTTPRequestHandler):
             token_prefix=server.token_prefix,
         )
         if route is None:
+            # Trimmed captures rarely include these side-effect calls, so
+            # synthesize a response only when the route table has none.
+            if path in server.post_login_endpoints:
+                self._send_response(200, [("Content-Type", "application/json")], '{"error": "ok"}')
+                return
             self._send_response(404, [], "Not Found")
             return
 
@@ -332,6 +337,7 @@ class HARMockServer(HTTPServer):
         self.auth_handler = create_auth_handler(modem_config, har_entries)
         self.login_page = _extract_login_page(modem_config)
         self.token_prefix = _extract_token_prefix(modem_config)
+        self.post_login_endpoints = _extract_post_login_endpoints(modem_config)
         self._thread: threading.Thread | None = None
 
         super().__init__((host, port), _MockHandler)
@@ -369,3 +375,10 @@ def _extract_token_prefix(modem_config: ModemConfig | None) -> str:
     if modem_config is None or modem_config.auth is None:
         return ""
     return getattr(modem_config.auth, "token_prefix", "") or ""
+
+
+def _extract_post_login_endpoints(modem_config: ModemConfig | None) -> frozenset[str]:
+    """Return normalized ``session.post_login_endpoints`` paths."""
+    if modem_config is None or modem_config.session is None:
+        return frozenset()
+    return frozenset(normalize_path(p) for p in modem_config.session.post_login_endpoints)

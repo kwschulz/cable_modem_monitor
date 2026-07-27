@@ -907,7 +907,38 @@ For HNAP, session is implicit (always `uid` + `PrivateKey` cookies,
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `headers` | map | `{}` | Static headers added to all requests for this session (e.g., `X-Requested-With: XMLHttpRequest` for SPA-style modems). Header values support the `{base_url}` placeholder, which resolves to the modem's URL at session-build time — used for `Referer`/`Origin` headers that some modems validate against their own origin. Dynamic headers (CSRF tokens, HNAP signatures, auth tokens) are managed by auth strategies — each strategy defines its own fields for token acquisition and header injection. |
-| `query_params` | map | `{}` | Static query parameters appended to all data-fetch URLs (e.g., `_n: "12345"` for Arris firmware that requires a cache-buster nonce on AJAX requests). Not used for auth-managed tokens — those go through `auth.token_prefix`. |
+| `query_params` | map | `{}` | Static query parameters appended to every URL Core fetches for this session — data resources, `post_login_endpoints`, and actions alike (e.g., `_n: "12345"` for Arris firmware that requires a cache-buster nonce on AJAX requests). Not used for auth-managed tokens — those go through `auth.token_prefix`. |
+| `post_login_endpoints` | list | `[]` | Paths to GET, in order, on every fresh login, ahead of any data request. See [Post-login endpoints](#post-login-endpoints). |
+
+### Post-login endpoints
+
+Some SPA firmware treats the browser's first post-login call as part of
+establishing the session, and rejects data requests until it has been
+made. Declare those paths and Core GETs them, in order, after a fresh
+login and before the first data fetch:
+
+```yaml
+session:
+  post_login_endpoints:
+    - "/api/v1/session/menu"
+```
+
+Responses are discarded — this is lifecycle, not data. The calls belong
+to login, so they run on every successful fresh authentication and
+nothing runs on a reused session. That includes a restart action, which
+authenticates without ever collecting data.
+
+A non-2xx response or a transport error logs a WARNING and collection
+continues. Login already succeeded, so failing here would report bad
+credentials for a working password; if the call really was required,
+the data fetch reports the failure itself with the warning naming the
+missed call alongside it.
+
+Evidence: a path the browser requests immediately after login that the
+firmware rejects when unauthenticated. Cite the capture, and any
+independent non-browser client that makes the same call — a headless
+client has no UI to render, so it is strong evidence the call is
+session establishment rather than chrome.
 
 ### Stateless
 

@@ -97,10 +97,13 @@ and strips the query string from `url` and scrubs the password from
 | `SessionCleared` | DEBUG | Session cleared |
 | `LogoutExecuted` | DEBUG | Logout action sent |
 | `LogoutFailed` | WARNING | Logout action failed |
+| `PostLoginFetchFailed` | WARNING | A `session.post_login_endpoints` path did not answer 2xx; collection continues |
 | `HnapSessionExpired` | WARNING | HNAP HTTP error on a reused session — session likely expired |
 | `StubPageDetected` | WARNING | 0 of N expected parser anchors found — stub/login page served at data URL |
 
 Fields — `LogoutFailed`: `model`, `reason: str`
+Fields — `PostLoginFetchFailed`: `model`, `path: str`,
+`status_code: int | None` (None on a transport error), `reason: str`
 Fields — `HnapSessionExpired`: `model`, `status_code: int`
 Fields — `StubPageDetected`: `model`, `path: str`, `anchors_found: int`,
 `anchors_expected: int`

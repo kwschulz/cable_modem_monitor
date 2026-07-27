@@ -13,7 +13,8 @@
     "cookie_name": "PHPSESSID"
   },
   "session": {
-    "headers": {"X-Requested-With": "XMLHttpRequest"}
+    "headers": {"X-Requested-With": "XMLHttpRequest"},
+    "post_login_endpoints": ["/establish.html"]
   },
   "actions": {
     "logout": {
