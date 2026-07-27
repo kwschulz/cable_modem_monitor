@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from solentlabs.cable_modem_monitor_catalog import CATALOG_PATH
+from solentlabs.cable_modem_monitor_core.auth.base import AuthFailureMode
+from solentlabs.cable_modem_monitor_core.auth.factory import create_auth_manager
 from solentlabs.cable_modem_monitor_core.catalog_manager import (
     ModemSummary,
     VariantInfo,
@@ -248,21 +250,41 @@ _SIGNAL_ERROR_MAP: dict[CollectorSignal, str] = {
     CollectorSignal.AUTH_FAILED: "invalid_auth",
     CollectorSignal.AUTH_LOCKOUT: "invalid_auth",
     CollectorSignal.LOAD_ERROR: "cannot_connect",
-    # Not invalid_auth: login succeeded and the modem then refused the data
-    # request; blaming credentials sends users to re-check a working password.
-    CollectorSignal.LOAD_AUTH: "session_rejected",
-    # The HTTP 200 form of the same refusal (a stub page served in place of
-    # data); ORCHESTRATION_SPEC gives it LOAD_AUTH's handling.
-    CollectorSignal.LOAD_INTEGRITY: "session_rejected",
+    CollectorSignal.LOAD_AUTH: "invalid_auth",
+    CollectorSignal.LOAD_INTEGRITY: "invalid_auth",
     CollectorSignal.PARSE_ERROR: "parse_failed",
 }
 
+# Signals raised after authenticate() reported success. Their entries
+# above are the conservative answer; _post_login_error_key refines them
+# when a modem_config is available to ask.
+_POST_LOGIN_SIGNALS = frozenset({CollectorSignal.LOAD_AUTH, CollectorSignal.LOAD_INTEGRITY})
 
-def classify_error(error: str | None, signal: CollectorSignal | None = None) -> str:
+
+def _post_login_error_key(modem_config: Any) -> str:
+    """Pick the error key for a post-login refusal, per auth strategy."""
+    # "Login succeeded, so the password is fine" is only true if the
+    # strategy verified it. basic auth never validates, and plain form
+    # auth accepts any response under HTTP 400, so for those the refusal
+    # is usually the bad password surfacing late (#120 regression).
+    try:
+        mode = create_auth_manager(modem_config).auth_failure_mode()
+    except Exception:  # noqa: BLE001 - never let message selection break the flow
+        return "invalid_auth"
+    return "session_rejected" if mode is AuthFailureMode.SESSION_REJECTED else "invalid_auth"
+
+
+def classify_error(
+    error: str | None,
+    signal: CollectorSignal | None = None,
+    modem_config: Any = None,
+) -> str:
     """Map a CollectorSignal to a strings.json error key for HA form display."""
-    if signal is not None:
-        return _SIGNAL_ERROR_MAP.get(signal, "unknown")
-    return "unknown"
+    if signal is None:
+        return "unknown"
+    if signal in _POST_LOGIN_SIGNALS and modem_config is not None:
+        return _post_login_error_key(modem_config)
+    return _SIGNAL_ERROR_MAP.get(signal, "unknown")
 
 
 # ---------------------------------------------------------------------------
@@ -362,12 +384,13 @@ def _detect_and_inject_form_nonce_encoding(
 def _raise_validation_failure(
     result: ModemResult,
     auth_signals: tuple[CollectorSignal, ...],
+    modem_config: Any = None,
 ) -> None:
     """Raise ``PermissionError`` for auth signals or ``RuntimeError`` for collection signals."""
     # Wire-level detail is already at WARNING from the collector; ERROR here
     # carries only the signal/key summary for the HA form UI.
     _LOGGER.error("Validation failed: signal=%s, error=%s", result.signal, result.error)
-    error_key = classify_error(result.error, result.signal)
+    error_key = classify_error(result.error, result.signal, modem_config)
     if result.signal in auth_signals:
         raise PermissionError(f"auth_error:{error_key}:{result.error}")
     raise RuntimeError(f"collection_error:{error_key}:{result.error}")
@@ -458,7 +481,7 @@ def _run_validation(
     )
 
     if not result.success:
-        _raise_validation_failure(result, auth_signals)
+        _raise_validation_failure(result, auth_signals, modem_config)
 
     _LOGGER.info("Validation succeeded: %d data keys", len(result.modem_data or {}))
 

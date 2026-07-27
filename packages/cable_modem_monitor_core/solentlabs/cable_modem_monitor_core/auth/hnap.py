@@ -24,7 +24,7 @@ from ..protocol.hnap import (
     compute_auth_header,
     hmac_hex,
 )
-from .base import AuthContext, AuthResult, BaseAuthManager, LoginLockoutError
+from .base import AuthContext, AuthFailureMode, AuthResult, BaseAuthManager, LoginLockoutError
 from .response import parse_json_dict
 
 if TYPE_CHECKING:
@@ -57,6 +57,12 @@ class HnapAuthManager(BaseAuthManager):
 
     def __init__(self, config: HnapAuth) -> None:
         self._hmac_algorithm = config.hmac_algorithm
+
+    def auth_failure_mode(self) -> AuthFailureMode:
+        """Login is verified: a wrong password fails the LoginResult check."""
+        # Proven by test_auth_failure_modes — the mock server rejects a
+        # bad HMAC, so a later 401 is not the credential.
+        return AuthFailureMode.SESSION_REJECTED
 
     def headers(self) -> frozenset[str]:
         # HNAP_AUTH carries an HMAC signed with the per-session PrivateKey.

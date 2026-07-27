@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 from requests.cookies import RequestsCookieJar
+from solentlabs.cable_modem_monitor_core.auth.base import AuthFailureMode
 from solentlabs.cable_modem_monitor_core.orchestration.events import (
     AuthFailed,
     AuthSucceeded,
@@ -76,7 +77,11 @@ def _make_collector(modem_config=None):
         patch("solentlabs.cable_modem_monitor_core.orchestration.collector.ModemParserCoordinator") as mock_coord,
     ):
         mock_cs.return_value = MagicMock(spec=requests.Session)
-        mock_cam.return_value = MagicMock()
+        auth_manager = MagicMock()
+        # Real enum member, not a bare mock: the collector renders its
+        # 401/403 hint from this, and the mode is a closed set.
+        auth_manager.auth_failure_mode.return_value = AuthFailureMode.CREDENTIALS_SUSPECT
+        mock_cam.return_value = auth_manager
         mock_coord.return_value = MagicMock()
         collector = ModemDataCollector(
             modem_config,

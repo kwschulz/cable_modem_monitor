@@ -296,8 +296,8 @@ config_flow_helpers.validate_connection(hass, host, user, pass, modem_dir, varia
 | `AUTH_FAILED` | `invalid_auth` | Login failed |
 | `AUTH_LOCKOUT` | `invalid_auth` | Login failed |
 | `LOAD_ERROR` | `cannot_connect` | Modem not responding |
-| `LOAD_AUTH` | `session_rejected` | Logged in, but the modem refused the data request |
-| `LOAD_INTEGRITY` | `session_rejected` | Logged in, but the modem refused the data request |
+| `LOAD_AUTH` | strategy-dependent, see below | |
+| `LOAD_INTEGRITY` | strategy-dependent, see below | |
 | `PARSE_ERROR` | `parse_failed` | Connected but couldn't read data |
 
 Every signal except `OK` is mapped. An unmapped signal falls through to
@@ -305,28 +305,33 @@ Every signal except `OK` is mapped. An unmapped signal falls through to
 `test_every_signal_is_mapped` fails when a new `CollectorSignal` lands without
 a key.
 
-`LOAD_AUTH` is deliberately not `invalid_auth`. A 401/403 on a data page
-happens *after* a successful login, so the credentials are known good;
-presenting it as a credential failure sends users to re-verify a password the
-modem already accepted.
+`LOAD_AUTH` and `LOAD_INTEGRITY` are read through the auth strategy, because
+a 401 after a "successful" login only means the session was refused if the
+strategy actually verified the login:
 
-`LOAD_INTEGRITY` shares the key: it is the HTTP 200 form of the same refusal,
-a stub page served in place of data (UC-19a), and ORCHESTRATION_SPEC § Signal
-Catalog gives it `LOAD_AUTH`'s handling.
+| `auth_failure_mode()` | strings.json key | User message |
+|-----------------------|------------------|--------------|
+| `CREDENTIALS_SUSPECT` (default) | `invalid_auth` | Login failed, check credentials |
+| `SESSION_REJECTED` | `session_rejected` | Logged in, but the modem refused the data request |
+| `NOT_CONFIGURED` | `invalid_auth` | Login failed, check credentials |
+
+`basic` never validates a credential and plain `form` accepts any response
+under HTTP 400, so for those a post-login 401 is most often the bad password
+surfacing late. Authority and the proven-not-assumed rule:
+ARCHITECTURE_DECISIONS.md § Post-login 401 is read per auth strategy.
 
 `auth_signals` is config-flow-local: it selects `PermissionError` over
 `RuntimeError`, and both carry the same encoded error key, so membership
 changes nothing a user sees. HA's reauth prompt is started on the runtime path
 instead (`_start_reauth_on_lockout` — `ConnectionStatus.AUTH_FAILED` plus an
-open circuit breaker), and policy already maps both signals to that status.
+open circuit breaker).
 
-Reauth is the flow that matters most here. An already configured modem that
-starts refusing data trips the auth streak, opens the breaker, and prompts for
+Reauth matters most here. An already configured modem that starts refusing
+data trips the auth streak, opens the breaker, and prompts for
 reauthentication, so a user with correct credentials arrives at
-`reauth_confirm` and must not be told to check their password. Both that
-handler and `_ValidationProgress.collect` therefore resolve the displayed key
-through `_validation_error_key`, rather than assuming an auth-shaped
-exception means bad credentials.
+`reauth_confirm`. Both that handler and `_ValidationProgress.collect` resolve
+the displayed key through `_validation_error_key`, rather than assuming an
+auth-shaped exception means bad credentials.
 
 **Protocol detection failure** (before `ModemDataCollector` runs):
 

@@ -281,6 +281,30 @@ class TestFormPbkdf2AuthManager:
             assert result.success is True
             assert mock_post.call_count == 2
 
+    def test_wrong_password_fails_login(self, session: requests.Session) -> None:
+        """A wrong password fails the login_success check, not a later data fetch.
+
+        This is what earns form_pbkdf2 its SESSION_REJECTED failure
+        mode: because the credential is verified here, a 401 arriving
+        afterwards is genuinely session-side. See
+        test_auth_failure_modes.py.
+        """
+        config = self._make_config(double_hash=False, login_success={"error": "ok"})
+        manager = FormPbkdf2AuthManager(config)
+        manager.configure_session(session, {})
+
+        with patch.object(session, "post") as mock_post:
+            salt_resp = MagicMock()
+            salt_resp.json.return_value = {"salt": "s", "saltwebui": "sw"}
+            login_resp = MagicMock()
+            login_resp.status_code = 200
+            login_resp.json.return_value = {"error": "LoginIncorrect"}
+            mock_post.side_effect = [salt_resp, login_resp]
+
+            result = manager.authenticate(session, "http://192.168.100.1", "admin", "wrong")
+
+            assert result.success is False
+
     def test_double_hash(self, session: requests.Session) -> None:
         """Double hash mode derives key twice."""
         config = self._make_config(double_hash=True)

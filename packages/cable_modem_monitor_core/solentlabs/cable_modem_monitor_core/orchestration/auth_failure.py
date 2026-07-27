@@ -7,6 +7,7 @@ from urllib.parse import urlparse, urlunparse
 
 import requests
 
+from ..auth.base import AuthFailureMode
 from ..models.modem_config.auth import BasicAuth, NoneAuth
 from .events import AuthFailed, HttpStatusError
 
@@ -15,13 +16,19 @@ _FAILURE_BODY_SNIPPET_MAX: Final[int] = 500
 _REDACTED: Final[str] = "[REDACTED]"
 
 
-def _auth_failure_hint(modem_config: Any) -> str:
+_HINTS: Final[dict[AuthFailureMode, str]] = {
+    AuthFailureMode.NOT_CONFIGURED: "modem requires authentication (check config)",
+    AuthFailureMode.CREDENTIALS_SUSPECT: "credentials rejected",
+    AuthFailureMode.SESSION_REJECTED: "session expired",
+}
+
+
+def _auth_failure_hint(auth_manager: Any) -> str:
     """Return a context-appropriate hint for a 401/403 during resource loading."""
-    if modem_config.auth is None or isinstance(modem_config.auth, NoneAuth):
-        return "modem requires authentication (check config)"
-    if isinstance(modem_config.auth, BasicAuth):
-        return "credentials rejected"
-    return "session expired"
+    # The strategy owns this, not an isinstance chain here: the answer
+    # depends on whether its login flow verifies the credential, which
+    # only the strategy knows. See BaseAuthManager.auth_failure_mode.
+    return _HINTS[auth_manager.auth_failure_mode()]
 
 
 def _build_http_status_error_event(

@@ -185,7 +185,7 @@ class ModemDataCollector:
             return self._classify_hnap_error(exc)
         except ResourceLoadError as exc:
             if exc.status_code in (401, 403):
-                hint = _auth_failure_hint(self._modem_config)
+                hint = _auth_failure_hint(self._auth_manager)
                 log_event(
                     _logger,
                     _build_http_status_error_event(

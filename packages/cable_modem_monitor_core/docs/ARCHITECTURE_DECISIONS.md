@@ -599,6 +599,40 @@ TG3442DE — logout present in YAML but no logout request captured in HAR →
 single-session. There is no mechanism to configure logout without triggering
 single-session semantics.
 
+### Post-login 401 is read per auth strategy
+
+**Decision:** `BaseAuthManager.auth_failure_mode()` returns how a 401/403
+arriving *after* a successful `authenticate()` should be read. The base
+returns `CREDENTIALS_SUSPECT`; a strategy overrides to `SESSION_REJECTED`
+only when it rejects a bad password at login time. Core's failure hint and
+the HA config-flow error key both derive from it.
+
+**Rationale:** `LOAD_AUTH` does not mean the login succeeded — it means the
+strategy *believed* it did. `basic` never validates a credential at all
+(`auth/basic.py` sets `session.auth` and returns success), and plain `form`
+accepts any response under HTTP 400. For those, a later 401 is usually the
+bad password surfacing late. Telling that user "this is not a username or
+password problem" is a dead end; telling a user with good credentials to
+check their password is merely unhelpful. The default is therefore
+pessimistic, and overriding is a claim.
+
+**Proven, not assumed.** A strategy may declare `SESSION_REJECTED` only
+with a bad-password test showing `success=False`. Today that is
+`form_pbkdf2` and `hnap` — the two the mock harness can reject. The others
+likely do verify, but the harness cannot yet simulate a rejected login for
+them, so the claim is unpaid and they keep the conservative default.
+Adding harness rejection plus its test is the price of flipping one.
+
+**Constrains:** The knowledge lives on the strategy, not in an `isinstance`
+chain in the orchestration layer — this replaced one that had drifted into
+asserting verification that never happened. `modem.yaml` gains no field;
+catalog contributors are unaffected. `test_auth_failure_modes.py` fails
+when a new strategy has no declared mode.
+
+**Regression:** beta.17 mapped every `LOAD_AUTH` to a "your login worked"
+message, so a wrong password on a `basic` or `form` modem reported that the
+credentials were fine.
+
 ### Post-login endpoints are session lifecycle, not an auth hook
 
 **Decision:** `session.post_login_endpoints` lists paths Core GETs on

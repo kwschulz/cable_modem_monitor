@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -437,8 +438,8 @@ def test_build_model_options_bucket_single_row():
 # │ AUTH_FAILED    │ "invalid_auth"     │ auth_failed    │
 # │ AUTH_LOCKOUT   │ "invalid_auth"     │ auth_lockout   │
 # │ LOAD_ERROR     │ "cannot_connect"   │ load_error     │
-# │ LOAD_AUTH      │ "session_rejected" │ load_auth      │
-# │ LOAD_INTEGRITY │ "session_rejected" │ load_integrity │
+# │ LOAD_AUTH      │ "invalid_auth"     │ load_auth      │
+# │ LOAD_INTEGRITY │ "invalid_auth"     │ load_integrity │
 # │ PARSE_ERROR    │ "parse_failed"     │ parse_error    │
 # │ OK             │ "unknown"          │ unmapped       │
 # │ None           │ "unknown"          │ no_signal      │
@@ -450,8 +451,8 @@ CLASSIFY_ERROR_CASES = [
     (CollectorSignal.AUTH_FAILED,    "invalid_auth",     "auth_failed"),
     (CollectorSignal.AUTH_LOCKOUT,   "invalid_auth",     "auth_lockout"),
     (CollectorSignal.LOAD_ERROR,     "cannot_connect",   "load_error"),
-    (CollectorSignal.LOAD_AUTH,      "session_rejected", "load_auth"),
-    (CollectorSignal.LOAD_INTEGRITY, "session_rejected", "load_integrity"),
+    (CollectorSignal.LOAD_AUTH,      "invalid_auth",     "load_auth"),
+    (CollectorSignal.LOAD_INTEGRITY, "invalid_auth",     "load_integrity"),
     (CollectorSignal.PARSE_ERROR,    "parse_failed",     "parse_error"),
     (CollectorSignal.OK,             "unknown",          "unmapped"),
     (None,                           "unknown",          "no_signal"),
@@ -1216,15 +1217,55 @@ class TestValidationReleasesSession:
 # type stable for callers; only the message the user reads changes.
 
 
-class TestLoadAuthErrorText:
-    """LOAD_AUTH must not be presented as a credential failure."""
+class TestPostLoginKeyIsStrategyDependent:
+    """A post-login 401 only means "session refused" if the login was verified.
 
-    def test_load_auth_key_differs_from_auth_failed(self) -> None:
-        """The two signals mean different things and must not share a message."""
-        assert classify_error(None, CollectorSignal.LOAD_AUTH) != classify_error(None, CollectorSignal.AUTH_FAILED)
+    basic auth never validates a password, and plain form auth accepts
+    any response under HTTP 400, so for those a 401 on the data page is
+    most often the bad password surfacing late. Reporting it as "your
+    password is fine" is what beta.17 got wrong.
+    """
+
+    # fmt: off
+    _CASES = [
+        # (strategy,     auth kwargs,                        expected key,       description)
+        ("basic",        {},                                 "invalid_auth",     "never validates"),
+        ("form",         {"action": "/login.htm"},           "invalid_auth",     "accepts any 2xx/3xx"),
+        ("form_pbkdf2",  {"login_endpoint": "/l",
+                          "pbkdf2_iterations": 1000,
+                          "pbkdf2_key_length": 128},         "session_rejected", "verifies via login_success"),
+        ("hnap",         {"hmac_algorithm": "md5"},          "session_rejected", "verifies via LoginResult"),
+    ]
+    # fmt: on
+
+    @staticmethod
+    def _config(strategy: str, **auth: Any) -> Any:
+        from pydantic import TypeAdapter
+        from solentlabs.cable_modem_monitor_core.models.modem_config.auth import AuthConfig
+
+        config = MagicMock()
+        config.auth = TypeAdapter(AuthConfig).validate_python({"strategy": strategy, **auth})
+        return config
+
+    @pytest.mark.parametrize(("strategy", "auth", "expected", "description"), _CASES, ids=[c[0] for c in _CASES])
+    @pytest.mark.parametrize("signal", [CollectorSignal.LOAD_AUTH, CollectorSignal.LOAD_INTEGRITY])
+    def test_key_follows_auth_strategy(
+        self,
+        signal: CollectorSignal,
+        strategy: str,
+        auth: dict[str, Any],
+        expected: str,
+        description: str,
+    ) -> None:
+        """The displayed key is chosen by whether the strategy verifies its login."""
+        assert classify_error(None, signal, self._config(strategy, **auth)) == expected
+
+    def test_defaults_to_invalid_auth_without_config(self) -> None:
+        """With no modem_config to ask, fall back to the conservative key."""
+        assert classify_error(None, CollectorSignal.LOAD_AUTH) == "invalid_auth"
 
     def test_load_auth_still_raises_permission_error(self) -> None:
-        """The new error key rides on PermissionError, the auth-signal exception type."""
+        """The error key rides on PermissionError, the auth-signal exception type."""
         auth_signals = (
             CollectorSignal.AUTH_FAILED,
             CollectorSignal.AUTH_LOCKOUT,
@@ -1232,7 +1273,7 @@ class TestLoadAuthErrorText:
         )
         result = ModemResult(success=False, signal=CollectorSignal.LOAD_AUTH, error="401 on /data")
 
-        with pytest.raises(PermissionError, match="session_rejected"):
+        with pytest.raises(PermissionError, match="invalid_auth"):
             _raise_validation_failure(result, auth_signals)
 
 

@@ -38,7 +38,6 @@ from solentlabs.cable_modem_monitor_core.models.modem_config.actions import (
     HttpAction,
 )
 from solentlabs.cable_modem_monitor_core.orchestration.auth_failure import (
-    _auth_failure_hint,
     _should_detect_login_pages,
 )
 from solentlabs.cable_modem_monitor_core.orchestration.collector import (
@@ -1233,39 +1232,6 @@ class TestMockServerLogout:
 
         handler = FormAuthHandler(login_path="/login.htm")
         assert handler.is_logout_request("GET", "/logout") is False
-
-
-# ------------------------------------------------------------------
-# Tests — _auth_failure_hint (table-driven)
-# ------------------------------------------------------------------
-
-# ┌───────────┬──────────────────────────────────────────┬──────────────┐
-# │ auth_type │ expected_hint                            │ description  │
-# ├───────────┼──────────────────────────────────────────┼──────────────┤
-# │ "none"    │ "modem requires authentication (check …" │ no-auth      │
-# │ "basic"   │ "credentials rejected"                   │ basic auth   │
-# │ "form"    │ "session expired"                        │ form auth    │
-# └───────────┴──────────────────────────────────────────┴──────────────┘
-#
-# fmt: off
-_AUTH_HINT_CASES = [
-    # (auth_type, expected_substring,               description)
-    ("none",      "modem requires authentication",  "no-auth modem"),
-    ("basic",     "credentials rejected",           "basic auth"),
-    ("form",      "session expired",                "form auth"),
-]
-# fmt: on
-
-
-@pytest.mark.parametrize(
-    "auth_type,expected,desc",
-    _AUTH_HINT_CASES,
-    ids=[c[2] for c in _AUTH_HINT_CASES],
-)
-def test_auth_failure_hint(auth_type: str, expected: str, desc: str) -> None:
-    """_auth_failure_hint: {desc}."""
-    config = _make_config(auth_type=auth_type)
-    assert expected in _auth_failure_hint(config)
 
 
 # ------------------------------------------------------------------

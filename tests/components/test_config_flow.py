@@ -208,6 +208,44 @@ async def test_validation_progress_permission_error():
     assert isinstance(progress.error, PermissionError)
 
 
+# ┌──────────────────┬───────────┬────────────────┬─────────────────────────┐
+# │ exception type   │ message   │ expected key   │ description             │
+# ├──────────────────┼───────────┼────────────────┼─────────────────────────┤
+# │ PermissionError  │ "denied"  │ invalid_auth   │ auth-shaped fallback    │
+# │ RuntimeError     │ "boom"    │ unknown        │ generic fallback        │
+# └──────────────────┴───────────┴────────────────┴─────────────────────────┘
+#
+# fmt: off
+UNCLASSIFIED_ERROR_CASES = [
+    # (exc_type,       message,  expected_key,   desc)
+    (PermissionError, "denied", "invalid_auth", "bare_permission_error"),
+    (RuntimeError,    "boom",   "unknown",      "bare_runtime_error"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    "exc_type,message,expected_key,desc",
+    UNCLASSIFIED_ERROR_CASES,
+    ids=[c[3] for c in UNCLASSIFIED_ERROR_CASES],
+)
+async def test_validation_progress_unclassified_error(exc_type, message, expected_key, desc):
+    """An exception carrying no encoded key falls back by exception type."""
+    # These reach the handler without the "{kind}:{key}:{msg}" encoding,
+    # e.g. protocol detection failing ahead of the collector run.
+    progress = _ValidationProgress()
+
+    async def _raise():
+        raise exc_type(message)
+
+    loop = asyncio.get_event_loop()
+    progress.task = loop.create_task(_raise())
+    await asyncio.sleep(0)
+
+    assert await progress.collect() is False
+    assert progress.error_key == expected_key
+
+
 # -----------------------------------------------------------------------
 # Config flow — Step 1a: Manufacturer selection
 # -----------------------------------------------------------------------
