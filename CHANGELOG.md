@@ -17,6 +17,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   constellation, so the unmappable modulation field is omitted, matching
   the XB7 and XB10). (Related to #111)
 
+### Changed
+
+- **Spec conformance now gates every modem, not just confirmed ones.**
+  The check skipped anything still `awaiting_verification`, so
+  non-canonical output accumulated unseen and then failed at promotion
+  time, mid-confirmation with a contributor waiting. It now runs on
+  every entry, and a new modem must be conformant on the commit that
+  adds it.
+
+### Fixed
+
+- **Six modems published non-canonical modulation values.** The
+  SB8200 (CBN), G54, Hub 5 (F3896LG-VMB), CGA4236, CGA6444VF, and
+  TC4400 passed firmware spellings straight through (`256QAM`,
+  `64QAM`, `qam_256`, `256-QAM`, `16-qam`), which now normalize to
+  canonical form. The TC4400 additionally published an IUC list on its
+  OFDM channel and restated the channel type on its upstream rows;
+  neither names a modulation scheme, so both are omitted. Downstream
+  and upstream `modulation` attributes change value on these modems,
+  and the TC4400's upstream `modulation` attribute goes away.
+
+- **Speculative `TDMA` channel-type mappings removed.** The MB7621,
+  SB6190, and CODA56 each mapped an upstream `TDMA` value that appears
+  nowhere in their captures, and the MB7621 and SB6190 mapped it to
+  `tdma`, which is not one of the four allowed channel types. The
+  CM1100 keeps its mapping (the value appears in that firmware's own
+  page source), as do the Technicolor .jst modems, whose shared
+  three-way map is documented domain knowledge about that platform.
+
+- **OFDM channels no longer leak non-modulation strings.** The parser
+  stripped an enumerated list of known channel-type restatements from
+  OFDM/OFDMA channels, which missed profile IDs and IUC lists. It now
+  strips any value that names no real modulation scheme, so real PLC
+  values like `QAM4096` still survive.
+
+- **Spec conformance no longer flags unlocked channels for a missing
+  `channel_type`.** The unlocked-channel nulling rule strips every key
+  except `channel_number` and `lock_status`, so the identity requirement
+  cannot apply there, but the validator checked it anyway. The false
+  failure had never fired because no confirmed modem's golden carries an
+  unlocked channel; the first one to capture a not-locked channel would
+  have failed the gate mid-confirmation. PARSING_SPEC is reconciled to
+  match, and the positive fixture now models real coordinator output
+  instead of an assumed shape.
+
 ## [3.14.0-beta.16] - 2026-07-24
 
 ### Added

@@ -3,16 +3,13 @@
 Auto-parametrized by conftest.py:
 - ``modem_yaml_path``: every modem*.yaml validates through Pydantic
 - ``modem_test_case``: HAR + golden file pairs run full orchestrator cycle
-  AND validate the committed golden against PARSING_SPEC contracts when
-  the modem's ``status`` is ``confirmed``
+  AND validate the committed golden against PARSING_SPEC contracts
 
 No modem-specific test code here. Adding a modem = adding files.
 
-The spec-conformance gate enforces PARSING_SPEC field contracts on
-``status: confirmed`` modems only. ``awaiting_verification`` and
-``unsupported`` modems are exempt — drift is expected during onboarding
-and is allowed until the modem is promoted. Promotion to ``confirmed``
-requires zero violations.
+The spec-conformance gate enforces PARSING_SPEC field contracts on every
+modem regardless of ``status:``. A new entry must be conformant on the
+commit that adds it.
 """
 
 from __future__ import annotations
@@ -20,7 +17,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import yaml
 from solentlabs.cable_modem_monitor_core.config_loader import load_modem_config
 from solentlabs.cable_modem_monitor_core.spec_conformance import validate_modem_data
 from solentlabs.cable_modem_monitor_core.test_harness import (
@@ -44,17 +40,15 @@ def test_modem_har_replay(modem_test_case: ModemTestCase) -> None:
     )
 
 
-def test_confirmed_modem_golden_spec_conformance(modem_test_case: ModemTestCase) -> None:
-    """Confirmed modems' goldens conform to PARSING_SPEC field contracts.
+def test_modem_golden_spec_conformance(modem_test_case: ModemTestCase) -> None:
+    """Every modem's golden conforms to PARSING_SPEC field contracts.
 
-    Awaiting_verification and unsupported modems are skipped: drift is
-    allowed during onboarding. The bar is enforced at promotion time —
-    flipping ``status:`` to ``confirmed`` requires the golden to already
-    pass every rule the validator enforces.
+    Runs regardless of ``status:``. The gate used to skip anything not
+    yet ``confirmed``, which let drift accumulate unseen in onboarding
+    entries and then surface as a surprise failure at promotion time,
+    mid-confirmation with a contributor waiting (see #111). Catching it
+    on the commit that introduces it is the whole point.
     """
-    config = yaml.safe_load(modem_test_case.modem_config_path.read_text(encoding="utf-8"))
-    if config.get("status") != "confirmed":
-        return
     if not modem_test_case.golden_path.is_file():
         return
 
@@ -64,10 +58,10 @@ def test_confirmed_modem_golden_spec_conformance(modem_test_case: ModemTestCase)
     if violations:
         details = "\n".join(f"  - {v.path} ({v.rule}): {v.value!r} — {v.message}" for v in violations)
         msg = (
-            f"{modem_test_case.name}: confirmed modem has "
-            f"{len(violations)} spec-conformance violation(s):\n{details}\n\n"
-            f"Either fix the parser/golden, or downgrade modem.yaml "
-            f"status to awaiting_verification."
+            f"{modem_test_case.name}: {len(violations)} spec-conformance "
+            f"violation(s):\n{details}\n\n"
+            f"Fix the parser and regenerate the golden. Downgrading "
+            f"modem.yaml status no longer exempts an entry."
         )
         raise AssertionError(msg)
 

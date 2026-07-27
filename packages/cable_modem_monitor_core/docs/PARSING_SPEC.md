@@ -634,23 +634,27 @@ modem actually publishes — it does not fabricate fields the modem
 doesn't report.
 
 - **Identity fields** (`channel_number`, `channel_id`, `channel_type`)
-  are universally required. They drive entity identity and must be
-  canonical on every channel.
+  are required on every *locked* channel. They drive entity identity
+  and must be canonical there. Unlocked channels are the one exception:
+  the nulling rule below removes `channel_type` along with everything
+  else, so the requirement does not apply to them.
 - **All other fields** in the per-type tables below are *if-published*:
   when the key is present and the value is non-null, it must conform to
   the contract; when the key is absent or the value is null, no
   violation. This covers modems that don't expose a column for the
   field (e.g., older DOCSIS 3.0 status pages without lock state) and
-  the unlocked-channel nulling rule (unlocked channels carry only
-  `channel_number` and `lock_status`; other fields null).
+  the unlocked-channel nulling rule (unlocked channels keep only
+  `channel_number` and `lock_status`; every other key is removed, not
+  set to null).
 
 Parser regressions that silently drop a field are caught by parser ↔
 golden self-consistency, not by spec conformance.
 
 #### Identity fields (all channel types)
 
-Every channel dict contains these fields. They are used for entity
-identity, position tracking, and lock status derivation.
+Every locked channel dict contains these fields. They are used for
+entity identity, position tracking, and lock status derivation. An
+unlocked channel keeps only `channel_number` and `lock_status`.
 
 | Field | Type | Notes |
 | ----- | ---- | ----- |

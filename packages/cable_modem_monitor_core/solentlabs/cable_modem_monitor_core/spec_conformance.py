@@ -181,8 +181,14 @@ def validate_modem_data(data: dict[str, Any], modem: str) -> list[Violation]:
 def _validate_channel(channel: dict[str, Any], modem: str, path_prefix: str) -> list[Violation]:
     out: list[Violation] = []
 
+    lock_status = channel.get("lock_status")
+
+    # The unlocked-channel nulling rule strips every key except
+    # channel_number and lock_status, channel_type included, so the
+    # identity requirement cannot apply to an unlocked channel.
+    # PARSING_SPEC.md § Field publication is per-modem.
     channel_type = channel.get("channel_type")
-    if channel_type not in ALLOWED_CHANNEL_TYPES:
+    if lock_status != "not_locked" and channel_type not in ALLOWED_CHANNEL_TYPES:
         out.append(
             Violation(
                 modem=modem,
@@ -193,7 +199,6 @@ def _validate_channel(channel: dict[str, Any], modem: str, path_prefix: str) -> 
             )
         )
 
-    lock_status = channel.get("lock_status")
     if lock_status is not None and lock_status not in ALLOWED_LOCK_STATUSES:
         out.append(
             Violation(

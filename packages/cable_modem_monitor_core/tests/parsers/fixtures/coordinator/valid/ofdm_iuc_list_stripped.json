@@ -1,0 +1,53 @@
+{
+  "_description": "OFDM/OFDMA modulation that names no real modulation scheme (TC4400 IUC lists) is stripped, same as the generic channel-type restatements; canonical PLC values survive",
+  "_json": {
+    "/api/downstream": {
+      "channels": [
+        {"id": 1, "type": "SC-QAM", "mod": "QAM256"},
+        {"id": 33, "type": "OFDM", "mod": "0,1,3,4"},
+        {"id": 34, "type": "OFDM", "mod": "QAM4096"}
+      ]
+    },
+    "/api/upstream": {
+      "channels": [
+        {"id": 5, "type": "OFDMA", "mod": "3, 4, 5, 6, 9, 10, 11, 12, 13"}
+      ]
+    }
+  },
+  "_parser_config": {
+    "downstream": {
+      "format": "json",
+      "resource": "/api/downstream",
+      "array_path": "channels",
+      "fields": [
+        {"key": "id", "field": "channel_id", "type": "integer"},
+        {"key": "type", "field": "channel_type", "type": "string", "map": {"OFDM": "ofdm", "SC-QAM": "qam"}},
+        {"key": "mod", "field": "modulation", "type": "modulation"}
+      ]
+    },
+    "upstream": {
+      "format": "json",
+      "resource": "/api/upstream",
+      "array_path": "channels",
+      "fields": [
+        {"key": "id", "field": "channel_id", "type": "integer"},
+        {"key": "type", "field": "channel_type", "type": "string", "map": {"OFDMA": "ofdma", "SC-QAM": "qam"}},
+        {"key": "mod", "field": "modulation", "type": "modulation"}
+      ]
+    }
+  },
+  "_expected": {
+    "downstream": [
+      {"channel_id": 1, "channel_number": 1, "channel_type": "qam", "modulation": "QAM256"},
+      {"channel_id": 33, "channel_number": 2, "channel_type": "ofdm"},
+      {"channel_id": 34, "channel_number": 3, "channel_type": "ofdm", "modulation": "QAM4096"}
+    ],
+    "upstream": [
+      {"channel_id": 5, "channel_number": 1, "channel_type": "ofdma"}
+    ],
+    "system_info": {
+      "downstream_channel_count": 3,
+      "upstream_channel_count": 1
+    }
+  }
+}

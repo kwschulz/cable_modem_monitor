@@ -20,7 +20,7 @@ from typing import Any, TypeVar
 
 from ..models.parser_config.common import ChannelTypeDerive
 from ..models.parser_config.config import ParserConfig
-from ..spec_conformance import derive_channel_type_from_modulation
+from ..spec_conformance import canonicalize_modulation, derive_channel_type_from_modulation
 from .diagnostics import AnchorCount, ParseDiagnostics
 from .registries import CHANNEL_PARSERS, SYSINFO_PARSERS
 
@@ -362,27 +362,30 @@ _OFDM_STRIP_FIELDS = frozenset({"is_ofdm", "symbol_rate"})
 # Channel types subject to OFDM field stripping.
 _OFDM_TYPES = frozenset({"ofdm", "ofdma"})
 
-# Generic modulation labels that restate channel type rather than
-# reporting an actual modulation scheme. Stripped from OFDM/OFDMA.
-# Real PLC modulation values (e.g. "QAM4096") are preserved.
-# See PARSING_SPEC.md § Output Contract.
-_OFDM_GENERIC_MODULATION = frozenset({"Other", "OFDM", "OFDM PLC", "OFDMA"})
-
 
 def _strip_ofdm_fields(channels: list[dict[str, Any]]) -> None:
     """Strip fields that don't belong on OFDM/OFDMA channels (in-place).
 
     ``is_ofdm`` is redundant with ``channel_type``. ``symbol_rate`` is
-    not applicable to OFDM/OFDMA. Generic modulation labels that
-    restate the channel type are stripped — real PLC modulation values
-    (e.g. ``"QAM4096"``) are preserved.
+    not applicable to OFDM/OFDMA. A modulation value that names no real
+    scheme is stripped — real PLC modulation values (e.g. ``"QAM4096"``)
+    are preserved.
     """
     for channel in channels:
         if channel.get("channel_type") in _OFDM_TYPES:
             for field in _OFDM_STRIP_FIELDS:
                 channel.pop(field, None)
+
+            # The OFDM modulation column carries several kinds of
+            # non-modulation string across the fleet: channel-type
+            # restatements ("OFDM", "OFDMA", "OFDM PLC", "Other"),
+            # DOCSIS 3.1 profile IDs, and IUC lists ("0,1,3,4").
+            # canonicalize_modulation returns None for all of them and a
+            # canonical value for anything real, so it decides the whole
+            # class rather than an enumerated list of known offenders.
+            # See PARSING_SPEC.md § Output Contract.
             mod = channel.get("modulation")
-            if mod in _OFDM_GENERIC_MODULATION:
+            if mod is not None and canonicalize_modulation(mod) is None:
                 del channel["modulation"]
 
 

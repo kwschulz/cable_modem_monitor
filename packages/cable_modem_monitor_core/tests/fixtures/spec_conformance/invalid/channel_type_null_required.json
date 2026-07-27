@@ -1,5 +1,5 @@
 {
-  "_description": "channel_type is universally required — null is a violation even though other fields aren't",
+  "_description": "channel_type is required on every locked channel: null is a violation even though other fields aren't. The unlocked counterpart is valid/clean_unlocked_channel_nulled.json",
   "_data": {
     "downstream": [
       {

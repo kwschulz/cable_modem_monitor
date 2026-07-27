@@ -23,7 +23,7 @@ downstream:
           unit: "dB"
         - key: FFT
           field: modulation
-          type: string
+          type: modulation
         - key: locked
           field: lock_status
           type: lock_status
@@ -76,7 +76,7 @@ upstream:
           unit: "dBmV"
         - key: FFT
           field: modulation
-          type: string
+          type: modulation
     - array_path: "data.ofdma_upstream"
       channel_type:
         fixed: ofdma
@@ -94,7 +94,7 @@ upstream:
           unit: "dBmV"
         - key: FFT
           field: modulation
-          type: string
+          type: modulation
 system_info:
   sources:
     - format: json

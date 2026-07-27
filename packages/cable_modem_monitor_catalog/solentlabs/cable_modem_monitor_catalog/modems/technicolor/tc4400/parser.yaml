@@ -52,7 +52,7 @@ downstream:
           unit: dBmV
         - index: 9
           field: modulation
-          type: string
+          type: modulation
         - index: 10
           field: unerrored_codewords
           type: integer
@@ -102,9 +102,11 @@ upstream:
           field: power
           type: float
           unit: dBmV
-        - index: 8
-          field: modulation
-          type: string
+        # Column 8 (Modulation) is not published upstream. It carries no
+        # modulation value on this firmware: SC-QAM rows restate the
+        # channel type ("ATDMA") and OFDMA rows carry an IUC list, both
+        # of which PARSING_SPEC requires the parser to omit. channel_type
+        # comes from column 3, so nothing depends on it.
 
 system_info:
   sources:

@@ -9,13 +9,13 @@ files; this document explains the choices that shaped them.
 | Section | What it covers |
 |---------|----------------|
 | [Package Boundaries](#package-boundaries) | Runtime package split, dependency direction, where each piece lives |
-| [Core Schema Model](#core-schema-model) | What enters Core's schema vs what stays user-side; catalog stores source-faithful strings, display normalizes; derived and dynamic fields, health as its own structure |
+| [Core Schema Model](#core-schema-model) | What enters Core's schema vs what stays user-side; catalog stores source-faithful strings and maps only observed values, display normalizes; derived and dynamic fields, health as its own structure |
 | [Transport and Constraint Model](#transport-and-constraint-model) | Transport as protocol identifier, implicit capabilities, shared protocol primitives, config as parameters |
 | [Auth Architecture](#auth-architecture) | Strategy discreteness, session lifecycle, failure logging, credential reconfiguration as reconstruction |
 | [Parsing Architecture](#parsing-architecture) | Three roles, per-section format selection, parser.py as escape hatch |
 | [Session and Action Model](#session-and-action-model) | Signal/policy separation, session reuse, restart-only actions |
 | [Recovery Architecture](#recovery-architecture) | Restart vs recovery, generic timing, reboot-signal vote, observer callback |
-| [Testing Strategy](#testing-strategy) | HAR replay, greenfield from specs, fresh-context capture |
+| [Testing Strategy](#testing-strategy) | HAR replay, conformance gates every modem, greenfield from specs, fresh-context capture |
 | [Onboarding](#onboarding) | MCP for deterministic steps, catalog_tools owns the spec, inference vs assembly, no fallback |
 | [Config Flow](#config-flow) | Cross-directory grouping, variant label design |
 | [Extension Model](#extension-model) | How to add modems, formats, parsers, auth strategies, transports |
@@ -291,6 +291,33 @@ evidence the fleet actually exhibits.
   readability. The catalog never does.
 - Intake and review must not "fix" styling inconsistencies between
   entries; matching the hardware's own output is the requirement.
+
+---
+
+### Catalog maps only values its own capture shows
+
+**Decision:** A `map:` block in parser.yaml enumerates values observed
+in that modem's own HAR. Anticipatory entries for values the capture
+does not contain are not added, and existing ones are removed when
+found.
+
+**Rationale:** An unobserved mapping is a guess about firmware nobody has
+seen, and it is indistinguishable from evidence once committed. The
+guess is also silently wrong-able: `TDMA` was mapped to `atdma` on
+three modems and to `ofdma` on four, and the first group had no
+capture supporting either target. With 40+ HARs on hand, "we have not
+seen it" is a conclusion, not a gap to paper over.
+
+**Constrains:**
+
+- The exception is documented platform knowledge shared across a
+  firmware family, where a sibling's capture supplies the evidence and
+  a spec or journal entry records the reasoning. The Technicolor
+  `.jst` three-way upstream map is the standing example.
+- Where a value genuinely has not been seen, leave it unmapped and let
+  it surface. A field-level `map:` passes unmapped values through, so
+  an unknown string reaches output rather than being silently
+  mislabeled, which is the signal that earns a real capture.
 
 ---
 
@@ -1130,6 +1157,33 @@ retested (regression firewall).
 
 **Constrains:** Adding a modem requires a HAR capture and a reviewed
 golden file. No test code in Catalog — only data files.
+
+### Spec conformance gates every modem, not just confirmed ones
+
+**Decision:** `test_modem_golden_spec_conformance` validates every
+committed golden against PARSING_SPEC field contracts regardless of
+`status:`. The earlier exemption for `awaiting_verification` and
+`unsupported` entries is removed.
+
+**Rationale:** The exemption made the check a promotion gate rather than a
+regression gate: it fired once, at the moment a modem was declared
+ready. Drift accumulated invisibly in onboarding entries and then
+surfaced as a CI failure mid-confirmation, with a contributor waiting
+— twice, on the XB7 (#107) and the XB6 (#111). Six entries had
+accumulated non-canonical modulation output by the time the second one
+hit. Catching a violation on the commit that introduces it costs the
+author minutes; catching it at promotion costs a contributor days.
+
+**Constrains:**
+
+- A new catalog entry must be conformant on the commit that adds it.
+  Landing drift and cleaning it up at confirmation time is no longer
+  available, and downgrading `status:` no longer exempts an entry.
+- Contributor PRs can now fail on a conformance rule during intake.
+  The failure message names the field, the rule, and the value, and
+  directs to the parser rather than the golden.
+
+---
 
 ### Greenfield from specs, not migration from prior versions
 

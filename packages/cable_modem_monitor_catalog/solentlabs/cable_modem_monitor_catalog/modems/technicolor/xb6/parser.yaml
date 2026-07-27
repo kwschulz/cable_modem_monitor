@@ -59,8 +59,8 @@ upstream:
   # type field, so the firmware renders the SC-QAM fallback "TDMA" for
   # OFDMA channels. Read channel_type directly from the Channel Type HTML
   # row; "TDMA" maps to "ofdma" here because of that firmware convention.
-  # The value set is the .jst platform's, observed across the XB6 and XB7
-  # captures.
+  # The three-way map is the .jst platform's documented value set, shared
+  # with the XB7/XB8/XB10 (journal 2026-06-02).
   #
   # Modulation is not published upstream: the firmware renders a bare
   # "QAM" with no constellation order, which PARSING_SPEC requires the

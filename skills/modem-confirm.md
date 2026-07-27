@@ -21,11 +21,11 @@ Key requirements that are easy to miss:
 - Channel arrays use compact rendering: one JSON object per line, no
   internal line breaks. All other objects use standard 2-space indent.
 - Status flips to `confirmed`, not `verified` or any other value.
-- **Run catalog tests (Step 15a) after flipping status, before
-  committing.** `test_confirmed_modem_golden_spec_conformance` only
-  fires for confirmed modems — this is the first time it runs for
-  this entry and it can catch parser violations that `test_modem_har_replay`
-  doesn't check. Fix any failures before proceeding.
+- **Run catalog tests (Step 15a) before committing.** This is ordinary
+  verification, not a promotion gate:
+  `test_modem_golden_spec_conformance` covers every modem regardless of
+  status, so flipping to `confirmed` activates nothing new. A failure
+  means this session's edits broke something. Fix it before proceeding.
 - Commit message follows the exact shape in Step 15, including the
   hardware summary line and `Related to #<issue>` (never `Fixes` or
   `Closes`).

@@ -516,20 +516,21 @@ must be verified independently.
 
 ### Step 15a: Run Catalog Tests
 
-After flipping status, run the full catalog test suite before
-committing:
+Run the full catalog test suite before committing:
 
 ```bash
 .venv/bin/python -m pytest packages/cable_modem_monitor_catalog/tests/ --no-header -q
 ```
 
-`test_confirmed_modem_golden_spec_conformance` only fires for confirmed
-modems, so this is the first time it runs for this entry. A parser
-that passed `test_modem_har_replay` during onboarding can still fail
-the conformance gate here — the two tests check different things.
+This is ordinary pre-commit verification, not a promotion gate. Every
+test here already ran on the commit that added the entry:
+`test_modem_golden_spec_conformance` covers every modem regardless of
+`status:`, so flipping to `confirmed` activates nothing new. A failure
+means this step's edits broke something, not that latent drift surfaced.
+
 Fix any failures before proceeding to Step 16. If the golden needs
-updating after a parser fix, regenerate with the actual output from
-the failing test run and re-run until clean.
+updating after a parser fix, promote the `modem.actual.json` the
+failing replay writes next to the HAR and re-run until clean.
 
 ### Step 16: Commit and Reply
 
