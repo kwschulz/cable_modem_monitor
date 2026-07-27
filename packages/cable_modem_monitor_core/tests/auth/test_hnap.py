@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+from solentlabs.cable_modem_monitor_core.auth.base import LoginLockoutError
 from solentlabs.cable_modem_monitor_core.auth.hnap import HnapAuthManager
 from solentlabs.cable_modem_monitor_core.models.modem_config.auth import HnapAuth
 from solentlabs.cable_modem_monitor_core.protocol.hnap import (
@@ -184,16 +185,16 @@ class TestSuccessfulLogin:
 # │ login_result     │ password │ expected_error_substring        │ description               │
 # ├──────────────────┼──────────┼─────────────────────────────────┼───────────────────────────┤
 # │ "OK"             │ wrong    │ incorrect username or password  │ wrong password            │
-# │ "LOCKUP"         │ correct  │ LOCKUP                          │ anti-brute-force lockup   │
-# │ "REBOOT"         │ correct  │ REBOOT                          │ anti-brute-force reboot   │
 # └──────────────────┴──────────┴─────────────────────────────────┴───────────────────────────┘
+#
+# LOCKUP/REBOOT are not failure *results* — they raise LoginLockoutError
+# so the orchestrator can distinguish firmware lockout from a rejected
+# credential (#117). Covered separately below.
 #
 # fmt: off
 LOGIN_FAILURE_CASES = [
     # (login_result, password,    error_substring,               description)
     ("OK",           "wrong_pwd", "incorrect username or password", "wrong password"),
-    ("LOCKUP",       "pw",        "LOCKUP",                        "anti-brute-force lockup"),
-    ("REBOOT",       "pw",        "REBOOT",                        "anti-brute-force reboot"),
 ]
 # fmt: on
 
@@ -220,6 +221,16 @@ def test_login_failure(
     assert result.success is False
     assert error_substring in result.error
     assert result.response is not None
+
+
+@pytest.mark.parametrize("login_result", ["LOCKUP", "REBOOT"])
+def test_firmware_lockout_raises(hnap_server: str, login_result: str) -> None:
+    """LOCKUP/REBOOT raise rather than returning a failed AuthResult (#117)."""
+    _HNAPHandler.login_result = login_result
+    manager = _make_manager()
+
+    with pytest.raises(LoginLockoutError, match=login_result):
+        manager.authenticate(requests.Session(), hnap_server, "admin", "pw")
 
 
 # ---------------------------------------------------------------------------

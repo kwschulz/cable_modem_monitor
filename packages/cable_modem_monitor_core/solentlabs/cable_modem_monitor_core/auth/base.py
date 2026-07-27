@@ -15,6 +15,17 @@ from dataclasses import dataclass, field
 import requests
 
 
+class LoginLockoutError(Exception):
+    """Firmware anti-brute-force triggered.
+
+    Raised by HNAP auth strategies when the modem responds with
+    ``LoginResult: "LOCKUP"`` or ``"REBOOT"``. The orchestrator
+    catches this and applies backoff policy. Defined here rather than
+    in orchestration so the auth layer can raise it without importing
+    upward.
+    """
+
+
 @dataclass
 class AuthContext:
     """Typed downstream state from auth managers.

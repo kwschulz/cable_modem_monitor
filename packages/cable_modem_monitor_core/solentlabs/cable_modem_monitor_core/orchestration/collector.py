@@ -16,7 +16,7 @@ from typing import Any, Final
 
 import requests
 
-from ..auth.base import AuthContext, AuthResult, BaseAuthManager
+from ..auth.base import AuthContext, AuthResult, BaseAuthManager, LoginLockoutError
 from ..auth.factory import create_auth_manager
 from ..connectivity import create_session
 from ..loaders.fetch_list import collect_fetch_targets
@@ -63,15 +63,6 @@ from .signals import CollectorSignal
 _logger = logging.getLogger(__name__)
 _LOGOUT_LOG_LEVEL: Final[int] = logging.DEBUG
 _DEFAULT_AUTH_LOG_LEVEL: Final[int] = logging.DEBUG
-
-
-class LoginLockoutError(Exception):
-    """Firmware anti-brute-force triggered.
-
-    Raised by HNAP auth strategies when the modem responds with
-    ``LoginResult: "LOCKUP"`` or ``"REBOOT"``. The orchestrator
-    catches this and applies backoff policy.
-    """
 
 
 class ModemDataCollector:

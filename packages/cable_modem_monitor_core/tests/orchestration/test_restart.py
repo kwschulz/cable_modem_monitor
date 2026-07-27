@@ -19,6 +19,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from solentlabs.cable_modem_monitor_core.auth.base import LoginLockoutError
 from solentlabs.cable_modem_monitor_core.models.modem_config.actions import (
     HttpAction,
 )
@@ -138,6 +139,21 @@ def test_success_authenticates_and_executes_action() -> None:
 def test_auth_failure_returns_command_failed() -> None:
     config = _config()
     collector = _collector(auth_success=False)
+    recovery = _recovery(config, collector)
+
+    result = run_restart(collector, config, recovery)
+
+    assert result.success is False
+    assert result.error == "command_failed"
+    assert recovery.active is False
+
+
+def test_auth_lockout_returns_command_failed() -> None:
+    """HNAP firmware lockout raises rather than returning; restart still
+    reports the single ``command_failed`` token (#117)."""
+    config = _config()
+    collector = _collector()
+    collector.authenticate.side_effect = LoginLockoutError("LOCKUP")
     recovery = _recovery(config, collector)
 
     result = run_restart(collector, config, recovery)

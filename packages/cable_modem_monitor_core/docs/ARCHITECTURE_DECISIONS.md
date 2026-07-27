@@ -90,16 +90,18 @@ rules at face value and cite this entry for the two declined ones.
 ### Test harness lives in Core, not Catalog
 
 **Decision:** Core owns the test harness (HAR replay framework, golden
-file comparison, schema validators). Catalog contains only data files
-(HAR captures, golden files).
+file comparison, schema validators). Catalog holds per-modem data
+files. Catalog's own suite is fleet-wide — it auto-discovers every
+modem rather than naming any — so no test code is per-modem.
 
 **Rationale:** Catalog contributors cannot accidentally modify test
-assertions or loader logic. Catalog's CI installs Core and runs Core's
-test suite pointed at catalog files. Adding a modem never requires
-writing test code.
+assertions or loader logic. Catalog's CI installs Core and runs both
+Core's harness against catalog files and its own fleet checks. Adding
+a modem never requires writing test code.
 
-**Constrains:** Test assertions cannot be customized per-modem.
-Strategy changes are validated across all modems automatically.
+**Constrains:** Test assertions cannot be customized per-modem, and a
+catalog test may not name a specific modem. Strategy changes are
+validated across all modems automatically.
 
 ### Test harness lives in Core, not catalog_tools
 
@@ -187,12 +189,14 @@ decision update.
 **Decision:** `pydantic>=2.0` is declared in Core's
 `[project] dependencies`, not gated behind an optional extra.
 
-**Rationale:** Core's `models/` package defines `ModemConfig`,
-`ParserConfig`, and `ModemData` as Pydantic `BaseModel` subclasses.
+**Rationale:** Core's `models/` package defines the config schemas —
+`ModemConfig` and `ParserConfig` — as Pydantic `BaseModel` subclasses.
 They are imported by runtime consumers —
 `core/validation/cross_file.py`, `core/orchestration/*`,
 `core/test_harness/runner.py`. A clean non-HA install of Core cannot
-function without pydantic.
+function without pydantic. `ModemData` is a `TypedDict`, not a model:
+it is parser output, validated by the conformance gate rather than at
+construction.
 
 Prior to the v3.14 carve-out, pydantic was mis-declared as
 `[project.optional-dependencies] mcp = ["pydantic>=2.0"]`. The bug
@@ -321,14 +325,32 @@ seen it" is a conclusion, not a gap to paper over.
 
 ---
 
-### `last_boot_time` is derived in Core
+### Time-anchored derivations belong to the consumer, not Core
 
-**Decision:** Core computes `last_boot_time` from uptime when the modem
-does not report a boot timestamp directly.
+**Decision:** Core reports `system_uptime` as the modem gives it and
+computes no boot timestamp. The HA adapter owns Last Boot Time,
+deriving it from `system_uptime` where the modem reports one and from
+orchestrator counter-reset evidence (`stats_last_reset`) where it does
+not. See ENTITY_MODEL_SPEC § Boot-time source normalization.
 
-**Rationale:** Transparent to consumers — the same field is present
-whether the firmware provides it or Core calculates it. Consumers never
-branch on which modem they are talking to.
+**Rationale:** A timestamp needs a clock to anchor it and somewhere to
+persist it. Core has neither: it is stateless per poll, and the only
+clock available to it is the modem's, whose timezone and sync state
+are unknowable. The consumer has both, so the derivation lives there.
+
+Deriving per poll would be wrong in any case. `now - uptime` drifts a
+few seconds each poll, writing a new recorder row for a value that
+changes only on reboot. The adapter replaces the held value only on
+reboot evidence: an uptime decrease, unambiguous because uptime is
+monotonic within a boot, or a shift beyond a jitter tolerance.
+
+**Constrains:** This is the rule for any field needing a clock or
+history to compute, and it marks the limit of § Core's schema tracks
+fleet-observed metrics. That entry admits derived fields that
+re-present a fleet datum; re-presentation is stateless arithmetic on a
+single poll, anchoring is not. If a modem ever reports a native boot
+time, subtract it from that modem's own reported current time so its
+clock cancels.
 
 ---
 
@@ -400,9 +422,21 @@ actual parser output. The parser output is the single source of truth.
 Absent capability = absent entity — no greyed-out buttons, no "not
 supported" placeholders.
 
-**Constrains:** The only way to declare a capability is to implement
-the extraction. The exception is `actions.restart` in modem.yaml, which
-declares restart capability (a modem command, not parsed data).
+**Constrains:** For parsed data, the only way to declare a capability
+is to implement the extraction. Two entity groups sit outside parser
+output and are gated differently:
+
+- `actions.restart` in modem.yaml declares restart capability — a
+  modem command, not parsed data.
+- The ICMP and HEAD latency sensors follow probe results held on the
+  config entry, not a catalog declaration. `health.supports_icmp`
+  seeds a default and `health.supports_head` sets a ceiling, but setup
+  probes the network and the probe decides. ICMP reachability is a
+  property of the network rather than the modem, so it cannot be
+  declared in the catalog at all.
+
+`actions.logout` is session lifecycle, not a capability; it creates no
+entity.
 
 ---
 
@@ -449,11 +483,11 @@ See MODEM_YAML_SPEC § Principles.
 ### Discrete strategies, not composable primitives
 
 **Decision:** Auth is a discriminated union of self-contained strategy
-types (`none`, `basic`, `form`, `form_nonce`, `url_token`, `hnap`,
-`form_pbkdf2`, `form_sjcl`, `form_cbn`). Each strategy has a
-per-strategy dataclass and a single audited implementation. The
-alternative — a toolkit of composable primitives (encoding, CSRF,
-nonce generation) that you mix and match per-modem — was rejected.
+types; `_AUTH_MODELS` in `models/modem_config/auth.py` is the
+authoritative list. Each strategy has a per-strategy model and a single
+audited implementation. The alternative — a toolkit of composable
+primitives (encoding, CSRF, nonce generation) that you mix and match
+per-modem — was rejected.
 
 **Rationale:** The boundary between "separate strategy" and "config
 flag" is structural behavior — how the auth protocol works. `form_nonce`
@@ -890,12 +924,17 @@ independent test data and independent confirmation status.
 ### Coordinator parser registry
 
 **Decision:** Section type maps to parser function through a dict, not
-an isinstance chain. Unimplemented formats are registered stubs that
-raise `NotImplementedError` naming the missing parser.
+an isinstance chain. The dict is derived from the format-model lists
+rather than hand-maintained, so a format registered without a wrapper
+fails at import. A section type with no entry raises
+`NotImplementedError` naming the model class, at the lookup site.
 
-**Rationale:** Adding a format is one registry entry plus the parser.
-The stubs make an unsupported format fail with a useful name instead of
-falling through to a generic error.
+**Rationale:** Adding a format is one wrapper entry plus the parser.
+Deriving the dict from the model lists means the two cannot drift: the
+comprehension indexes the wrapper table by `format_tag`, so a missing
+wrapper is an import-time failure rather than something discovered on
+the first modem that uses the format. Both failure paths name what is
+missing instead of falling through to a generic error.
 
 ---
 
@@ -936,8 +975,8 @@ on reused session → clear and retry once).
 ### Two modem-side actions only
 
 **Decision:** Two actions: restart (user-triggered) and logout
-(system-triggered). Both share the same action schema with two type
-discriminators: `http` and `hnap`.
+(system-triggered). Both draw on the same `ActionConfig` union, which
+carries one type discriminator per transport.
 
 **Rationale:** The integration's purpose is read-only monitoring.
 Restart is the sole state-changing action — a security and
@@ -950,14 +989,32 @@ expanding the action model. This is intentional.
 
 ---
 
-### Health probe order: ICMP, then HEAD, then data poll
+### Health probes are independent layers, not an escalation chain
 
-**Decision:** Use the lightest probe the modem supports, escalating
-only when the lighter one is unavailable.
+**Decision:** ICMP, HEAD, and TCP each measure a different layer. All
+run when the modem supports them; none is a fallback for another.
+Status comes from ICMP + TCP. HEAD measures latency only and never
+changes status. A recent successful collection skips HEAD and TCP,
+which would only re-prove what it already showed. For probe order and
+per-configuration outcomes, see ORCHESTRATION_SPEC § Probe
+Configurations Matrix.
 
-**Rationale:** Never hammer a modem's web server to answer a question a
-ping can answer. Consumer modem HTTP stacks are weak, and health runs
-far more often than parsing.
+**Rationale:** One HTTP-latency number was averaging two different
+things: the modem's cached response and its handler execution. The same
+modem read ~5ms or ~100ms depending on the network path, so the number
+meant something different from one poll to the next (wire-traced,
+2026-04-29). Separate probes keep them apart. They also make
+misconfiguration readable — a reachable IP with a listening socket but
+the wrong firmware now looks different from a dead modem. Escalation
+would not do this: a passing ICMP says nothing about whether the web
+server is listening.
+
+**Constrains:** Never hammer a modem's web server for something a
+cheaper probe answers. That rule lives in the skip gate and the
+`supports_head` guard, not in probe ordering. Two things look like bugs
+and are not: HEAD runs before TCP so a single-threaded modem gets an
+uncontested connection, and a failed ICMP forces TCP past the skip gate
+so stale evidence cannot outvote a live probe (UC-59a).
 
 ---
 
@@ -1141,7 +1198,7 @@ code or tests is not a durable record.
 
 ### HAR replay as integration tests
 
-**Decision:** Each modem's `tests/` directory contains HAR captures
+**Decision:** Each modem's `test_data/` directory contains HAR captures
 (pipeline input) and expected output golden files (assertions). The
 test harness replays each HAR through the `HARMockServer`, runs the full
 pipeline, and compares output against the golden file.
@@ -1153,7 +1210,7 @@ implementation changes, all modems using that format are automatically
 retested (regression firewall).
 
 **Constrains:** Adding a modem requires a HAR capture and a reviewed
-golden file. No test code in Catalog — only data files.
+golden file, and no per-modem test code.
 
 ### Spec conformance gates every modem, not just confirmed ones
 
@@ -1295,7 +1352,10 @@ Add a directory under `modems/{manufacturer}/{model}/` with:
 - `modem.yaml` — identity, auth, session, hardware, metadata
 - `parser.yaml` — declarative extraction config
 - `parser.py` — optional post-processor (only if needed)
-- `tests/modem.har` + `tests/modem.expected.json` — HAR and golden file
+- `test_data/modem.har` + `test_data/modem.expected.json` — HAR and
+  golden file
+- `test_data/modem.verified.json` — required to reach `confirmed`
+  status; see MODEM_DIRECTORY_SPEC § Verification Status
 
 No registration. No changes to Core or Catalog package code. Drop-in.
 
@@ -1397,13 +1457,12 @@ never guessed at runtime. The dynamic import resolves a declared
 strategy to its implementation; it does not discover which strategy
 to use.
 
-**If the strategy pre-fetches a login page, use the response.** Four
-of nine strategies pre-fetch a page as part of the auth handshake
-(`form`, `form_sjcl`, `form_cbn`, `url_token`). Each extracts
-session-specific state from the response — hidden fields, crypto
-parameters, cookies, or tokens. The pre-fetch establishes session
-cookies as a side effect, but its primary purpose is reading the
-data the handshake needs. Discarding the response body is a bug.
+**If the strategy pre-fetches a login page, use the response.** Several
+strategies GET a page as part of the auth handshake and extract
+session-specific state from it — hidden fields, crypto parameters,
+cookies, or tokens. The pre-fetch establishes session cookies as a side
+effect, but its primary purpose is reading the data the handshake
+needs. Discarding the response body is a bug.
 
 ### How to add a transport
 
@@ -1437,21 +1496,30 @@ stored as `_selected_modem_dir` on the config flow and used for all
 downstream steps (auth strategy resolution, connection validation, config
 entry storage).
 
-### Hardware version as the user-facing variant discriminator
+### The variant name is the user-facing discriminator
 
-**Decision:** `hardware.hw_version` is the field shown in the variant
-dropdown when multiple entries share the same auth strategy. `hardware.firmware`
-is recorded as catalog metadata but not shown in the UI.
+**Decision:** The variant picker labels each entry with its auth
+strategy and the variant's own name, taken from the filename stem.
+`hardware.hw_version` is added only when two variants would otherwise
+read identically. `hardware.firmware` is catalog metadata and is never
+shown.
 
-**Rationale:** Hardware version is printed on the modem sticker — users can
-physically verify it without navigating the modem's web UI. Firmware codes
-(AB01, TB01) are meaningful to contributors and maintainers but opaque to
-users during setup.
+**Rationale:** Variants exist to express different auth contracts, not
+different hardware, so labelling by hardware version asked users to
+choose on an axis that decides nothing. The SB8200 config built from a
+v6 capture ran clean end to end on v7 hardware: one config serves both
+board revisions, and the version in the label was noise that led
+contributors to pick the wrong variant (#124). Hardware version is
+also weak as data. Of the three Arris S33 units captured, two report
+no hardware version at all and the third reports a value the catalog
+does not use.
 
-**Constrains:** `hw_version` must be omitted when the variant name (from the
-filename stem) already communicates the version to the user — duplication
-degrades the label. `firmware` should always be recorded when known as it is
-useful for future tooling and contributor reference.
+**Constrains:** A variant's filename stem is user-facing text, so it
+must name the real distinguisher. A misleading stem is renamed rather
+than relabelled; there is deliberately no label-override field, since
+that would only dress up a bad name. `hw_version` stays recorded, and
+earns a place in the label only where variants genuinely differ by
+hardware alone (the S33 generations).
 
 ### Brand names as manufacturer-step choices
 

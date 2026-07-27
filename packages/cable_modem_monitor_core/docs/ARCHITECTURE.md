@@ -636,13 +636,13 @@ per-resource fetch details (`ResourceFetch`).
 
 **`SystemInfo`** — mix of structured and dynamic fields:
 
-- Structured: `system_uptime`, `last_boot_time`, `software_version`,
-    `hardware_version`, `model_name`
+- Structured: the canonical set is `SYSTEM_INFO_FIELDS` in
+    `models/field_registry.py`
 - Dynamic: modem-specific fields (e.g., `connectivity_state`,
     `boot_status`) pass through without core needing to understand them
-- Core derives `last_boot_time` from `system_uptime` when the modem
-    doesn't provide it natively — consumers see the same field regardless
-    of source
+- Core reports uptime as the modem gives it and derives no boot
+    timestamp; see ARCHITECTURE_DECISIONS § Time-anchored derivations
+    belong to the consumer, not Core
 
 **`ModemIdentity`** — static modem metadata from modem.yaml, populated
 once at config load time. Built by `load_modem_config()`. Consumers
