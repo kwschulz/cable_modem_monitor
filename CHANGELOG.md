@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Technicolor XB6 (CGM4140COM) confirmed on hardware.** Verified via
+  contributor diagnostics: 32 downstream + 4 upstream channels locked,
+  form auth, all signals nominal. Downstream modulation now normalizes to
+  canonical `QAM256`, and upstream channel type reads the "Channel Type"
+  column directly (the firmware reports a bare "QAM" with no
+  constellation, so the unmappable modulation field is omitted, matching
+  the XB7 and XB10). (Related to #111)
+
 ## [3.14.0-beta.16] - 2026-07-24
 
 ### Added

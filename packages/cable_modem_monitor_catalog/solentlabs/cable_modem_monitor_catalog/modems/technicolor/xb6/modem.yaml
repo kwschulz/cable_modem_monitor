@@ -23,7 +23,7 @@ hardware:
   chipset: "Broadcom BCM3390"
   release_date: "2017"
 
-status: awaiting_verification
+status: confirmed
 
 sources:
   release_date: "[Next TV / Multichannel News, December 6, 2017](https://www.nexttv.com/news/comcast-goes-wide-docsis-31-gigabit-gateway-416930) — Comcast national rollout of the xFi Advanced Gateway (XB6), naming Technicolor as builder of the Broadcom-chipset CGM4140COM"

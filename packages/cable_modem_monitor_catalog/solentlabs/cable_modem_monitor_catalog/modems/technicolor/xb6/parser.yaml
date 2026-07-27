@@ -5,7 +5,7 @@ downstream:
     - channel_type:
         field: modulation
         map:
-          "256 QAM": "qam"
+          "QAM256": "qam"
           "OFDM": "ofdm"
 
       rows:
@@ -30,6 +30,8 @@ downstream:
         - field: modulation
           label: "Modulation"
           type: string
+          map:
+            "256 QAM": "QAM256"
       selector:
         match: "Downstream"
         type: header_text
@@ -54,13 +56,15 @@ upstream:
   resource: "/network_setup.jst"
   # docsIfUpChannelType (DOCS-IF-MIB, RFC 4546) has no OFDMA value.
   # OFDMA upstream channels are in DOCS-IF31-MIB which defines no channel
-  # type field — the firmware renders the inapplicable SC-QAM field ("TDMA")
-  # for OFDMA channels. Derive channel_type from Modulation instead.
-  channel_type:
-    field: modulation
-    map:
-      "QAM": "atdma"
-      "OFDMA": "ofdma"
+  # type field, so the firmware renders the SC-QAM fallback "TDMA" for
+  # OFDMA channels. Read channel_type directly from the Channel Type HTML
+  # row; "TDMA" maps to "ofdma" here because of that firmware convention.
+  # The value set is the .jst platform's, observed across the XB6 and XB7
+  # captures.
+  #
+  # Modulation is not published upstream: the firmware renders a bare
+  # "QAM" with no constellation order, which PARSING_SPEC requires the
+  # parser to omit rather than pass through.
   rows:
     - field: channel_id
       label: "Channel ID"
@@ -76,9 +80,13 @@ upstream:
       label: "Power Level"
       type: float
       unit: "dBmV"
-    - field: modulation
-      label: "Modulation"
+    - field: channel_type
+      label: "Channel Type"
       type: string
+      map:
+        "TDMA_AND_ATDMA": "atdma"
+        "ATDMA": "atdma"
+        "TDMA": "ofdma"
     - field: symbol_rate
       label: "Symbol Rate"
       type: integer
