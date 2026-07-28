@@ -10,7 +10,7 @@ import pytest
 import requests
 from bs4 import BeautifulSoup
 from solentlabs.cable_modem_monitor_core.auth.base import AuthResult
-from solentlabs.cable_modem_monitor_core.loaders.fetch_list import ResourceTarget
+from solentlabs.cable_modem_monitor_core.fetch_list import ResourceTarget
 from solentlabs.cable_modem_monitor_core.loaders.http import (
     HTTPResourceLoader,
     LoginPageDetectedError,

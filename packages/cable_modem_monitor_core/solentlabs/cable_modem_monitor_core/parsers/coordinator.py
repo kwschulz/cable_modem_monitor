@@ -18,11 +18,12 @@ import logging
 from collections import defaultdict
 from typing import Any, TypeVar
 
+from ..fetch_list import collect_fetch_targets
 from ..models.parser_config.common import ChannelTypeDerive
 from ..models.parser_config.config import ParserConfig
 from ..spec_conformance import canonicalize_modulation, derive_channel_type_from_modulation
 from .diagnostics import AnchorCount, ParseDiagnostics
-from .registries import CHANNEL_PARSERS, SYSINFO_PARSERS
+from .registries import CHANNEL_PARSERS, SYSINFO_PARSERS, resource_present
 
 _T = TypeVar("_T")
 _logger = logging.getLogger(__name__)
@@ -111,6 +112,8 @@ class ModemParserCoordinator:
             result["system_info"] = system_info
         for resource, count in sysinfo_counts.items():
             per_resource[resource] = per_resource[resource] + count
+
+        self._account_uncounted_resources(per_resource, resources)
 
         self._enrich_derived_fields(result)
 
@@ -206,6 +209,26 @@ class ModemParserCoordinator:
                 per_resource[resource_path] = per_resource[resource_path] + anchors
 
         return self._apply_hook("system_info", merged, resources), dict(per_resource), failed
+
+    def _account_uncounted_resources(
+        self,
+        per_resource: dict[str, AnchorCount],
+        resources: dict[str, Any],
+    ) -> None:
+        """Add presence accounting for declared paths no format parser counted.
+
+        XML tables, multi-array JSON, and parser.py-declared resources
+        hang their paths off something other than a section-level
+        ``resource``, so no format parser attributes a count to them.
+        Without this, a resource that was fetched but never reached the
+        parse layer (decode failure, loader skip) reads as a clean parse.
+
+        The expected set comes from ``collect_fetch_targets`` — the same
+        derivation the collector fetches from, so the two cannot drift.
+        """
+        for target in collect_fetch_targets(self._config, self._post_processor):
+            if target.path not in per_resource:
+                per_resource[target.path] = resource_present(resources, target.path)
 
     def _configured_system_info_fields(self) -> set[str]:
         """Field names parser.yaml maps across all system_info sources.

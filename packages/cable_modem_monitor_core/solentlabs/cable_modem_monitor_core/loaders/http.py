@@ -19,10 +19,10 @@ import requests
 from bs4 import BeautifulSoup
 
 from ..auth.base import AuthResult
+from ..fetch_list import ResourceTarget
 from ..models.parser_config.config import ALL_FORMAT_MODELS
 from ..models.parser_config.format_registry import lookup_decode_kind
 from .diagnostics import describe_request
-from .fetch_list import ResourceTarget
 from .html_normalize import normalize_html
 
 _logger = logging.getLogger(__name__)
@@ -329,8 +329,8 @@ def _decode_response(
 def _is_login_page(text: str) -> bool:
     """Check if an HTML response contains login form indicators.
 
-    Data pages from parser.yaml (status, connection, channel info)
-    do not contain password input fields. Login pages always do.
+    The data pages on the fetch list (status, connection, channel
+    info) do not contain password input fields. Login pages always do.
     This invariant enables login page detection without
     modem-specific configuration.
 

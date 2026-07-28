@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from solentlabs.cable_modem_monitor_core.loaders.fetch_list import (
+from solentlabs.cable_modem_monitor_core.fetch_list import (
     ResourceTarget,
     collect_fetch_targets,
 )
@@ -21,7 +21,7 @@ from solentlabs.cable_modem_monitor_core.models.parser_config import ParserConfi
 
 from tests._helpers import load_fixture
 
-FIXTURES_DIR = Path(__file__).parent.parent / "models" / "fixtures" / "parser_config" / "valid"
+FIXTURES_DIR = Path(__file__).parent / "models" / "fixtures" / "parser_config" / "valid"
 LOCAL_FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 # =============================================================================

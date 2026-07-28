@@ -2,8 +2,10 @@
 
 Collects unique resource paths and their formats from parser.yaml
 sections, merged with the paths a parser.py PostProcessor declares
-via its ``resources`` attribute. The fetch list drives what the HTTP
-resource loader requests.
+via its ``resources`` attribute. The fetch list drives what the
+resource loaders request, and what the parser coordinator expects to
+find in the resource dict — it sits above both rather than inside
+either, so the two cannot disagree about what was asked for.
 
 See RESOURCE_LOADING_SPEC.md Fetch List Derivation section.
 """
@@ -14,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..models.parser_config import ParserConfig
+    from .models.parser_config import ParserConfig
 
 
 @dataclass(frozen=True)

@@ -799,7 +799,8 @@ Three transport paths, selected by `modem.yaml.transport`:
 
 **HTTP transport** (`HTTPResourceLoader`):
 
-- Derives fetch targets from parser.yaml via `collect_fetch_targets()`
+- Fetches the targets the collector derives via `collect_fetch_targets()`
+  from parser.yaml and parser.py
 - Fetches each resource URL independently over HTTP
 - HTML responses → `BeautifulSoup` objects
 - JSON responses → parsed dicts

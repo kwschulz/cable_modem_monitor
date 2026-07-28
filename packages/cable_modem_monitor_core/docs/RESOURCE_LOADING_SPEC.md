@@ -26,7 +26,7 @@ by key and cast to the expected type.
 
 ### HTTP Transport — HTML Formats
 
-Keys are URL paths from parser.yaml `resource` fields. Values are parsed HTML.
+Keys are the URL paths on the fetch list. Values are parsed HTML.
 
 ```python
 {
@@ -46,7 +46,7 @@ Keys are URL paths from parser.yaml `resource` fields. Values are parsed HTML.
 
 ### HTTP Transport — Structured Formats
 
-Keys are URL paths from parser.yaml `resource` fields. Values are parsed
+Keys are the URL paths on the fetch list. Values are parsed
 structured data (dict).
 
 ```python
@@ -96,7 +96,7 @@ reference the action names via `response_key` in parser.yaml.
 
 ### Page Fetching (HTTP Transport)
 
-For each unique `resource` path from parser.yaml:
+For each unique path on the fetch list:
 
 1. Build the full URL: `{protocol}://{host}{path}`
 2. Attach auth credentials to the request (strategy-specific):
@@ -166,8 +166,7 @@ token on every response.
 
 **Fetch cycle:**
 
-1. For each target in the fetch list (derived from parser.yaml
-   `resource` fields):
+1. For each target in the fetch list:
    a. Read the current `sessionToken` from `session.cookies`
    b. POST to `getter_endpoint` with body
       `token=<sessionToken>&fun=<target.path>` — token **must be the
@@ -191,8 +190,8 @@ token on every response.
 }
 ```
 
-Keys are the `fun` parameter strings (matching parser.yaml `resource`
-fields). Values are `defusedxml.ElementTree.Element` objects
+Keys are the `fun` parameter strings on the fetch list. Values are
+`defusedxml.ElementTree.Element` objects
 representing the parsed XML root.
 
 **Token rotation:** The server sets a new `sessionToken` cookie via
@@ -342,6 +341,7 @@ policy (see Signal and Policy Separation in `ARCHITECTURE.md`).
 | HTTP 5xx | Status code in response | Status `unreachable` |
 | Login page on data URL | `LOAD_AUTH` | Clear session, increment auth streak |
 | Empty response body | Empty parsed result | Parser handles gracefully |
+| Body will not decode as its format | `ResourceDecodeError` logged, path omitted from the resource dict | Parse layer reports the path unfulfilled → `LOAD_INTEGRITY` (PARSING_SPEC § Parser Diagnostics) |
 | SSL handshake failure | `SSLError` | Check `legacy_ssl` flag |
 
 On any 4xx/5xx response, the loader's exception message includes the
@@ -438,7 +438,7 @@ models, and so is this rule — `_should_detect_login_pages` reads the
 same `stateless` and `transport` ClassVars rather than restating
 them.
 
-**Detection invariant:** Data pages from parser.yaml (status,
+**Detection invariant:** The data pages on the fetch list (status,
 connection, channel info) do not carry a password field. Login pages
 always do. A password field on a data URL means the modem served a
 login page there.
@@ -466,7 +466,7 @@ Structured formats (JSON, XML) and HNAP transport are not checked.
 
 | Failure | Impact | Likelihood | Mitigation |
 |---------|--------|------------|------------|
-| False positive (data page has `<input type="password">`) | Auth failure loop — session cleared every poll | Very low — parser.yaml only references status/data pages, not settings/admin pages | Detected during HAR regression; override via `session.login_page` (future, if needed) |
+| False positive (data page has `<input type="password">`) | Auth failure loop — session cleared every poll | Very low — the fetch list holds only status/data pages, not settings/admin pages | Detected during HAR regression; override via `session.login_page` (future, if needed) |
 | False negative (response without `<input type="password">` is not real data) | Falls through to the parser and produces silent empty results — incorrectly surfaces as `no_signal`. Covers both JS-rendered SPA login forms and stub responses (issue #151). | Low — but observed in the field (CM1200, 2026-05-02) | Runtime: Parser Coordinator detects `0 of N expected anchors fulfilled` and raises `LOAD_INTEGRITY` (see UC-19a, `PARSING_SPEC § Parser Diagnostics`). Intake: HAR-time MCP onboarding flag (see below) |
 
 If a false positive occurs in the field, the escape hatch is a

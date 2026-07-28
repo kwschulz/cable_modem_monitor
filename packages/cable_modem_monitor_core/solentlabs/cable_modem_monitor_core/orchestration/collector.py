@@ -19,7 +19,7 @@ import requests
 from ..auth.base import AuthContext, AuthResult, BaseAuthManager, LoginLockoutError
 from ..auth.factory import create_auth_manager
 from ..connectivity import create_session
-from ..loaders.fetch_list import collect_fetch_targets
+from ..fetch_list import collect_fetch_targets
 from ..loaders.hnap import HNAPLoadError
 from ..loaders.http import (
     HTTPResourceLoader,

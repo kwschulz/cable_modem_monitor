@@ -32,8 +32,8 @@ import requests
 from ..auth.base import AuthResult
 from ..auth.factory import create_auth_manager
 from ..config_loader import load_modem_config, load_parser_config
+from ..fetch_list import collect_fetch_targets
 from ..har import load_har_json
-from ..loaders.fetch_list import collect_fetch_targets
 from ..loaders.hnap import HNAPLoader
 from ..loaders.http import HTTPResourceLoader
 from ..orchestration.factory import create_orchestrator

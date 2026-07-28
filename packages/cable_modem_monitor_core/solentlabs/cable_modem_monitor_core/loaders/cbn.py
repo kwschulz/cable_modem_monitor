@@ -23,8 +23,8 @@ from xml.etree.ElementTree import Element, ParseError
 import defusedxml.ElementTree as DefusedET
 import requests
 
+from ..fetch_list import ResourceTarget
 from .diagnostics import describe_request
-from .fetch_list import ResourceTarget
 
 _logger = logging.getLogger(__name__)
 

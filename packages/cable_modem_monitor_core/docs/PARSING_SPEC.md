@@ -178,8 +178,8 @@ extract data without making network calls.
 
 ### HTML and REST
 
-Keys are URL paths collected from `resource` fields in parser.yaml.
-One entry per unique path (deduplicated by the loader).
+Keys are the URL paths on the fetch list. One entry per unique path
+(deduplicated by the loader).
 
 ```python
 # HTML
@@ -267,10 +267,13 @@ by stripping the `Response` suffix. The parser.py `resources` attribute
 does not apply to HNAP — the batched request has no per-page fetch
 list, and no HNAP modem has needed a hook-only action.
 
-**Startup validation:** The orchestrator verifies at startup that
-every `resource` path in parser.yaml is fetchable (valid path format,
-modem reachable) and that every HNAP `response_key` has a
-corresponding action. Missing resources fail fast with a clear error.
+**Validation:** Nothing checks the fetch list at startup. A path that
+fails at poll time raises `ResourceLoadError` and ends the cycle
+(RESOURCE_LOADING_SPEC § Error Signals). A path that returns HTTP 200
+but fails to decode is logged and omitted from the resource dict; the
+absence surfaces as `0 of N anchors` → `LOAD_INTEGRITY` through
+[Parser Diagnostics](#parser-diagnostics). HNAP declares no
+per-resource paths, so neither applies to it.
 
 ### Path Navigation
 
@@ -872,8 +875,9 @@ actually a stub-page false negative (see UC-19a).
 
 ### Contract
 
-For each `resource` referenced by `parser.yaml`, the coordinator
-reports two counts:
+For each `resource` on the fetch list — parser.yaml sections, the
+per-table and per-array paths inside them, and parser.py `resources`
+declarations — the coordinator reports two counts:
 
 | Field | Meaning |
 |-------|---------|
@@ -899,15 +903,24 @@ HNAP parsers know which `data_key` references resolved. This
 specification defines **what is reported**, not the mechanism by
 which each format counts.
 
-**XML sections are provisionally exempt**: they report trivially
-fulfilled anchors (`_parse_xml_channels` in `parsers/registries.py`).
-XMLSection declares multiple `tables[].resource` rather than one
-section-level resource, and the CBN transport has not exhibited the
-stub-page failure shape that drives UC-19a. If a CBN modem ever
-serves a login/stub page where channel XML is expected, XML sections
-opt in to real anchor counting at that point. Parsers may surface the count via tuple
-return, recorder injection, or coordinator-side inspection of the
-extracted data shape against `parser_config` — whichever fits the
+**Presence accounting covers what per-anchor counting doesn't.** A
+path no format parser counted is reported as one expected anchor,
+fulfilled only if the resource reached the parse layer. This is what
+covers XML `tables[]`, multi-array JSON `arrays[]`, and parser.py
+`resources` — none of which hang off a section-level `resource`, so
+no format parser attributes a count to them. A fetched resource that
+never arrives (decode failure, loader skip) therefore cannot read as
+a clean parse.
+
+**XML sections remain exempt from per-anchor counting**: they report
+trivially fulfilled anchors (`_parse_xml_channels` in
+`parsers/registries.py`), and the CBN transport has not exhibited the
+stub-page failure shape that drives UC-19a. Presence accounting still
+covers their table paths. If a CBN modem ever serves a login/stub
+page where channel XML is expected, XML sections opt in to real
+anchor counting at that point. Parsers may surface the count via
+tuple return, recorder injection, or coordinator-side inspection of
+the extracted data shape against `parser_config` — whichever fits the
 format cleanly.
 
 The `BaseParser` output shape (`ModemData`) is unchanged. Diagnostics
