@@ -411,16 +411,23 @@ detection misses.
 | 1 | Consumer calls `get_modem_data()` | | |
 | 2 | Collector: auth succeeds (or session reused) | | |
 | 3 | Resource Loader: GET /status.html → HTTP 200, body contains login form | | |
-| 4 | Resource Loader: detects login page indicators | | |
+| 4 | Resource Loader: detects login page, raises `LoginPageDetectedError` | fetch aborts, resources already fetched that poll are discarded | WARNING log |
 | 5 | Collector returns `ModemResult(signal=LOAD_AUTH)` | | |
-| 6 | Orchestrator: clear session, streak++ | | |
+| 6 | Orchestrator: logout (best-effort), clear session | session cleared | |
+| 7 | Orchestrator: retry collection once in same poll — fresh login, refetch every target | | |
+| 8 | Retry succeeds | streak→0 | `ModemSnapshot(ONLINE)` |
+| 9 | Retry serves the login page again | streak++ | `ModemSnapshot(AUTH_FAILED)` |
+| 10 | Streak reaches the threshold | circuit breaker opens | HA starts reauth flow |
 
 **Assertions:**
 
 - Signal is LOAD_AUTH (not PARSE_ERROR) — correct root cause classification
 - Login page detection checks for `<input type="password">` or similar
-- Session is cleared for fresh login on next poll
-- WARNING log: "Data page /status.html appears to be a login page"
+- The raise aborts the whole poll, not just the tripped page: a partial resource set is never parsed
+- Recovery is a same-poll retry (UC-18 path), not a wait for the next poll
+- Two consecutive same-poll recoveries disable cached session reuse (UC-18)
+- The breaker does not close on its own; the reauth flow's config-entry reload is what clears it
+- WARNING log: "Data page /status.html appears to be a login page — session: cookies=[…] basic_auth=…"
 
 ---
 
@@ -490,13 +497,13 @@ header-safe token.
 | 4 | Auth: returns `AuthResult(success=True)` with no credential cookie (no spurious success artefact) | | |
 | 5 | Resource Loader: GET data page → HTTP 200, body is the login page | | |
 | 6 | Resource Loader: detects login page → `LOAD_AUTH` (UC-19) | | |
-| 7 | Orchestrator: clear session, streak++ | session cleared | |
+| 7 | Orchestrator: clear session, retry once in same poll; streak++ if the retry also fails | session cleared | |
 
 **Assertions:**
 
 - Auth never injects a non-header-safe value as the credential cookie — prevents the `http.client.putheader` `ValueError` (no stack trace for an expected failure)
 - Signal is `LOAD_AUTH`, reached through the existing UC-19 detection — no new failure branch
-- Single occurrence self-corrects on the next poll (same threshold-based backoff as UC-19/UC-13); persistent failures escalate normally
+- Single occurrence self-corrects in the same poll via the UC-19 retry; persistent failures escalate normally
 - Auth log at the manager's level: body is a login page, credential cookie not injected
 
 **Background:** SB8200 inject variant (#124, rct). The login response

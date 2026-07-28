@@ -339,7 +339,7 @@ policy (see Signal and Policy Separation in `ARCHITECTURE.md`).
 | Request timeout | `Timeout` | Status `unreachable` |
 | HTTP 401/403 | Status code in response | Stale session → retry auth |
 | HTTP 5xx | Status code in response | Status `unreachable` |
-| Login page on data URL | `LOAD_AUTH` | Clear session, increment auth streak |
+| Login page on data URL | `LOAD_AUTH` | Clear session, retry once in the same poll; streak++ if the retry fails |
 | Empty response body | Empty parsed result | Parser handles gracefully |
 | Body will not decode as its format | `ResourceDecodeError` logged, path omitted from the resource dict | Parse layer reports the path unfulfilled → `LOAD_INTEGRITY` (PARSING_SPEC § Parser Diagnostics) |
 | SSL handshake failure | `SSLError` | Check `legacy_ssl` flag |
@@ -454,10 +454,23 @@ row below describes. The tradeoff is that the string also matches
 inside inline JS or a comment on a genuine data page, which is the
 false-positive row.
 
-When detected, the loader signals `LOAD_AUTH` instead of returning
-the response in the resource dict. The orchestrator clears the
-session and increments the auth streak — the next poll starts with
-a fresh login.
+When detected, the loader raises `LoginPageDetectedError`; the
+collector maps it to `LOAD_AUTH` (the collection layer owns the
+signal). The raise aborts the fetch, discarding every resource
+already retrieved that poll — a session serving a login page at one
+data URL is dead for the rest, and recovery refetches the whole list
+anyway.
+
+Recovery runs in the same poll, not the next one. The orchestrator
+attempts logout (best-effort), clears the session, re-authenticates,
+and refetches every target. If that succeeds the poll succeeds and
+the auth streak resets. If it fails, the streak increments and the
+poll reports `AUTH_FAILED`; at the threshold the auth circuit breaker
+opens and blocks further polling. The breaker does not close on its
+own — the HA layer starts a reauth flow, and completing it reloads
+the config entry, which is what clears the state. See
+[RUNTIME_POLLING_SPEC.md](RUNTIME_POLLING_SPEC.md) § Auth Circuit
+Breaker and UC-19.
 
 **Scope:** Only applies to HTTP transport, HTML format responses.
 Structured formats (JSON, XML) and HNAP transport are not checked.
@@ -466,7 +479,7 @@ Structured formats (JSON, XML) and HNAP transport are not checked.
 
 | Failure | Impact | Likelihood | Mitigation |
 |---------|--------|------------|------------|
-| False positive (data page has `<input type="password">`) | Auth failure loop — session cleared every poll | Very low — the fetch list holds only status/data pages, not settings/admin pages | Detected during HAR regression; override via `session.login_page` (future, if needed) |
+| False positive (data page has `<input type="password">`) | Every poll aborts, retries, and fails; at the threshold the breaker opens and prompts reauth for credentials that are not wrong | Very low — the fetch list holds only status/data pages, not settings/admin pages | Detected during HAR regression; override via `session.login_page` (future, if needed) |
 | False negative (response without `<input type="password">` is not real data) | Falls through to the parser and produces silent empty results — incorrectly surfaces as `no_signal`. Covers both JS-rendered SPA login forms and stub responses (issue #151). | Low — but observed in the field (CM1200, 2026-05-02) | Runtime: Parser Coordinator detects `0 of N expected anchors fulfilled` and raises `LOAD_INTEGRITY` (see UC-19a, `PARSING_SPEC § Parser Diagnostics`). Intake: HAR-time MCP onboarding flag (see below) |
 
 If a false positive occurs in the field, the escape hatch is a

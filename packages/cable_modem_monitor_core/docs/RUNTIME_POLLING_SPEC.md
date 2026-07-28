@@ -474,15 +474,16 @@ Normal poll
 Next poll
  ├─ Auth manager: session valid? → yes (stale cookies still in memory)
  ├─ Resource loader: fetch pages with stale session
- │   ├─ Case A: modem rejects → LOAD_AUTH → clear session → auth_failed
+ │   ├─ Case A: modem rejects → LOAD_AUTH → clear session → same-poll retry
  │   └─ Case B: modem accepts (IP-based, or ignores stale cookies) → success
  ├─ Parser: channels found (Case B)
  └─ Orchestrator: log transition with session state for diagnostics
 ```
 
 If the stale session is rejected (Case A), `LOAD_AUTH` signal handling
-clears the session — the next poll starts with a fresh login. No
-proactive cache clear is needed.
+clears the session and retries once in the same poll with a fresh
+login, so a modem that is back up recovers without waiting for the
+next cycle. No proactive cache clear is needed.
 
 The orchestrator logs the `unreachable → online` transition. Session
 state is already reported in the poll log (`session: new` vs
