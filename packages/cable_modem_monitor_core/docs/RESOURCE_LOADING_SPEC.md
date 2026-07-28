@@ -435,9 +435,20 @@ automatic for form-based auth strategies (`form`, `form_nonce`,
 `basic`, or `hnap`.
 
 **Detection invariant:** Data pages from parser.yaml (status,
-connection, channel info) do not contain `<input type="password">`.
-Login pages always do. If the response contains a password input
-field, it is a login page served at a data URL.
+connection, channel info) do not carry a password field. Login pages
+always do. A password field on a data URL means the modem served a
+login page there.
+
+**The test is a substring, not a DOM query.** `_is_login_page`
+lowercases the undecoded body and looks for `type="password"` or
+`type='password'`. This is deliberately looser than parsing for an
+`<input type="password">` node: it runs before decode, so it costs
+nothing and still reads a body that fails to decode, and it fires on
+markup too broken to yield an `input` node and on login forms that
+exist only inside a script template — the SPA shape the false-negative
+row below describes. The tradeoff is that the string also matches
+inside inline JS or a comment on a genuine data page, which is the
+false-positive row.
 
 When detected, the loader signals `LOAD_AUTH` instead of returning
 the response in the resource dict. The orchestrator clears the
