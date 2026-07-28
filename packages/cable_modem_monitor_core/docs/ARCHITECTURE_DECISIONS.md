@@ -10,7 +10,7 @@ files; this document explains the choices that shaped them.
 |---------|----------------|
 | [Package Boundaries](#package-boundaries) | Runtime package split, dependency direction, where each piece lives |
 | [Core Schema Model](#core-schema-model) | What enters Core's schema vs what stays user-side; catalog stores source-faithful strings and maps only observed values, display normalizes; derived and dynamic fields, health as its own structure |
-| [Transport and Constraint Model](#transport-and-constraint-model) | Transport as protocol identifier, implicit capabilities, shared protocol primitives, config as parameters |
+| [Transport and Constraint Model](#transport-and-constraint-model) | Transport as protocol identifier, generated constraint tables, implicit capabilities, shared protocol primitives, config as parameters |
 | [Auth Architecture](#auth-architecture) | Strategy discreteness, session lifecycle, failure logging, credential reconfiguration as reconstruction |
 | [Parsing Architecture](#parsing-architecture) | Three roles, per-section format selection, parser.py as escape hatch |
 | [Session and Action Model](#session-and-action-model) | Signal/policy separation, session reuse, restart-only actions |
@@ -411,6 +411,35 @@ modem inventory and stress test results.
 they receive. HTML formats expect `BeautifulSoup`, structured formats
 expect `dict`. Misconfigured modem.yaml is rejected at load time.
 
+### The published constraint tables are generated, not written
+
+**Decision:** The auth, format, and action models are the single
+authoritative source for the transport constraint. The tables in
+ARCHITECTURE.md and MODEM_YAML_SPEC.md are rendered from those models
+by `scripts/generate_constraint_tables.py` into marked regions;
+`tests/models/test_constraint_tables.py` fails when a doc is stale.
+Rules derived from the same source — login-page detection reads
+`stateless` and `transport` off the strategy — do not restate the
+table either.
+
+**Rationale:** The constraint lived in four hand-maintained places and
+three of them were wrong: both ARCHITECTURE tables omitted `bearer`
+(shipped and in use on `sagemcom/f3896lg-vmb`), ARCHITECTURE listed
+`xml` as an HTTP format when it is CBN-only, and both docs omitted
+`javascript_vars`. Nothing failed, because nothing compared them.
+Reading ARCHITECTURE alone therefore produced wrong conclusions about
+which strategies exist. A doc that restates a machine-checkable fact
+is a doc that will disagree with the code eventually; generation
+removes the opportunity rather than adding a review step.
+
+**Constrains:** Two columns carry no model behind them (the loader
+class and the session mechanism) and live in `_TRANSPORT_PROSE` in
+the generator, keyed by transport. A transport with no entry fails
+generation instead of rendering a blank cell. The three-axis Mermaid
+diagram in ARCHITECTURE.md still enumerates values by hand — a
+generated region inside a diagram node would be unreadable — so its
+contents are gated by test instead.
+
 ### Capabilities are implicit from parser output
 
 **Decision:** No `capabilities` field in modem.yaml. A mapping in
@@ -499,14 +528,15 @@ AJAX-style login are all config flags on `form` — same
 POST-evaluate-redirect flow.
 
 **Constrains:** Adding a new auth strategy requires a new dataclass
-(with `display_name` and `transport` ClassVars), a new
+(with `display_name`, `transport`, and `stateless` ClassVars), a new
 `BaseAuthManager` subclass with a `create_manager()` entry point,
 and a new entry in the `AuthConfig` union. The factory dynamically
 imports the manager module by strategy literal — no factory code
 changes, no isinstance chains, no manual registry updates. Display
-labels and transport validation sets derive from the ClassVars
-automatically. No per-modem auth hooks — all variation is modem.yaml
-config.
+labels, transport validation sets, login-page detection, and the
+constraint tables published in the specs all derive from the
+ClassVars automatically. No per-modem auth hooks — all variation is
+modem.yaml config.
 
 ### No per-modem auth hooks
 
@@ -1475,10 +1505,15 @@ editing format-list frozensets in multiple files.
    `_SYSINFO_WRAPPERS_BY_TAG`). The model→callable dict is built by
    looking each model's `format_tag` up in that table, so ordering
    does not matter — a missing entry raises at import time.
+5. **Regenerate the published tables** —
+   `python scripts/generate_constraint_tables.py`. The valid-formats
+   column of the constraint tables in ARCHITECTURE.md and
+   MODEM_YAML_SPEC.md derives from `transports`;
+   `tests/models/test_constraint_tables.py` fails if it is stale.
 
 **Why ClassVars on the model.** Auth strategies already use this
-pattern (`AuthStrategyBase` with `display_name`/`transport` ClassVars +
-`_AUTH_MODELS` list). Format metadata is the same shape: a few
+pattern (`AuthStrategyBase` with `display_name`/`transport`/`stateless`
+ClassVars + `_AUTH_MODELS` list). Format metadata is the same shape: a few
 attributes that cross-cutting machinery needs to know about. Putting
 them on the model keeps everything about a format colocated and lets
 the loader, validator, and registry derive their views.
@@ -1518,7 +1553,13 @@ access do not belong here.
 
 1. **`models/modem_config/auth.py`** — three co-located additions:
    - Define the model class inheriting from `AuthStrategyBase` with
-     `display_name` and `transport` ClassVars.
+     `display_name`, `transport`, and `stateless` ClassVars.
+     `stateless` is true only when the strategy establishes no
+     server-side session: `none` sends no credential and `basic`
+     re-sends it on every request, so neither holds anything that can
+     expire mid-poll. Everything else obtains a session artefact at
+     login and is stateful, which is what turns on login-page
+     detection.
    - Add an `Annotated[NewAuth, Tag("strategy_name")]` member to the
      `AuthConfig` union.
    - Add the class to the `_AUTH_MODELS` registry list (immediately
@@ -1527,15 +1568,19 @@ access do not belong here.
    `create_manager(config)` entry point.
 3. **`test_harness/auth/{strategy}.py`** — new handler module with a
    `create_handler(modem_config, har_entries)` entry point.
+4. **Regenerate the published tables** —
+   `python scripts/generate_constraint_tables.py`.
 
-Three files, all additive. No factory code changes — the factory
-dynamically imports the manager module by strategy literal. Display
-labels and transport validation sets derive from the model ClassVars.
-No existing strategy code is touched.
+Three files plus a regeneration, all additive. No factory code changes
+— the factory dynamically imports the manager module by strategy
+literal. Display labels, transport validation sets, and login-page
+detection derive from the model ClassVars. No existing strategy code
+is touched.
 
 **If you forget a step:** missing union member → modem.yaml fails to
 parse at config load time. Missing `_AUTH_MODELS` entry → display
-label and transport validation missing, caught by fleet test. Neither
+label and transport validation missing, caught by fleet test. Skipped
+regeneration → `tests/models/test_constraint_tables.py` fails. No
 failure is silent.
 
 **Strategy selection is config-driven** — declared in modem.yaml,
@@ -1553,8 +1598,11 @@ needs. Discarding the response body is a bug.
 ### How to add a transport
 
 Add a new loader (new value type), new `BaseParser` implementation(s)
-that consume that type, a new row in the constraint table, and
-validator updates. No existing code changes.
+that consume that type, a new action model, the transport literal on
+`ModemConfig.transport`, and a `_TRANSPORT_PROSE` entry in
+`scripts/generate_constraint_tables.py` for the two columns no model
+carries (loader and session). Then regenerate. No existing code
+changes.
 
 ---
 

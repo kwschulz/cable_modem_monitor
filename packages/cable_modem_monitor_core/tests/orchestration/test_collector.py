@@ -1,7 +1,10 @@
 """Tests for ModemDataCollector.
 
-Covers signal classification, session lifecycle, logout, and login
-page detection. Uses the HAR mock server for integration tests.
+Covers signal classification, session lifecycle, logout, and the
+loader's login-page handling. Uses the HAR mock server for
+integration tests. The gate that decides *whether* detection runs
+lives in ``auth_failure.py`` and is covered by
+``test_auth_failure.py``.
 
 Use case coverage (collector level):
 - UC-01: First poll — fresh login
@@ -37,8 +40,9 @@ from solentlabs.cable_modem_monitor_core.models.modem_config.actions import (
     CbnAction,
     HttpAction,
 )
-from solentlabs.cable_modem_monitor_core.orchestration.auth_failure import (
-    _should_detect_login_pages,
+from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
+    BasicAuth,
+    NoneAuth,
 )
 from solentlabs.cable_modem_monitor_core.orchestration.collector import (
     LoginLockoutError,
@@ -84,10 +88,6 @@ def _make_config(
 
     # Auth
     if auth_type == "none":
-        from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
-            NoneAuth,
-        )
-
         config.auth = NoneAuth(strategy="none")
     elif auth_type == "form":
         config.auth = MagicMock()
@@ -96,10 +96,6 @@ def _make_config(
         config.auth.username_field = "username"
         config.auth.password_field = "password"
     elif auth_type == "basic":
-        from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
-            BasicAuth,
-        )
-
         config.auth = BasicAuth(strategy="basic")
     else:
         config.auth = MagicMock()
@@ -199,45 +195,6 @@ class _SimpleServer(HTTPServer):
 
 _LOGIN_PAGE_HTML = '<html><form><input type="password" name="pw"></form></html>'
 _DATA_PAGE_HTML = "<html><table><tr><td>data</td></tr></table></html>"
-
-
-# ------------------------------------------------------------------
-# Tests — login page detection utility (table-driven)
-# ------------------------------------------------------------------
-
-# ┌────────────┬───────────┬──────────┬──────────────────────┐
-# │ auth_type  │ transport │ expected │ description          │
-# ├────────────┼───────────┼──────────┼──────────────────────┤
-# │ "none"     │ "http"    │ False    │ no-auth              │
-# │ "basic"    │ "http"    │ False    │ stateless            │
-# │ "form"     │ "http"    │ True     │ form-based           │
-# │ "hnap"     │ "hnap"    │ False    │ hnap transport       │
-# │ None       │ "http"    │ False    │ no auth config       │
-# └────────────┴───────────┴──────────┴──────────────────────┘
-#
-# fmt: off
-LOGIN_PAGE_DETECTION_CASES = [
-    # (auth_type,  transport, set_none, expected, description)
-    ("none",       "http",    False,    False,    "no-auth — detection disabled"),
-    ("basic",      "http",    False,    False,    "stateless — detection disabled"),
-    ("form",       "http",    False,    True,     "form-based — detection enabled"),
-    ("hnap",       "hnap",    False,    False,    "hnap transport — detection disabled"),
-    ("none",       "http",    True,     False,    "no auth config — detection disabled"),
-]
-# fmt: on
-
-
-@pytest.mark.parametrize(
-    "auth_type,transport,set_none,expected,desc",
-    LOGIN_PAGE_DETECTION_CASES,
-    ids=[c[4] for c in LOGIN_PAGE_DETECTION_CASES],
-)
-def test_should_detect_login_pages(auth_type: str, transport: str, set_none: bool, expected: bool, desc: str) -> None:
-    """_should_detect_login_pages returns correct value per auth strategy."""
-    config = _make_config(auth_type=auth_type, transport=transport)
-    if set_none:
-        config.auth = None
-    assert _should_detect_login_pages(config) is expected
 
 
 # ------------------------------------------------------------------

@@ -8,7 +8,6 @@ from urllib.parse import urlparse, urlunparse
 import requests
 
 from ..auth.base import AuthFailureMode
-from ..models.modem_config.auth import BasicAuth, NoneAuth
 from .events import AuthFailed, HttpStatusError
 
 # Maximum response body characters stored in auth-failure logs (log-line budget).
@@ -60,15 +59,15 @@ def _build_http_status_error_event(
 def _should_detect_login_pages(modem_config: Any) -> bool:
     """Determine if login page detection should be enabled.
 
-    Only applicable to form-based HTTP auth strategies where the
-    modem may silently serve a login page at data URLs when the
-    session expires. Not applicable to none, basic, or hnap.
+    Derived from the strategy's own ClassVars, not an isinstance
+    chain: a stateless strategy holds no session that can expire, and
+    only the HTTP loader can substitute a login page for a data page.
+    See ARCHITECTURE.md § Auth Manager for the published table.
     """
-    if modem_config.auth is None:
+    auth = modem_config.auth
+    if auth is None:
         return False
-    if isinstance(modem_config.auth, NoneAuth | BasicAuth):
-        return False
-    return bool(modem_config.transport != "hnap")
+    return not auth.stateless and auth.transport == "http"
 
 
 # ---------------------------------------------------------------------------

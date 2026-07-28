@@ -1464,15 +1464,17 @@ session, and format are configured independently, subject to the
 [auth-session-action consistency](#auth-session-action-consistency)
 rules below.
 
+<!-- BEGIN GENERATED: yaml-constraints (from the auth, format, and action models; run packages/cable_modem_monitor_core/scripts/generate_constraint_tables.py) -->
 | Transport | Valid auth strategies | Valid session | Valid formats | Valid action types |
-|-----------|---------------------|--------------|---------------|-------------------|
-| `http` | `none`, `basic`, `bearer`, `form`, `form_nonce`, `url_token`, `form_pbkdf2`, `form_sjcl` | stateless, cookie, CSRF, url_token | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json`, `json_transposed` | `http` (with optional `action_auth` on `HttpAction`) |
-| `hnap` | `hnap` | implicit (uid + HNAP_AUTH) | `hnap` | `hnap` |
+|-----------|-----------------------|---------------|---------------|--------------------|
 | `cbn` | `form_cbn` | cookie (rotating sessionToken + stable SID) | `xml` | `cbn` |
+| `hnap` | `hnap` | implicit (uid cookie + HNAP_AUTH header) | `hnap` | `hnap` |
+| `http` | `basic`, `bearer`, `form`, `form_nonce`, `form_pbkdf2`, `form_sjcl`, `none`, `url_token` | stateless, cookie, CSRF, or url_token | `html_fields`, `javascript`, `javascript_json`, `javascript_vars`, `json`, `json_transposed`, `table`, `table_transposed` | `http` (optional `action_auth`) |
+<!-- END GENERATED: yaml-constraints -->
 
 The format field in parser.yaml determines how the response is decoded.
-HTML formats produce `BeautifulSoup`, structured formats (`json`, `xml`)
-produce `dict` or `Element`. See ARCHITECTURE.md Constraint Summary.
+See ARCHITECTURE.md Constraint Summary for the format-to-value-type
+mapping.
 
 Violations are rejected at both **build time** (Pydantic validation in
 Catalog's dev-gate) and **load time** (`load_modem_config()` in Core)

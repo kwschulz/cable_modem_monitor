@@ -430,9 +430,13 @@ The fall-through case is fully covered by UC-19a (see
 
 The Resource Loader checks each HTTP 200 HTML response for login page
 indicators before adding it to the resource dict. Detection is
-automatic for form-based auth strategies (`form`, `form_nonce`,
-`form_pbkdf2`, `form_sjcl`, `url_token`). Not applicable to `none`,
-`basic`, or `hnap`.
+automatic for any auth strategy that ARCHITECTURE.md's Auth Manager
+table marks as not stateless on the `http` transport: a stateless
+strategy holds no session that can expire, and the other transports
+never reach this loader. That table is generated from the auth
+models, and so is this rule — `_should_detect_login_pages` reads the
+same `stateless` and `transport` ClassVars rather than restating
+them.
 
 **Detection invariant:** Data pages from parser.yaml (status,
 connection, channel info) do not carry a password field. Login pages

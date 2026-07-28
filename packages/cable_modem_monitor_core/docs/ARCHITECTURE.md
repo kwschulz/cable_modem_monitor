@@ -104,7 +104,7 @@ but modem-specific behavior comes from config, not from Core code.
 | Protocol primitives | `protocol/hnap` — shared HNAP constants and HMAC signing. `protocol/cbn` — shared CBN_Encrypt (AES-256-CBC) used by `form_cbn` auth. |
 | Auth shared helpers | `auth/response` — JSON response parsing (double-decode, type check, diagnostics) shared by `form_sjcl`, `form_pbkdf2`, `hnap`. |
 | Parser coordinator | `ModemParserCoordinator` — factory + orchestration: parser.yaml → `BaseParser` instances → parser.py chaining → `ModemData` |
-| Auth strategies | `none`, `basic`, `form`, `form_nonce`, `form_pbkdf2`, `form_sjcl`, `hnap`, `url_token`, `form_cbn` |
+| Auth strategies | One audited implementation per strategy in `auth/`. See the [Auth Manager](#auth-manager) table for the full set. |
 | Resource loaders | HTTP → `BeautifulSoup` or `dict` (format-dependent), HNAP → JSON, CBN → `Element` |
 | Orchestrator | Policy engine: signal→policy dispatch, circuit breaker, status derivation |
 | ModemDataCollector | Single collection cycle: auth → load → parse → `ModemData` or signal |
@@ -226,9 +226,9 @@ graph TD
     HA --> HS["<b>SESSION</b><hr/>• uid + PrivateKey cookies<br/>• HNAP_AUTH header"]
     HS --> HF["<b>FORMAT</b><hr/>• hnap (JSON + delimiters)"]
 
-    HTTP --> HTA["<b>AUTH</b><hr/>• none<br/>• basic<br/>• form / form_nonce<br/>• form_pbkdf2 🔗<br/>• form_sjcl 🔗<br/>• url_token 🔗"]
+    HTTP --> HTA["<b>AUTH</b><hr/>• none<br/>• basic<br/>• bearer<br/>• form / form_nonce<br/>• form_pbkdf2 🔗<br/>• form_sjcl 🔗<br/>• url_token 🔗"]
     HTA --> HTS["<b>SESSION</b><hr/>• stateless<br/>• cookie<br/>• CSRF 🔗<br/>• url_token 🔗"]
-    HTS --> HTF["<b>FORMAT</b><hr/>• table<br/>• table_transposed<br/>• javascript<br/>• javascript_json<br/>• html_fields<br/>• json<br/>• xml"]
+    HTS --> HTF["<b>FORMAT</b><hr/>• table<br/>• table_transposed<br/>• javascript<br/>• javascript_json<br/>• javascript_vars<br/>• html_fields<br/>• json<br/>• json_transposed"]
 
     CBN --> CA["<b>AUTH</b><hr/>• form_cbn (AES-256-CBC)"]
     CA --> CS["<b>SESSION</b><hr/>• rotating sessionToken cookie<br/>• stable SID cookie"]
@@ -269,21 +269,22 @@ choosing `json` format doesn't require `form_pbkdf2` auth.
 
 ### Constraint Summary
 
-| Transport | Loader | Valid Auth | Valid Formats | Valid Action Types |
-|-----------|--------|-----------|--------------|-------------------|
-| `hnap` | HNAPLoader → `dict` | `hnap` only | `hnap` only | `hnap` |
-| `http` | HTTPLoader → BeautifulSoup or dict | `none`, `basic`, `form`, `form_nonce`, `url_token`, `form_pbkdf2`, `form_sjcl` | `table`, `table_transposed`, `javascript`, `javascript_json`, `html_fields`, `json`, `xml` | `http` |
-| `cbn` | CBNLoader → `Element` | `form_cbn` | `xml` | `cbn` |
+<!-- BEGIN GENERATED: constraint-summary (from the auth, format, and action models; run packages/cable_modem_monitor_core/scripts/generate_constraint_tables.py) -->
+| Transport | Loader | Valid auth | Valid formats | Valid action types |
+|-----------|--------|------------|---------------|--------------------|
+| `cbn` | `CBNLoader` → `Element` | `form_cbn` | `xml` | `cbn` |
+| `hnap` | `HNAPLoader` → `dict` | `hnap` | `hnap` | `hnap` |
+| `http` | `HTTPResourceLoader` → `BeautifulSoup` or `dict` | `basic`, `bearer`, `form`, `form_nonce`, `form_pbkdf2`, `form_sjcl`, `none`, `url_token` | `html_fields`, `javascript`, `javascript_json`, `javascript_vars`, `json`, `json_transposed`, `table`, `table_transposed` | `http` (optional `action_auth`) |
+<!-- END GENERATED: constraint-summary -->
 
 At runtime, the format declared in parser.yaml determines how the response
-is decoded. HTML formats (`table`, `table_transposed`, `javascript`,
-`javascript_json`, `html_fields`) are parsed into `BeautifulSoup`.
-Structured formats (`json`, `xml`) are decoded into `dict`. Any format supports an optional
-`encoding` property (e.g., `encoding: base64` for modems that wrap
-JSON in base64). The encoding is a pre-step — the loader
-unwraps the encoding before the format-specific decoder runs. The
-format-to-value-type mapping is deterministic and validated at config
-load time.
+is decoded. Each format model declares its own `decode_kind`: `html`
+yields `BeautifulSoup`, `json` and `hnap` yield `dict`, `xml` yields
+`Element`. Any format supports an optional `encoding` property (e.g.,
+`encoding: base64` for modems that wrap JSON in base64). The encoding is
+a pre-step — the loader unwraps the encoding before the format-specific
+decoder runs. The format-to-value-type mapping is deterministic and
+validated at config load time.
 
 These constraints are validated at both **build time** (Pydantic validation
 in Catalog's dev-gate) and **load time** (`load_modem_config()` in Core).
@@ -295,21 +296,28 @@ with mysterious parsing failures.
 Adding a new format, auth strategy, or transport is **additive only** — no
 existing entries change.
 
-- **New format for `http`:** Add the `BaseParser` implementation, add the
-  format string to the valid formats list, update validators. Existing
-  modem configs and tests are untouched.
-- **New auth strategy for `http`:** Add the model (with `display_name`
-  and `transport` ClassVars), the manager module (with `create_manager()`
-  entry point), and a test handler module. Add to the `AuthConfig` union
-  and `_AUTH_MODELS` list. The factory dynamically loads the manager by
-  strategy literal — no factory code changes. Display labels and
-  transport validation derive from ClassVars automatically.
-- **New transport:** Add a new loader, new `BaseParser` implementation(s),
-  a new row in the constraint table, and validator updates. No existing
-  code changes. `cbn` demonstrates this: new loader, new `xml`
-  parser, new `form_cbn` auth — no changes to HTTP or HNAP code.
+- **New format for `http`:** Add the `BaseParser` implementation and the
+  format model (with its `format_tag`, `decode_kind`, and `transports`
+  ClassVars), then append it to `CHANNEL_SECTION_MODELS` or
+  `SYSTEM_INFO_SOURCE_MODELS`. Existing modem configs and tests are
+  untouched.
+- **New auth strategy for `http`:** Add the model (with `display_name`,
+  `transport`, and `stateless` ClassVars), the manager module (with
+  `create_manager()` entry point), and a test handler module. Add to the
+  `AuthConfig` union and `_AUTH_MODELS` list. The factory dynamically
+  loads the manager by strategy literal — no factory code changes.
+  Display labels, transport validation, and login-page detection derive
+  from ClassVars automatically.
+- **New transport:** Add a new loader, new `BaseParser`
+  implementation(s), a new action model, the transport literal on
+  `ModemConfig.transport`, and a `_TRANSPORT_PROSE` entry in the table
+  generator. No existing code changes. `cbn` demonstrates this: new
+  loader, new `xml` parser, new `form_cbn` auth — no changes to HTTP or
+  HNAP code.
 
-The constraint table is an allowlist, not a lock. It prevents
+The tables above are generated from those models, so a new entry
+appears in the specs by regenerating rather than by hand-editing. The
+constraint table is an allowlist, not a lock: it prevents
 misconfigurations without preventing growth.
 
 ---
@@ -325,17 +333,20 @@ Handles authentication for all transports through configuration, not code.
 Each auth strategy is a single audited implementation that reads its parameters
 from modem.yaml:
 
+<!-- BEGIN GENERATED: auth-strategies (from the auth models; run packages/cable_modem_monitor_core/scripts/generate_constraint_tables.py) -->
 | Strategy | Transport | Stateless? |
 |----------|-----------|:----------:|
-| `none` | HTTP | Yes |
-| `basic` | HTTP | Yes |
-| `form` | HTTP | No |
-| `form_nonce` | HTTP | No |
-| `hnap` | HNAP | No |
-| `form_pbkdf2` | HTTP | No |
-| `form_sjcl` | HTTP | No |
-| `url_token` | HTTP | No |
-| `form_cbn` | CBN | No |
+| `basic` | `http` | Yes |
+| `bearer` | `http` | No |
+| `form` | `http` | No |
+| `form_cbn` | `cbn` | No |
+| `form_nonce` | `http` | No |
+| `form_pbkdf2` | `http` | No |
+| `form_sjcl` | `http` | No |
+| `hnap` | `hnap` | No |
+| `none` | `http` | Yes |
+| `url_token` | `http` | No |
+<!-- END GENERATED: auth-strategies -->
 
 See [MODEM_YAML_SPEC.md](MODEM_YAML_SPEC.md#auth) for per-strategy
 config fields.
