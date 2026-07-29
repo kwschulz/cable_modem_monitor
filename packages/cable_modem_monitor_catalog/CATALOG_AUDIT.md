@@ -2,7 +2,7 @@
 
 > Auto-generated. Run `scripts/generate_catalog_index.py` to refresh.
 
-**43 configurations supported** — 25 confirmed on real hardware, 18 awaiting verification.
+**43 configurations supported** — 26 confirmed on real hardware, 17 awaiting verification.
 
 ---
 
@@ -40,7 +40,6 @@ and share a diagnostics snapshot.
 | C3700 | HTML | Comcast, Cox, Spectrum | synthetic |
 | CM2000 | HTML | Comcast, Cox, Spectrum, Xfinity | synthetic |
 | CM600 | HTML | Comcast, Cox, Spectrum, TWC | synthetic |
-| F3896LG-VMB | HTML | Virgin Media UK | generated |
 | CGA2121 | HTML | Telia | generated |
 | CGA4236 | HTML | Unknown | — |
 | CGA6444VF | HTML | Vodafone | — |
@@ -88,6 +87,7 @@ Entries with an open capability gap are listed above, not here.
 | CM1200 (basic) | HTML | Comcast, Spectrum, Cox | — |
 | CM2050V | HTML | Comcast, Xfinity | — |
 | CM3000 | HTML | Comcast, Cox, Spectrum, Xfinity | — |
+| F3896LG-VMB | HTML | Virgin Media UK | generated |
 | DM1000 | HTML | Koodo | hybrid |
 | XB10 | HTML | Xfinity | — |
 | XB6 | HTML | Rogers | — |

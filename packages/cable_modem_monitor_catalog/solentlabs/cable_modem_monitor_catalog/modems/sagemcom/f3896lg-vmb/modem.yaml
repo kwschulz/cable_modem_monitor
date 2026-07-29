@@ -29,7 +29,7 @@ hardware:
   chipset: "Broadcom BCM3390"
   release_date: "2021-10"
 
-status: awaiting_verification
+status: confirmed
 
 sources:
   auth_config: "Synthetic HAR — no authentication required"
@@ -51,7 +51,7 @@ notes: |
   DOCSIS 3.1 gateway made by Sagemcom. Chipset: Broadcom BCM3390.
   Sold by Virgin Media as the "Hub 5" (community name "SuperHub 5").
   REST API at /rest/v1/cablemodem/ - no authentication required.
-  33 SC-QAM downstream + 1 OFDM, 5 ATDMA upstream + 1 OFDMA.
+  32 SC-QAM downstream + 1 OFDM, 5 ATDMA upstream + 1 OFDMA.
   bootFilename shows "vmdg660" (Virgin's internal designation).
   Default IP: 192.168.100.1 (modem mode) or 192.168.0.1 (router mode).
 
