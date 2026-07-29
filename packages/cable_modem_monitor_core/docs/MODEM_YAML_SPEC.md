@@ -762,7 +762,8 @@ walking a dot-separated path, and injects
 subsequent requests.
 
 The login request sends `{"username": "<username>", "password": "<password>"}` as the
-JSON body.
+JSON body. Set `username_field: ""` for password-only firmwares — the
+username key is then omitted entirely rather than sent empty.
 
 ```yaml
 auth:
@@ -776,6 +777,7 @@ auth:
 | `strategy` | string | yes | Always `"bearer"` |
 | `login_endpoint` | string | yes | Path to POST the JSON login body to |
 | `token_path` | string | yes | Dot-separated JSON path to the token in the response (e.g., `"created.token"` extracts `response["created"]["token"]`) |
+| `username_field` | string | no | Key carrying the username, default `"username"`. Empty string omits the username from the body — required for firmwares that authenticate on a password alone. |
 
 **Login request:**
 
@@ -785,14 +787,18 @@ Content-Type: application/json
 {"username": "<username>", "password": "<password>"}
 ```
 
+With `username_field: ""` the body is `{"password": "<password>"}`.
+
 **Token extraction:** the `token_path` value is split on `.` and used
 to walk the parsed JSON response. For example, `"created.token"` with
 response `{"created": {"token": "abc", "userLevel": "regular"}}`
 extracts `"abc"`. Returns an error if any key in the path is missing
 or the response is not valid JSON.
 
-**Success detection:** HTTP non-200 → `AuthResult(success=False)`.
-Missing token path → `AuthResult(success=False)`. Non-JSON response →
+**Success detection:** any 2xx carrying the token succeeds — token
+creation legitimately answers `201 Created`. Non-2xx →
+`AuthResult(success=False)`. Missing token path →
+`AuthResult(success=False)`. Non-JSON response →
 `AuthResult(success=False)`.
 
 **Transport:** `http` only.
@@ -800,9 +806,12 @@ Missing token path → `AuthResult(success=False)`. Non-JSON response →
 **Header injected:** `Authorization: Bearer <token>`. The strategy's
 `headers()` method returns `frozenset({"authorization", "cookie"})`.
 
-Evidence: Virgin Media Hub 5 REST API — monitoring endpoints are
-public (no auth), but the restart endpoint at `/rest/v1/system/reboot`
-requires a Bearer token from `/rest/v1/user/login`. See issue #82.
+Evidence: Sagemcom F3896LG REST API, shipped by two Liberty Global
+operators. On Virgin Media (Hub 5) the monitoring endpoints are public
+and only the restart endpoint at `/rest/v1/system/reboot` needs a token
+(issue #82). On Ziggo the capture shows the token on every request
+(issue #185). Both firmwares authenticate on a password alone and
+answer `POST /rest/v1/user/login` with `201`.
 
 ---
 

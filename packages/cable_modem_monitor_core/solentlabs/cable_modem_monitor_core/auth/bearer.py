@@ -34,13 +34,17 @@ class BearerAuthManager(BaseAuthManager):
 
         _logger.log(log_level, "Bearer login: POST %s", config.login_endpoint)
 
-        response = session.post(
-            login_url,
-            json={"username": username, "password": password},
-            timeout=timeout,
-        )
+        # Password-only firmwares send no username key at all; an empty
+        # username_field reproduces that body exactly.
+        credentials: dict[str, str] = {"password": password}
+        if config.username_field:
+            credentials = {config.username_field: username, "password": password}
 
-        if response.status_code != 200:
+        response = session.post(login_url, json=credentials, timeout=timeout)
+
+        # Token creation legitimately answers 201; any 2xx that carries the
+        # token is a successful login.
+        if not 200 <= response.status_code < 300:
             return AuthResult(
                 success=False,
                 error=f"Login returned HTTP {response.status_code}",

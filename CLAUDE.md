@@ -212,6 +212,26 @@ propose fixes first.
 
 ## Verification Discipline
 
+The first two rules govern the rest of this section. Every other rule
+here asks for a check done privately; these two put the check in the
+reply, where a skipped one is visible without re-running the work.
+
+- **Cite what you opened.** When stating a fact or a cause about the
+  system, name the files or commands the claim rests on. A claim about
+  CI cites a workflow file; a claim about history cites `git log`. When
+  the named sources don't cover the claim's domain, the hole shows on
+  the page: *"CI isn't recording the trend (checked: Makefile, the
+  regression script)"* is visibly unsupported, because neither source
+  is CI. This is the forcing function from *name the governing spec*,
+  generalised past specs.
+- **An unexplained number stays unexplained.** Report the measurement;
+  do not supply a cause you have not verified. "I can't account for
+  this yet" is a complete answer. On 2026-07-29 every measurement was
+  correct — fleet accuracy, the per-modem deltas, the four-day zero
+  window — and every wrong conclusion was an invented cause laid over
+  one of them, each disproved by a single `git log` or `grep` that ran
+  only after the user pushed back.
+
 - **Verify against ground truth, not against doc claims.** When
   asked to review a planning doc / status doc / roadmap, summarize
   what's *actually true* (check code, git, issues), not what the

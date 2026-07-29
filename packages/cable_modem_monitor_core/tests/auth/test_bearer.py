@@ -17,11 +17,13 @@ from solentlabs.cable_modem_monitor_core.models.modem_config.auth import BearerA
 def _config(
     login_endpoint: str = "/rest/v1/user/login",
     token_path: str = "created.token",
+    username_field: str = "username",
 ) -> BearerAuth:
     return BearerAuth(
         strategy="bearer",
         login_endpoint=login_endpoint,
         token_path=token_path,
+        username_field=username_field,
     )
 
 
@@ -128,6 +130,42 @@ class TestBearerHappyPath:
         body = session.post.call_args[1]["json"]
         assert body["username"] == "someuser"
         assert body["password"] == "pass"
+
+    # Sagemcom F3896LG answers a successful login with 201 Created, not 200.
+    # Evidence: issue #185 HAR (Ziggo F3896LG-ZG), POST /rest/v1/user/login.
+    @pytest.mark.parametrize("status_code", [200, 201, 202, 204])
+    def test_any_2xx_is_success(self, status_code: int) -> None:
+        """Any 2xx login response carrying the token succeeds."""
+        session = _session()
+        session.post.return_value = _response(status_code, {"created": {"token": "tok"}})
+
+        manager = BearerAuthManager(_config())
+        result = manager.authenticate(session, "http://192.168.100.1", "", "pass")
+
+        assert result.success is True
+        assert session.headers["Authorization"] == "Bearer tok"
+
+    # Password-only firmware: both Virgin (issue #82 curl) and Ziggo (issue #185
+    # HAR) post {"password": ...} with no username key.
+    def test_username_omitted_when_username_field_empty(self) -> None:
+        """Empty username_field drops the username key from the login body."""
+        session = _session()
+        session.post.return_value = _response(201, {"created": {"token": "t"}})
+
+        manager = BearerAuthManager(_config(username_field=""))
+        manager.authenticate(session, "http://192.168.100.1", "unused", "secret")
+
+        assert session.post.call_args[1]["json"] == {"password": "secret"}
+
+    def test_username_field_renames_the_key(self) -> None:
+        """A non-default username_field names the credential key."""
+        session = _session()
+        session.post.return_value = _response(200, {"created": {"token": "t"}})
+
+        manager = BearerAuthManager(_config(username_field="user"))
+        manager.authenticate(session, "http://192.168.100.1", "admin", "pass")
+
+        assert session.post.call_args[1]["json"] == {"user": "admin", "password": "pass"}
 
     def test_shallow_token_path(self) -> None:
         """Single-segment token_path extracts top-level key."""
