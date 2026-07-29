@@ -54,10 +54,11 @@ body:
     id: auth-required
     attributes:
       label: Does your modem require login?
-      description: When you visit your modem's web interface, do you need to enter a username/password?
+      description: When you visit your modem's web interface, do you have to sign in before the pages load?
       options:
         - "No - pages load without login"
-        - "Yes - requires username/password"
+        - "Yes - password only"
+        - "Yes - username and password"
         - "Not sure"
     validations:
       required: true
