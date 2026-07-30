@@ -11,8 +11,12 @@
       "00:11:22:33:44:53",
       "00:11:22:33:44:54",
       "00:11:22:33:44:55",
-      "aa:bb:cc:dd:ee:ff"
-    ]
+      "aa:bb:cc:dd:ee:ff",
+      "01:23:45:67:89:ab"
+    ],
+    "_provenance": {
+      "01:23:45:67:89:ab": "Placeholder MAC in the Sagemcom F3896LG MAC-filter UI strings, present in every shipped locale ('(example: 01:23:45:67:89:AB)', '(Beispiel: ...)', '(exemple : ...)'). Firmware localization data in index.js, not a contributor address. Appears in the sagemcom/f3896lg-zg fixture."
+    }
   },
 
   "safe_ip_prefixes": {
@@ -158,6 +162,7 @@
       "aaaa:",
       "abcd:",
       "aa:bb:cc:dd",
+      "01:23:45:67:89:ab",
       "fe80:"
     ]
   },
@@ -167,12 +172,16 @@
     "_provenance": {
       "11.22.11.22": "Static example IP in Xfinity XB-series firmware help text (locale/global.js), not the contributor's WAN IP. Appears in XB6, XB7, XB10 HAR fixtures.",
       "10.0.0.1": "Xfinity XB-series default LAN gateway (router mode). Declared as default_host in technicolor/xb10 modem.yaml; identical across all XB10 units, RFC1918 private, not contributor PII.",
-      "3.81.21.97": "Not an IP: substring of the Technicolor XB8 BOOT version 'S1TC-3.81.21.97' in the technicolor/xb8 fixture. Firmware version self-reported by the contributor in issue #101; the IPv4 regex matches the dotted tail of the version string."
+      "3.81.21.97": "Not an IP: substring of the Technicolor XB8 BOOT version 'S1TC-3.81.21.97' in the technicolor/xb8 fixture. Firmware version self-reported by the contributor in issue #101; the IPv4 regex matches the dotted tail of the version string.",
+      "192.168.178.1": "Static example gateway in a Sagemcom F3896LG Dutch help string ('Open vervolgens een browser en ga naar 192.168.178.1'). Firmware UI copy in index.js, not the contributor's LAN. Appears in the sagemcom/f3896lg-zg fixture.",
+      "1.5.75.75": "Not an IP: substring of an inline SVG path in the Sagemcom F3896LG index.js ('...5.75v3.75a.75.75 0 01-1.5 0V9...'). The IPv4 regex matches the dotted coordinate run."
     },
     "values": [
       "3.81.21.97",
       "10.0.0.1",
-      "11.22.11.22"
+      "11.22.11.22",
+      "192.168.178.1",
+      "1.5.75.75"
     ]
   },
 

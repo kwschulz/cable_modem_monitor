@@ -19,6 +19,7 @@
     "pyür":        {"abbrev": "PYÜR", "name": "Pyür",                  "color": "aa6699"},
     "pyur":        {"abbrev": "PYÜR", "name": "Pyür",                  "color": "aa6699"},
     "virgin":      {"abbrev": "VM",   "name": "Virgin Media",           "color": "aa4466"},
+    "ziggo":       {"abbrev": "ZIG",  "name": "Ziggo",                  "color": "cc7744"},
     "vodafone":    {"abbrev": "VDF",  "name": "Vodafone Kabel",         "color": "aa6666"},
     "magenta":     {"abbrev": "MAG",  "name": "Magenta Telekom",        "color": "aa5588"},
     "unitymedia":  {"abbrev": "UM",   "name": "Unitymedia",             "color": "778899"},
@@ -31,7 +32,7 @@
   "display_order": [
     "comcast", "xfinity", "cox", "spectrum", "twc", "rogers", "shaw",
     "videotron", "volia", "pyür", "vodafone", "magenta", "unitymedia",
-    "virgin", "telia", "mediacom", "suddenlink", "rcn", "cableone",
+    "virgin", "ziggo", "telia", "mediacom", "suddenlink", "rcn", "cableone",
     "kood", "brighthouse", "service electric", "teksavvy"
   ],
   "info": {
@@ -49,6 +50,7 @@
     "volia":       {"name": "Volia",                   "region": "Ukraine",            "approval_url": "https://en.wikipedia.org/wiki/Volia_(ISP)", "notes": "Acquired by Datagroup (2021)"},
     "pyür":        {"name": "Pyür",                   "region": "Germany",            "approval_url": "https://www.pyur.com/", "notes": "Formerly Tele Columbus"},
     "virgin":      {"name": "Virgin Media",            "region": "UK",                 "approval_url": "https://www.virginmedia.com/", "notes": "No BYOM; modem mode available"},
+    "ziggo":       {"name": "Ziggo",                   "region": "Netherlands",        "approval_url": "https://www.ziggo.nl/", "notes": "VodafoneZiggo joint venture. Source: https://en.wikipedia.org/wiki/Ziggo"},
     "vodafone":    {"name": "Vodafone Kabel",          "region": "Germany",            "approval_url": "https://www.vodafone.de/", "notes": "BYOM allowed since 2016; absorbed Unitymedia"},
     "magenta":     {"name": "Magenta Telekom",         "region": "Austria",            "approval_url": "https://www.magenta.at/hilfe-service/services/hardwaresupport/device/internet-fiber/box", "notes": "Formerly UPC Austria / T-Mobile Austria; distributes CH7465MT as Internet Fiber Box"},
     "unitymedia":  {"name": "Unitymedia",              "region": "Germany (West)",     "approval_url": "", "notes": "Merged into Vodafone (2019)"},

@@ -23,6 +23,7 @@ actions:
       strategy: bearer
       login_endpoint: "/rest/v1/user/login"
       token_path: "created.token"
+      username_field: ""
 
 hardware:
   docsis_version: "3.1"

@@ -702,11 +702,13 @@ class ModemDataCollector:
         actions = self._modem_config.actions
         if actions is None or actions.logout is None:
             return
-        # requires_session=True means the endpoint needs a valid session cookie to
-        # function. Skip the call when we have no cookies — it would fail anyway.
+        # requires_session=True means the endpoint needs a live session to
+        # function. Skip the call when it is already gone; it would fail anyway.
         # Unauthenticated endpoints (False, the default) can clear any active
-        # server-side session without credentials.
-        if isinstance(actions.logout, HttpAction) and actions.logout.requires_session and not self._session.cookies:
+        # server-side session without credentials. The test is session validity,
+        # not cookie presence: bearer holds a live session in the Authorization
+        # header with an empty jar.
+        if isinstance(actions.logout, HttpAction) and actions.logout.requires_session and not self.session_is_valid:
             return
         with contextlib.suppress(Exception):
             execute_action(self, self._modem_config, actions.logout, log_level=_LOGOUT_LOG_LEVEL)

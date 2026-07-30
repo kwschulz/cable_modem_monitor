@@ -923,30 +923,44 @@ _HTTP_LOGOUT_REQUIRES_SESSION = HttpAction(type="http", method="GET", endpoint="
 _CBN_LOGOUT = CbnAction(type="cbn", fun=16)
 
 
+# Session states the requires_session guard has to tell apart, as
+# (auth_type, cookie_name, set_cookie). The guard reads session_is_valid,
+# not the cookie jar: "header" is a live bearer session with an empty jar,
+# which a cookie test would have read as no session at all (#185).
+_SESSION_STATES: dict[str, tuple[str, str, bool]] = {
+    "no_session": ("form", "PHPSESSID", False),
+    "cookie_session": ("form", "PHPSESSID", True),
+    "header_session": ("bearer", "", False),
+}
+
+
 @pytest.mark.parametrize(
-    "logout_action, set_cookie, expected_fires",
+    "logout_action, session_state, expected_fires",
     [
-        pytest.param(None, False, False, id="no_logout_action"),
-        pytest.param(_HTTP_LOGOUT_DEFAULT, False, True, id="http_default_no_cookies"),
-        pytest.param(_HTTP_LOGOUT_DEFAULT, True, True, id="http_default_has_cookies"),
-        pytest.param(_HTTP_LOGOUT_REQUIRES_SESSION, False, False, id="http_requires_session_guard_fires"),
-        pytest.param(_HTTP_LOGOUT_REQUIRES_SESSION, True, True, id="http_requires_session_has_cookies"),
-        # CBN embeds the session token by protocol — the isinstance guard never
-        # fires, so logout proceeds regardless of local cookie state.
-        pytest.param(_CBN_LOGOUT, False, True, id="cbn_no_cookies"),
-        pytest.param(_CBN_LOGOUT, True, True, id="cbn_has_cookies"),
+        pytest.param(None, "cookie_session", False, id="no_logout_action"),
+        pytest.param(_HTTP_LOGOUT_DEFAULT, "no_session", True, id="http_default_no_session"),
+        pytest.param(_HTTP_LOGOUT_DEFAULT, "cookie_session", True, id="http_default_cookie_session"),
+        pytest.param(_HTTP_LOGOUT_REQUIRES_SESSION, "no_session", False, id="http_requires_session_guard_fires"),
+        pytest.param(_HTTP_LOGOUT_REQUIRES_SESSION, "cookie_session", True, id="http_requires_session_cookie"),
+        pytest.param(_HTTP_LOGOUT_REQUIRES_SESSION, "header_session", True, id="http_requires_session_header"),
+        # CBN embeds the session token by protocol, so the isinstance guard
+        # never fires and logout proceeds regardless of local session state.
+        pytest.param(_CBN_LOGOUT, "no_session", True, id="cbn_no_session"),
+        pytest.param(_CBN_LOGOUT, "cookie_session", True, id="cbn_cookie_session"),
     ],
 )
 def test_attempt_logout_before_retry_matrix(
     logout_action: HttpAction | CbnAction | None,
-    set_cookie: bool,
+    session_state: str,
     expected_fires: bool,
 ) -> None:
     """Table-driven guard matrix for attempt_logout_before_retry."""
-    config = _make_config(logout_action=logout_action)
+    auth_type, cookie_name, set_cookie = _SESSION_STATES[session_state]
+    config = _make_config(auth_type=auth_type, cookie_name=cookie_name, logout_action=logout_action)
     collector = ModemDataCollector(config, MagicMock(), None, "http://localhost", "", "")
+    collector._auth_context = AuthContext()
     if set_cookie:
-        collector._session.cookies.set("PHPSESSID", "abc123")
+        collector._session.cookies.set(cookie_name, "abc123")
 
     with patch("solentlabs.cable_modem_monitor_core.orchestration.collector.execute_action") as mock_action:
         collector.attempt_logout_before_retry()

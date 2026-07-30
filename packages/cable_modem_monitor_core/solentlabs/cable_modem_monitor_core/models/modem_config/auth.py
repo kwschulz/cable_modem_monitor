@@ -232,6 +232,7 @@ class BearerAuth(AuthStrategyBase):
     login_endpoint: str
     token_path: str
     username_field: str = "username"
+    user_id_path: str = ""
 
     display_name: ClassVar[str] = "Bearer Token"
     transport: ClassVar[str] = "http"

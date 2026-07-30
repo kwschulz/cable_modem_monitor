@@ -21,9 +21,9 @@ Auto-generated index of the v3.14 modem catalog.
 
 - `modem.yaml` — Single source of truth (manufacturer, model, hardware, ISPs, status)
 
-**38 modems, 43 configurations** (26 ✅ confirmed, 17 ⏳ awaiting)
+**39 modems, 44 configurations** (26 ✅ confirmed, 18 ⏳ awaiting)
 
-**Auth strategies:** form (14), none (8), hnap (7), basic (5), url_token (3), form_cbn (2), form_pbkdf2 (2), form_nonce (1), form_sjcl (1)
+**Auth strategies:** form (14), none (8), hnap (7), basic (5), url_token (3), form_cbn (2), form_pbkdf2 (2), form_nonce (1), form_sjcl (1), bearer (1)
 
 ## Directory Structure
 
@@ -79,6 +79,7 @@ packages/cable_modem_monitor_catalog/.../modems/
 | Netgear | [CM3000](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/netgear/cm3000/modem.yaml) | 3.1 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") |  | ![form](https://img.shields.io/badge/-form-4A7FB8?style=flat-square "Form Login") | [![COM](https://img.shields.io/badge/-COM-5588aa?style=flat-square "Comcast")](#comcast) [![COX](https://img.shields.io/badge/-COX-cc9966?style=flat-square "Cox Communications")](#cox) [![SPEC](https://img.shields.io/badge/-SPEC-6699aa?style=flat-square "Spectrum (Charter)")](#spectrum) [![XFI](https://img.shields.io/badge/-XFI-aa7788?style=flat-square "Xfinity")](#comcast) | CM3000 | ✅ Confirmed |
 | Netgear | [CM600](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/netgear/cm600/modem.yaml) | 3.0 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | [BCM3384](#bcm3384) | ![basic](https://img.shields.io/badge/-basic-C07820?style=flat-square "Basic Authentication") | [![COM](https://img.shields.io/badge/-COM-5588aa?style=flat-square "Comcast")](#comcast) [![COX](https://img.shields.io/badge/-COX-cc9966?style=flat-square "Cox Communications")](#cox) [![SPEC](https://img.shields.io/badge/-SPEC-6699aa?style=flat-square "Spectrum (Charter)")](#spectrum) [![TWC](https://img.shields.io/badge/-TWC-7799aa?style=flat-square "Time Warner Cable")](#twc) | CM600 | ⏳ Awaiting |
 | Sagemcom | [F3896LG-VMB](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/sagemcom/f3896lg-vmb/modem.yaml) | 3.1 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | [BCM3390](#bcm3390) | ![none](https://img.shields.io/badge/-none-808080?style=flat-square "No Authentication") | [![VM](https://img.shields.io/badge/-VM-aa4466?style=flat-square "Virgin Media")](#virgin) | F3896LG-VMB<br>Hub 5<br>SuperHub 5 | ✅ Confirmed |
+| Sagemcom | [F3896LG-ZG](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/sagemcom/f3896lg-zg/modem.yaml) | 3.1 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | [BCM3390](#bcm3390) | ![bearer](https://img.shields.io/badge/-bearer-1A7FAA?style=flat-square "Bearer Token") | [![ZIG](https://img.shields.io/badge/-ZIG-cc7744?style=flat-square "Ziggo")](#ziggo) | F3896LG-ZG | ⏳ Awaiting |
 | Sercomm | [DM1000](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/sercomm/dm1000/modem.yaml) | 3.1 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | Broadcom | ![form](https://img.shields.io/badge/-form-4A7FB8?style=flat-square "Form Login") | [![KOOD](https://img.shields.io/badge/-KOOD-77aa88?style=flat-square "Koodo")](#kood) | DM1000 | ✅ Confirmed |
 | Technicolor | [CGA2121](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/technicolor/cga2121/modem.yaml) | 3.0 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | [BCM3384](#bcm3384) | ![form](https://img.shields.io/badge/-form-4A7FB8?style=flat-square "Form Login") | [![TEL](https://img.shields.io/badge/-TEL-9966aa?style=flat-square "Telia")](#telia) | CGA2121 | ⏳ Awaiting |
 | Technicolor | [CGA4236](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/technicolor/cga4236/modem.yaml) | 3.1 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | [BCM3390](#bcm3390) | ![pbkdf2](https://img.shields.io/badge/-pbkdf2-4A9A5B?style=flat-square "Form Login (PBKDF2)") | ![UNKN](https://img.shields.io/badge/-UNKN-gray?style=flat-square "Unknown") | CGA4236<br>CGA4236TCH1 | ⏳ Awaiting |
@@ -135,6 +136,7 @@ DOCSIS 3.1
 ├── 2021  Technicolor CGA6444VF  ░░░░░░░░░░░░░███████   5yr  Current
 ├── 2021  Sagemcom    F3896LG-VM ░░░░░░░░░░░░░███████   5yr  Current
 ├── 2022  Hitron      CODA56     ░░░░░░░░░░░░░░░█████   4yr  Current
+├── 2022  Sagemcom    F3896LG-ZG ░░░░░░░░░░░░░░░█████   4yr  Current
 ├── 2022  Technicolor XB8        ░░░░░░░░░░░░░░░█████   4yr  Current
 ├── 2023  Compal      CH8978E    ░░░░░░░░░░░░░░░░████   3yr  Current
 ├── 2023  CommScope   G54        ░░░░░░░░░░░░░░░░████   3yr  Current
@@ -191,6 +193,7 @@ _Scale: 2010-2026 (16 years)_
 | <span id="magenta"></span>MAG | Magenta Telekom | Austria | [Official list](https://www.magenta.at/hilfe-service/services/hardwaresupport/device/internet-fiber/box) | Formerly UPC Austria / T-Mobile Austria; distributes CH7465MT as Internet Fiber Box |
 | <span id="unitymedia"></span>UM | Unitymedia | Germany (West) | — | Merged into Vodafone (2019) |
 | <span id="virgin"></span>VM | Virgin Media | UK | [Official list](https://www.virginmedia.com/) | No BYOM; modem mode available |
+| <span id="ziggo"></span>ZIG | Ziggo | Netherlands | [Official list](https://www.ziggo.nl/) | VodafoneZiggo joint venture. Source: <https://en.wikipedia.org/wiki/Ziggo> |
 | <span id="telia"></span>TEL | Telia | Nordic/Baltic | [Official list](https://www.teliacompany.com/) | Sweden, Finland, Norway, Baltics |
 | <span id="mediacom"></span>MED | Mediacom | US (Midwest/South) | [Official list](https://mediacomcable.com/compatible-retail-modems/) |  |
 | <span id="suddenlink"></span>SUD | Suddenlink (Optimum) | US (13 states) | — | Rebranded to Optimum (Aug 2022); Altice USA subsidiary. Source: <https://en.wikipedia.org/wiki/Suddenlink_Communications> |
@@ -203,4 +206,4 @@ _Scale: 2010-2026 (16 years)_
 
 ---
 
-Generated by `scripts/generate_catalog_index.py` from 44 modem configs ([source](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/scripts/generate_catalog_index.py)).
+Generated by `scripts/generate_catalog_index.py` from 45 modem configs ([source](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/scripts/generate_catalog_index.py)).

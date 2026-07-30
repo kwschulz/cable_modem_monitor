@@ -20,6 +20,7 @@ from .hnap_action import execute_hnap_action
 from .http_action import execute_http_action
 
 if TYPE_CHECKING:
+    from ...auth.base import AuthContext
     from ...models.modem_config.actions import CbnAction, HnapAction, HttpAction
     from ...models.modem_config.config import ModemConfig
     from ..collector import ModemDataCollector
@@ -59,6 +60,9 @@ def execute_action(
         if modem_config.session and modem_config.session.query_params:
             query_params = dict(modem_config.session.query_params)
         session = collector._session
+        # {auth:...} placeholders resolve from the session that sends the
+        # request, so a per-action session brings its own context.
+        auth_context: AuthContext | None = collector._auth_context
         if action.action_auth is not None:
             from ...auth.factory import create_auth_manager_for_action
 
@@ -78,6 +82,7 @@ def execute_action(
                     message=f"Per-action auth failed: {auth_result.error}",
                 )
             session = fresh
+            auth_context = auth_result.auth_context
         return execute_http_action(
             session,
             collector._base_url,
@@ -86,6 +91,7 @@ def execute_action(
             log_level=log_level,
             model=model,
             query_params=query_params or None,
+            auth_context=auth_context,
         )
 
     if isinstance(action, HnapAction):

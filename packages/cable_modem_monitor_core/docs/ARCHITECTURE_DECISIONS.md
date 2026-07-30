@@ -595,7 +595,7 @@ regression.
 **Constrains:** No `logout_url` or `logout_required` convenience
 fields. `actions.logout` presence drives single-session semantics;
 `HttpAction.requires_session` controls whether the pre-retry logout
-call is guarded by cookie presence. Auth strategies that don't use
+call is guarded by session validity. Auth strategies that don't use
 cookies leave `cookie_name` empty (default).
 
 ### Session concurrency — SSOT via `actions.logout`
@@ -614,9 +614,18 @@ a logout block without `max_concurrent: 1`, silently disabling logout.
 
 **New field:** `HttpAction.requires_session: bool = False` distinguishes
 unauthenticated logout endpoints (`false` — can clear any active server-side
-session without a cookie; safe to call during pre-retry recovery) from
-session-scoped endpoints (`true` — skip the pre-retry call when Core has no
-valid cookie, since it would fail anyway and the retry proceeds regardless).
+session without credentials; safe to call during pre-retry recovery) from
+session-scoped endpoints (`true` — skip the pre-retry call when the session
+is not valid, since it would fail anyway and the retry proceeds regardless).
+
+**The guard tests session validity, not cookie presence.** It originally
+read the cookie jar, which is equivalent for every cookie-based strategy but
+wrong for header-authenticated ones: `bearer` holds a live session in
+`session.headers["Authorization"]` with an empty jar, so a cookie test would
+silently skip logout on exactly the modems that most need it. `session_is_valid`
+already answers this per strategy — HNAP checks uid plus private key, cookie
+strategies check `auth.cookie_name`, `url_token` checks the token — so the
+guard delegates to it rather than reimplementing a narrower check.
 CBN transport always embeds the session token by protocol; `requires_session`
 is absent from `CbnAction` by type-system design.
 
@@ -892,12 +901,24 @@ using them to choose the strategy.
 ### `AuthResult.auth_context` is typed
 
 **Decision:** Auth strategies store downstream state in an
-`AuthContext` dataclass with named fields (`url_token`, `private_key`),
-which the runner reads by attribute based on `modem_config.transport`.
+`AuthContext` dataclass with named fields (`url_token`, `private_key`,
+`token`, `user_id`), which the runner reads by attribute based on
+`modem_config.transport`.
 
 **Rationale:** Adding a transport means adding a field, not inventing a
 magic string key. `cbn` needs no field at all — its session token lives
 in cookies managed by `requests.Session`.
+
+**Extended for action endpoints (F3896LG, #185).** `token` and `user_id`
+were added when a firmware turned out to end its session with
+`DELETE /rest/v1/user/{userId}/token/{token}` — both values live in the
+login response and neither is a cookie. They are surfaced to action
+endpoints as `{auth:token}` and `{auth:user_id}`, so the same named-field
+rule now governs two consumers: the resource loader and the action
+executor. The alternative, letting modem.yaml address the login response
+by JSON path, was rejected in MODEM_YAML_SPEC.md § Architecture Decision:
+a fixed key set, not a template language. A third value is a third field
+here, not a new syntax there.
 
 ---
 

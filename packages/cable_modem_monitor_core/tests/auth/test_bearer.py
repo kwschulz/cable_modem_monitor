@@ -1,6 +1,7 @@
 """Tests for Bearer token auth strategy.
 
-Covers: happy path (token extracted), missing token path, HTTP error,
+Covers: happy path (token extracted), auth-context population for
+``{auth:...}`` action placeholders, missing token path, HTTP error,
 bad JSON response, and interface compliance (headers method).
 """
 
@@ -18,12 +19,14 @@ def _config(
     login_endpoint: str = "/rest/v1/user/login",
     token_path: str = "created.token",
     username_field: str = "username",
+    user_id_path: str = "",
 ) -> BearerAuth:
     return BearerAuth(
         strategy="bearer",
         login_endpoint=login_endpoint,
         token_path=token_path,
         username_field=username_field,
+        user_id_path=user_id_path,
     )
 
 
@@ -177,6 +180,70 @@ class TestBearerHappyPath:
 
         assert result.success is True
         assert session.headers["Authorization"] == "Bearer flat_token"
+
+
+# ------------------------------------------------------------------
+# Auth context — values action endpoints address as {auth:...}
+# ------------------------------------------------------------------
+
+
+class TestBearerAuthContext:
+    """Token and user id captured for {auth:token} / {auth:user_id} placeholders."""
+
+    def test_token_populates_auth_context(self) -> None:
+        """The extracted token is stored on AuthContext, not only in the header."""
+        session = _session()
+        session.post.return_value = _response(201, {"created": {"token": "tok123"}})
+
+        result = BearerAuthManager(_config()).authenticate(session, "http://192.168.100.1", "", "pass")
+
+        assert result.auth_context.token == "tok123"
+
+    # fmt: off
+    USER_ID_CASES: list[tuple[object, str, str, str]] = [
+        # (json_body,                                  user_id_path,     expected_user_id, description)
+        ({"created": {"token": "t", "userId": 3}},     "created.userId", "3",  "numeric id coerced to string"),
+        ({"created": {"token": "t", "userId": "u7"}},  "created.userId", "u7", "string id verbatim"),
+        ({"created": {"token": "t"}},                  "created.userId", "",   "path absent from response"),
+        ({"created": {"token": "t", "userId": 3}},     "",               "",   "user_id_path not configured"),
+        ({"created": {"token": "t", "userId": {}}},    "created.userId", "",   "non-scalar id rejected"),
+        ({"created": {"token": "t", "userId": True}},  "created.userId", "",   "bool is not an identifier"),
+    ]
+    # fmt: on
+
+    @pytest.mark.parametrize(
+        "json_body,user_id_path,expected_user_id,description",
+        USER_ID_CASES,
+        ids=[c[3] for c in USER_ID_CASES],
+    )
+    def test_user_id_extraction(
+        self,
+        json_body: object,
+        user_id_path: str,
+        expected_user_id: str,
+        description: str,
+    ) -> None:
+        """user_id_path resolves to a string; anything unresolvable leaves it empty."""
+        session = _session()
+        session.post.return_value = _response(201, json_body)
+
+        manager = BearerAuthManager(_config(user_id_path=user_id_path))
+        result = manager.authenticate(session, "http://192.168.100.1", "", "pass")
+
+        assert result.success is True
+        assert result.auth_context.user_id == expected_user_id
+
+    def test_unresolvable_user_id_does_not_fail_login(self) -> None:
+        """A user_id_path that resolves to nothing still yields a usable session."""
+        session = _session()
+        session.post.return_value = _response(201, {"created": {"token": "tok"}})
+
+        manager = BearerAuthManager(_config(user_id_path="created.userId"))
+        result = manager.authenticate(session, "http://192.168.100.1", "", "pass")
+
+        assert result.success is True
+        assert result.error == ""
+        assert session.headers["Authorization"] == "Bearer tok"
 
 
 # ------------------------------------------------------------------

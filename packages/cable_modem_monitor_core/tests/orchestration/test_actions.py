@@ -677,6 +677,72 @@ class TestHttpCookieParamInterpolation:
 
 
 # ------------------------------------------------------------------
+# Tests — HTTP auth-value endpoint interpolation
+# ------------------------------------------------------------------
+
+
+class TestHttpAuthEndpointInterpolation:
+    """{auth:token} / {auth:user_id} resolution in an action endpoint."""
+
+    _LOGOUT = "/rest/v1/user/{auth:user_id}/token/{auth:token}"
+
+    # fmt: off
+    INTERPOLATION_CASES = [
+        # (endpoint, auth_context, expected_path, description)
+        ("/logout", AuthContext(token="t"), "/logout", "no placeholders — verbatim"),
+        (_LOGOUT, AuthContext(token="tok", user_id="3"), "/rest/v1/user/3/token/tok", "both keys resolved"),
+        (_LOGOUT, AuthContext(token="tok"), "/rest/v1/user/{auth:user_id}/token/tok", "empty user id — left literal"),
+        (_LOGOUT, None, _LOGOUT, "no authenticated session — left literal"),
+        ("/x/{auth:nope}", AuthContext(token="tok"), "/x/{auth:nope}", "unknown key — left literal"),
+    ]
+    # fmt: on
+
+    @pytest.mark.parametrize(
+        "endpoint,auth_context,expected_path,desc",
+        INTERPOLATION_CASES,
+        ids=[c[3] for c in INTERPOLATION_CASES],
+    )
+    def test_auth_endpoint_interpolation(
+        self,
+        endpoint: str,
+        auth_context: AuthContext | None,
+        expected_path: str,
+        desc: str,
+    ) -> None:
+        """Auth-value placeholders resolve from the session's AuthContext."""
+        session = MagicMock(spec=requests.Session)
+        resp = MagicMock()
+        resp.status_code = 204
+        session.request.return_value = resp
+
+        action = HttpAction(type="http", method="DELETE", endpoint=endpoint)
+
+        execute_http_action(session, "http://192.168.100.1", action, auth_context=auth_context)
+
+        assert session.request.call_args[0][1] == f"http://192.168.100.1{expected_path}"
+
+    def test_params_are_not_auth_interpolated(self) -> None:
+        """Placeholders resolve in the endpoint only — params keep their own scheme."""
+        session = MagicMock(spec=requests.Session)
+        session.cookies = requests.cookies.RequestsCookieJar()
+        resp = MagicMock()
+        resp.status_code = 200
+        session.request.return_value = resp
+
+        action = HttpAction(
+            type="http",
+            method="POST",
+            endpoint="/x/{auth:token}",
+            params={"tok": "{auth:token}"},
+        )
+
+        execute_http_action(session, "http://192.168.100.1", action, auth_context=AuthContext(token="tok"))
+
+        assert session.request.call_args[0][1] == "http://192.168.100.1/x/tok"
+        assert session.request.call_args[1]["data"] == {"tok": "{auth:token}"}
+
+
+# ------------------------------------------------------------------
 # Tests — execute_action dispatch
 # ------------------------------------------------------------------
 
@@ -685,10 +751,11 @@ class TestExecuteAction:
     """Single dispatch routing for HTTP and HNAP actions."""
 
     def test_http_action_dispatches(self) -> None:
-        """HTTP action routes to execute_http_action."""
+        """HTTP action routes to execute_http_action with the collector's auth context."""
         collector = MagicMock()
         collector._session = MagicMock(spec=requests.Session)
         collector._base_url = "http://192.168.100.1"
+        collector._auth_context = AuthContext(token="tok", user_id="3")
 
         modem_config = MagicMock()
         modem_config.auth = NoneAuth(strategy="none")
@@ -708,6 +775,7 @@ class TestExecuteAction:
             log_level=logging.INFO,
             model=modem_config.model,
             query_params=None,
+            auth_context=collector._auth_context,
         )
 
     def test_hnap_action_dispatches(self) -> None:

@@ -35,6 +35,7 @@ from ..logging import log_event
 from .base import ActionResult
 
 if TYPE_CHECKING:
+    from ...auth.base import AuthContext
     from ...models.modem_config.actions import HttpAction
 
 _logger = logging.getLogger(__name__)
@@ -49,6 +50,7 @@ def execute_http_action(
     log_level: int = logging.INFO,
     model: str = "",
     query_params: dict[str, str] | None = None,
+    auth_context: AuthContext | None = None,
 ) -> ActionResult:
     """Execute an HTTP action (logout, restart); connection errors on restart are treated as success."""
     stripped_base = base_url.rstrip("/")
@@ -70,6 +72,8 @@ def execute_http_action(
         )
 
     # Phase 3 + 4: Param interpolation and main request
+    if "{auth:" in endpoint:
+        endpoint = _interpolate_auth_endpoint(endpoint, auth_context)
     url = f"{stripped_base}{endpoint}"
     if query_params:
         sep = "&" if "?" in url else "?"
@@ -241,3 +245,21 @@ def _interpolate_cookie_params(
         return m.group(0) if val is None else val
 
     return {k: _COOKIE_PLACEHOLDER_RE.sub(_resolve, v) for k, v in params.items()}
+
+
+_AUTH_PLACEHOLDER_RE = re.compile(r"\{auth:([^}]+)\}")
+
+
+def _interpolate_auth_endpoint(endpoint: str, auth_context: AuthContext | None) -> str:
+    """Replace ``{auth:token}`` / ``{auth:user_id}`` in an endpoint with the authenticated session's values.
+
+    Unresolved keys are left as the literal placeholder, matching
+    ``{cookie:name}``. A fixed key set, not a template language;
+    see MODEM_YAML_SPEC.md § Auth-value placeholders.
+    """
+    values = {"token": auth_context.token, "user_id": auth_context.user_id} if auth_context is not None else {}
+
+    def _resolve(m: re.Match[str]) -> str:
+        return values.get(m.group(1)) or m.group(0)
+
+    return _AUTH_PLACEHOLDER_RE.sub(_resolve, endpoint)

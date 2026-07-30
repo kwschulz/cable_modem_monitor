@@ -778,6 +778,7 @@ auth:
 | `login_endpoint` | string | yes | Path to POST the JSON login body to |
 | `token_path` | string | yes | Dot-separated JSON path to the token in the response (e.g., `"created.token"` extracts `response["created"]["token"]`) |
 | `username_field` | string | no | Key carrying the username, default `"username"`. Empty string omits the username from the body — required for firmwares that authenticate on a password alone. |
+| `user_id_path` | string | no | Dot-separated JSON path to a user identifier in the login response, resolved the same way as `token_path`. Set it only when an action endpoint needs the value. |
 
 **Login request:**
 
@@ -794,6 +795,18 @@ to walk the parsed JSON response. For example, `"created.token"` with
 response `{"created": {"token": "abc", "userLevel": "regular"}}`
 extracts `"abc"`. Returns an error if any key in the path is missing
 or the response is not valid JSON.
+
+**Downstream values:** the extracted token is also stored in
+`AuthContext.token`, and `user_id_path` (when set) in
+`AuthContext.user_id`. Action endpoints reference both as
+`{auth:token}` and `{auth:user_id}` — see
+[Auth-value placeholders](#auth-value-placeholders). Firmwares that end
+a session by addressing it in the URL path need them; re-reading the
+token out of the `Authorization` header would be indirect, and the user
+id never reaches the header at all. A `user_id_path` resolving to a
+number is stored as its string form. Missing or unresolvable
+`user_id_path` leaves `AuthContext.user_id` empty and does not fail the
+login.
 
 **Success detection:** any 2xx carrying the token succeeds — token
 creation legitimately answers `201 Created`. Non-2xx →
@@ -995,8 +1008,8 @@ When `actions.logout` is configured, logout fires in two places:
   never released. Whether the call proceeds depends on `requires_session`
   (see below).
 
-The integration cannot clear another client's session — it doesn't
-have their cookie. If a third-party session holds the slot and the
+The integration cannot clear another client's session — it holds no
+credential for one. If a third-party session holds the slot and the
 pre-retry logout doesn't free it, login fails with
 `AuthResult.FAILURE` and status reports `auth_failed`. Recovery
 happens when the other session ends (explicit logout or modem-side
@@ -1046,8 +1059,8 @@ Both actions share the same schema with two type discriminators:
 **Logout call sites:** Core invokes `actions.logout` in two places:
 after a successful poll (session always valid), and before a same-poll
 auth retry (`attempt_logout_before_retry`). The retry call is guarded
-by `requires_session` — if `true` and no session cookies are present,
-the call is skipped. See [Single-session modems](#single-session-modems)
+by `requires_session` — if `true` and the session is not valid, the
+call is skipped. See [Single-session modems](#single-session-modems)
 for the full call-site semantics.
 
 ### Action schema — `type: http`
@@ -1070,8 +1083,8 @@ actions:
 |-------|------| :--------: |-------------|
 | `type` | enum | yes | `http`, `hnap`, or `cbn` |
 | `method` | string | yes | HTTP method (`GET`, `POST`, etc.). No default — must be explicit. |
-| `endpoint` | string | yes | URL path to send the request to |
-| `requires_session` | bool | `false` | *Logout only.* `false` = endpoint is unauthenticated and can clear any active server-side session without credentials. `true` = endpoint requires a valid session cookie; Core skips the pre-retry logout call when no session cookie is present. |
+| `endpoint` | string | yes | URL path to send the request to. May contain `{auth:token}` / `{auth:user_id}` placeholders — see [Auth-value placeholders](#auth-value-placeholders). |
+| `requires_session` | bool | `false` | *Logout only.* `false` = endpoint is unauthenticated and can clear any active server-side session without credentials. `true` = endpoint needs a live session; Core skips the pre-retry logout call when the session is not valid. |
 | `params` | map | no | Form parameters. If present, body is `application/x-www-form-urlencoded`. Mutually exclusive with `json_body`. |
 | `json_body` | map | no | JSON request body. If present, body is `application/json`. Mutually exclusive with `params`. Use for REST APIs that accept JSON. |
 | `headers` | map | no | Per-action headers. Merged with session-level `headers` (action wins on conflict). |
@@ -1204,6 +1217,64 @@ the action fires. If the named cookie is absent from the jar when the
 action executes, the placeholder is left unresolved and the param value
 is sent as the literal string `{cookie:name}` — callers should ensure
 the cookie exists via `pre_fetch_url`.
+
+### Auth-value placeholders
+
+Some REST firmwares address the session itself in the URL. The
+Sagemcom F3896LG ends one with
+`DELETE /rest/v1/user/{userId}/token/{token}`, where both values come
+from the login response body and neither is a cookie. Use `{auth:…}`
+placeholders in an action `endpoint`:
+
+```yaml
+auth:
+  strategy: bearer
+  login_endpoint: "/rest/v1/user/login"
+  token_path: "created.token"
+  user_id_path: "created.userId"
+
+actions:
+  logout:
+    type: http
+    method: DELETE
+    endpoint: "/rest/v1/user/{auth:user_id}/token/{auth:token}"
+    requires_session: true
+```
+
+Two keys are defined, both resolved from `AuthContext` at action time:
+
+| Placeholder | Source |
+|-------------|--------|
+| `{auth:token}` | `AuthContext.token` — the session token the auth strategy obtained |
+| `{auth:user_id}` | `AuthContext.user_id` — the account identifier, when the strategy captures one |
+
+An unresolved placeholder (empty `AuthContext` field, or no
+authenticated session) leaves the literal `{auth:key}` text in the
+endpoint, matching how `{cookie:name}` behaves in `params`. For a
+logout that means the request goes to a nonsense path and fails
+harmlessly; `requires_session: true` is what prevents the call being
+attempted with no session at all.
+
+**Scope:** placeholders resolve in `endpoint` only, not in `params`,
+`json_body`, or `headers`. No modem has needed them there. `params`
+has its own `{cookie:name}` resolution, which is unrelated and stays
+as it is.
+
+### Architecture Decision: a fixed key set, not a template language
+
+`{auth:…}` accepts two known keys, not arbitrary expressions or paths
+into the login response. Which values Core captures is decided in the
+auth strategy (`token_path`, `user_id_path`); modem.yaml only names an
+already-captured value. This is the same division as
+`endpoint_pattern`: the config declares *what* to use, Core owns *how*
+it is obtained.
+
+**Why not `{response:created.userId}`?** That pushes JSON-path
+evaluation into endpoint strings, makes every login response
+permanently addressable, and turns a two-key substitution into a
+template evaluator with its own failure modes. A third key, if one is
+ever observed, is a field on `AuthContext` and a row in the table
+above.
 
 **Extensibility:** If a future modem needs non-form extraction (e.g.,
 JavaScript variable), add an `extraction_mode` field to the schema and

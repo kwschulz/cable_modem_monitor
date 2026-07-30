@@ -56,6 +56,9 @@ ignoreWords:
   - fehlgeschlagen
   - Kanalbenennung
   - módem
+  # Source citations in catalog modem.yaml: publication name, Dutch product name
+  - Telecompaper
+  - zwart
 
 words:
   # Home Assistant tooling

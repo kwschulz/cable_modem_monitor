@@ -124,15 +124,18 @@ class ModemDataCollector:
         Called by the orchestrator immediately before clear_session() when
         LOAD_AUTH or LOAD_INTEGRITY triggers a retry. Releases any active
         server-side session so the subsequent re-authentication can succeed.
-        Does not inspect or clear session cookies — that is clear_session()'s
-        responsibility. The firmware's logout endpoint does not require
-        credentials (confirmed on SB8200 v6), so the call succeeds whether or
-        not the session has cookies. Failure is silently ignored; the retry
-        proceeds regardless.
+        Does not inspect or clear session state — that is clear_session()'s
+        responsibility. Failure is silently ignored; the retry proceeds
+        regardless.
 
-        No-op unless ``actions.logout`` is configured.
-        When ``actions.logout.requires_session`` is true and the session
-        has no cookies, the call is skipped (session already lost).
+        No-op unless ``actions.logout`` is configured. With
+        ``requires_session: false`` the call always proceeds — such endpoints
+        clear a server-side session without credentials (confirmed on
+        SB8200 v6). With ``requires_session: true`` the call is skipped when
+        ``session_is_valid`` is False, because the credential the endpoint
+        needs is already gone. The test is session validity, not cookie
+        presence: header-authenticated strategies (``bearer``) hold a live
+        session with an empty cookie jar.
         """
 ```
 
@@ -203,7 +206,7 @@ class CollectorSignal(Enum):
 | `AUTH_LOCKOUT` | Trip circuit breaker immediately, report `auth_failed` |
 | `CONNECTIVITY` | Abort, report `unreachable`, apply connectivity backoff |
 | `LOAD_ERROR` | Abort, report `unreachable` |
-| `LOAD_AUTH` | For single-session modems (`actions.logout` configured): attempt logout (best-effort; skipped if `requires_session: true` and no cookies) before clearing session. Then clear session, retry once in same poll, increment auth streak if retry fails, report `auth_failed` (see UC-17, UC-18) |
+| `LOAD_AUTH` | For single-session modems (`actions.logout` configured): attempt logout (best-effort; skipped if `requires_session: true` and the session is not valid) before clearing session. Then clear session, retry once in same poll, increment auth streak if retry fails, report `auth_failed` (see UC-17, UC-18) |
 | `LOAD_INTEGRITY` | Same as `LOAD_AUTH` — for single-session modems, attempt logout (best-effort) before clearing session. Clear session, retry once in same poll, increment auth streak if retry fails, report `auth_failed` (see UC-19a) |
 | `PARSE_ERROR` | Abort, report `parser_issue` |
 

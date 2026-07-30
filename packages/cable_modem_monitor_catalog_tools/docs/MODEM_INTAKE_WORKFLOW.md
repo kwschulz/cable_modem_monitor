@@ -355,6 +355,13 @@ name or a likely label (e.g., "uptime", "Up Time") and add the mapping to
 the parser.yaml. A parser that ships without a Tier-1 field will fail
 `verify_diagnostics` at confirmation time.
 
+`generate_golden_file` runs the parser coordinator, not the
+orchestrator, so its output omits every orchestrator-derived field —
+`rate_corrected` / `rate_uncorrected`, signal classification, status
+derivation. Use it for the channel-count and field sanity check above.
+The committed golden comes from the orchestrated replay in Step 9,
+which is what CI compares against.
+
 Then write the catalog package:
 
 ```python
@@ -367,10 +374,22 @@ See [ONBOARDING_SPEC.md](ONBOARDING_SPEC.md) for the full
 
 ## Step 9: Run Tests
 
-```python
-from solentlabs.cable_modem_monitor_core.test_harness.runner import run_tests
-test_result = run_tests(modem_dir)
+The authoritative check is the catalog suite — it replays the HAR
+through the full orchestrator, which is what CI runs:
+
+```bash
+.venv/bin/python -m pytest packages/cable_modem_monitor_catalog/tests/ \
+  --no-header -q -k "<model>"
 ```
+
+On a golden mismatch the replay writes `modem.actual.json` next to the
+HAR. Once the diff is what you intend, promote it to
+`modem.expected.json` and re-run.
+
+`catalog_tools.run_tests(modem_dir)` exists as an MCP tool and returns
+the same structured diff, but it calls the non-orchestrated pipeline,
+so a modem whose golden carries orchestrator-derived fields fails there
+while passing CI. Diagnose with it if you like; decide with pytest.
 
 If tests fail, diagnose from the structured diff:
 
@@ -648,9 +667,14 @@ are no errors in `modem_data`.
 9. **Logout is an operational requirement — confirm it works.** Logout prevents
    stale server-side sessions from blocking re-authentication. For every modem
    with `actions.logout` configured, ask the contributor to confirm the endpoint
-   responds (any 2xx or redirect) after a successful login. If the logout
-   request appeared in the HAR with a Cookie header, set `requires_session: true`;
-   if no Cookie header was present, set `requires_session: false` (the default).
+   responds (any 2xx or redirect) after a successful login. Set
+   `requires_session: true` when the captured logout request carried the
+   credential its auth strategy uses: a `Cookie` header for cookie-based
+   strategies, an `Authorization` header for `bearer`. Set it to `false`
+   (the default) when the request carried no credential at all. Judge by the
+   credential, not by the presence of any cookie — the F3896LG logout carries
+   a `sidebar_state` UI cookie that authenticates nothing, while the header is
+   what the endpoint actually needs.
 10. **Fixture values trace to observed artifacts.** Every value written into a
     golden file or verified.json must come from a real artifact — the
     contributor's diagnostics, a HAR, page source, or a posted screenshot. Never

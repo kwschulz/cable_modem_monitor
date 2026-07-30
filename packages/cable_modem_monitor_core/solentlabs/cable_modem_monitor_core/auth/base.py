@@ -46,15 +46,20 @@ class AuthContext:
     """Typed downstream state from auth managers.
 
     Each auth strategy populates the fields it produces; the runner
-    reads them by attribute based on ``modem_config.transport``.
+    reads them by attribute based on ``modem_config.transport``, and
+    action endpoints reference them as ``{auth:...}`` placeholders.
 
     Attributes:
         url_token: Session token for URL query string auth (``url_token`` strategy).
         private_key: HMAC signing key for HNAP requests (``hnap`` strategy).
+        token: Session token from the login response (``bearer`` strategy).
+        user_id: Account identifier from the login response (``bearer`` strategy).
     """
 
     url_token: str = ""
     private_key: str = ""
+    token: str = ""
+    user_id: str = ""
 
 
 @dataclass
