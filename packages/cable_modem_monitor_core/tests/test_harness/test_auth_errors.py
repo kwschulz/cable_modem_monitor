@@ -349,8 +349,6 @@ class TestBearerHandler:
         return BearerAuthHandler(
             login_path="/rest/v1/user/login",
             token_path=token_path,
-            restart_path="/rest/v1/system/reboot",
-            restart_method="POST",
         )
 
     def test_login_answers_201_with_token_nested_at_token_path(self) -> None:

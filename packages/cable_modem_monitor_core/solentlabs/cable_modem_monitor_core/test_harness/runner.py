@@ -144,6 +144,18 @@ def run_modem_restart_test(test_case: RestartTestCase) -> ActionTestResult:
             test_name=test_case.name, passed=False, error=result.message or "Action returned failure"
         )
 
+    # The HTTP executor reports success for any response it received, so
+    # ``success`` alone cannot tell a restart the modem accepted from one
+    # it 404'd. The status code it already records can. HNAP validates its
+    # own SOAP result and records no status, so this skips it.
+    status = result.details.get("status_code")
+    if status is not None and not 200 <= int(status) < 400:
+        return ActionTestResult(
+            test_name=test_case.name,
+            passed=False,
+            error=f"Restart request answered {status} — the modem never recorded this exchange",
+        )
+
     return ActionTestResult(test_name=test_case.name, passed=True)
 
 
@@ -511,4 +523,32 @@ def _run_orchestrated(
         if snapshot.connection_status != ConnectionStatus.ONLINE:
             raise RuntimeError(f"Expected ONLINE, got {snapshot.connection_status.value}")
 
+        _assert_logout_succeeded(modem_config, server)
+
         return snapshot.modem_data
+
+
+def _assert_logout_succeeded(modem_config: Any, server: HARMockServer) -> None:
+    """Fail the replay if a declared logout did not come back successfully.
+
+    A poll ends by firing ``actions.logout`` and Core deliberately
+    ignores the outcome — logout is best-effort at both call sites per
+    ORCHESTRATION_SPEC. That makes the harness the only place a logout
+    which never worked can be noticed, so the check lives here rather
+    than in the collector.
+    """
+    if modem_config.actions is None or modem_config.actions.logout is None:
+        return
+
+    status = server.auth_handler.served_actions.get("logout")
+    if status is None:
+        # Two ways to get here, both real failures: the request Core sent
+        # did not match the declared endpoint, or the harness refused it
+        # before dispatch (an unresolved placeholder answers 500). The
+        # harness log carries which.
+        raise RuntimeError(
+            "Declared logout was never dispatched — the request Core sent did not match "
+            "the declared endpoint, or the harness refused it (see the harness log)"
+        )
+    if not 200 <= status < 400:
+        raise RuntimeError(f"Logout answered {status} — the modem never recorded this exchange")

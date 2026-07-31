@@ -3,18 +3,20 @@
 Supports two lifecycle modes: ephemeral (context manager for automated
 tests) and persistent (``serve_forever()`` for manual integration testing).
 
-See ONBOARDING_SPEC.md Test Harness section.
+See ARCHITECTURE.md § Test Harness for the replay-fidelity rules this
+server implements.
 """
 
 from __future__ import annotations
 
 import gzip
 import logging
+import re
 import threading
 import zlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 if TYPE_CHECKING:
     from ..models.modem_config import ModemConfig
@@ -23,6 +25,11 @@ from .auth import create_auth_handler
 from .routes import build_routes, normalize_path
 
 _logger = logging.getLogger(__name__)
+
+# The two placeholder namespaces MODEM_YAML_SPEC defines. Matched
+# against the path only — a captured query string may legitimately
+# carry braces (an XB10 entry passes JSON in one).
+_UNRESOLVED_PLACEHOLDER_RE = re.compile(r"\{(?:auth|cookie):[^}/]+\}")
 
 
 class _MockHandler(BaseHTTPRequestHandler):
@@ -55,6 +62,14 @@ class _MockHandler(BaseHTTPRequestHandler):
         """Handle POST requests."""
         self._handle_request("POST")
 
+    def do_PUT(self) -> None:  # noqa: N802
+        """Handle PUT requests."""
+        self._handle_request("PUT")
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        """Handle DELETE requests — REST firmwares end a session with one."""
+        self._handle_request("DELETE")
+
     def _handle_request(self, method: str) -> None:
         """Dispatch a request through auth then routes."""
         server = self._mock_server
@@ -69,36 +84,49 @@ class _MockHandler(BaseHTTPRequestHandler):
         headers = {k.lower(): v for k, v in self.headers.items()}
 
         body = b""
-        if method == "POST":
+        if method in ("POST", "PUT", "DELETE"):
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
 
         method = lookup_method
         auth = server.auth_handler
 
+        # A placeholder that survived to the wire means Core could not
+        # resolve it, so the request targets a path the modem never had.
+        # Routing it would hide the bug behind whatever the lookup does
+        # next; the ZG's logout reached the modem as a literal
+        # {auth:user_id} for exactly this reason.
+        unresolved = _UNRESOLVED_PLACEHOLDER_RE.search(unquote(path))
+        if unresolved:
+            self._fail_request(f"unresolved placeholder in request path: {unresolved.group(0)}")
+            return
+
         # Login request — handle auth and serve response
         if auth.is_login_request(method, path):
             self._handle_login(server, method, path, route_path, body, headers)
             return
 
-        # Logout request — clear session and respond
-        if auth.is_logout_request(method, path):
-            logout_response = auth.handle_logout()
-            self._send_response(
-                logout_response.status,
-                logout_response.headers,
-                logout_response.body,
+        # Logout / restart — the capture answers when it has the
+        # exchange; the handler contributes the session side effect
+        # either way (clearing state, invalidating a token).
+        for kind, matches, handle in (
+            ("logout", auth.is_logout_request, auth.handle_logout),
+            ("restart", auth.is_restart_request, auth.handle_restart),
+        ):
+            if not matches(method, path):
+                continue
+            synthesized = handle()
+            captured = _find_route(
+                server.routes,
+                method,
+                path,
+                route_path,
+                login_page=server.login_page,
+                token_prefix=server.token_prefix,
             )
-            return
-
-        # Restart request — accept and clear session
-        if auth.is_restart_request(method, path):
-            restart_response = auth.handle_restart()
-            self._send_response(
-                restart_response.status,
-                restart_response.headers,
-                restart_response.body,
-            )
+            response = captured if captured is not None else synthesized
+            auth.record_action(kind, response.status)
+            self._send_response(response.status, response.headers, response.body)
             return
 
         # Non-login request — check auth
@@ -193,6 +221,16 @@ class _MockHandler(BaseHTTPRequestHandler):
             response_headers.append((name, value))
         self._send_response(route.status, response_headers, route.body)
 
+    def _fail_request(self, message: str) -> None:
+        """Answer 500 with a diagnostic — the harness cannot honestly serve this request."""
+        payload = message.encode("utf-8")
+        self.send_response(500)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if not getattr(self, "_is_head", False):
+            self.wfile.write(payload)
+
     def _send_response(
         self,
         status: int,
@@ -205,13 +243,7 @@ class _MockHandler(BaseHTTPRequestHandler):
             out_headers, payload = _frame_wire_response(headers, body, server.base_url)
         except _UnsupportedFramingError as exc:
             # Fail loudly rather than serve bytes that contradict the headers.
-            message = str(exc).encode("utf-8")
-            self.send_response(500)
-            self.send_header("Content-Type", "text/plain")
-            self.send_header("Content-Length", str(len(message)))
-            self.end_headers()
-            if not getattr(self, "_is_head", False):
-                self.wfile.write(message)
+            self._fail_request(str(exc))
             return
         self.send_response(status)
         for name, value in out_headers:

@@ -1172,11 +1172,17 @@ class TestMockServerLogout:
         from solentlabs.cable_modem_monitor_core.test_harness.auth import (
             FormAuthHandler,
         )
+        from solentlabs.cable_modem_monitor_core.test_harness.auth.base import ActionConfig
 
-        handler = FormAuthHandler(
-            login_path="/login.htm",
-            cookie_name="sid",
-            logout_path="/logout",
+        handler = FormAuthHandler(login_path="/login.htm", cookie_name="sid")
+        handler.configure_actions(
+            ActionConfig(
+                cookie_name="sid",
+                logout_method="GET",
+                logout_path="/logout",
+                restart_method="POST",
+                restart_path="",
+            )
         )
 
         # Authenticate

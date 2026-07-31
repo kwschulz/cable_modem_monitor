@@ -1,13 +1,22 @@
 """Bearer token auth handler.
 
 Serves a token from the login endpoint and requires it back as
-``Authorization: Bearer <token>`` on subsequent requests. The login
-response is shaped from the config's ``token_path`` so the real
-``BearerAuthManager`` extracts the token by the same walk it uses
-against hardware.
+``Authorization: Bearer <token>`` on subsequent requests.
 
-Answers ``201 Created`` — the status the Sagemcom F3896LG firmware
-returns for token creation (issue #185).
+When the capture holds the login response, it is served verbatim and
+the token it carries is the one enforced. This is what makes a logout
+that addresses the session in its URL replayable: the captured logout
+path contains the captured token, so Core has to be carrying that same
+token for the request to match. Enforcement compares against what the
+client sends, which is derived from the login *body* — never against
+the captured ``Authorization`` header, because har-capture sanitizes
+bodies and headers independently and the two carry different values.
+
+Without a captured login response the handler synthesizes one from
+``token_path``, so the real ``BearerAuthManager`` still extracts the
+token by the same walk it uses against hardware. Answers
+``201 Created`` — the status the Sagemcom F3896LG firmware returns for
+token creation (issue #185).
 """
 
 from __future__ import annotations
@@ -16,8 +25,8 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ..routes import RouteEntry, normalize_path
-from .base import AuthHandler, extract_action_config
+from ..routes import RouteEntry, build_routes, normalize_path
+from .base import AuthHandler
 
 if TYPE_CHECKING:
     from ...models.modem_config import ModemConfig
@@ -39,11 +48,12 @@ def _nest(token_path: str, token: str) -> dict[str, Any]:
 class BearerAuthHandler(AuthHandler):
     """Issues a bearer token at the login endpoint and enforces it thereafter."""
 
-    def __init__(self, login_path: str, token_path: str, restart_path: str, restart_method: str) -> None:
+    def __init__(self, login_path: str, token_path: str, captured_login: RouteEntry | None = None) -> None:
+        super().__init__()
         self._login_path = normalize_path(login_path)
         self._token_path = token_path
-        self._restart_path = normalize_path(restart_path) if restart_path else ""
-        self._restart_method = restart_method
+        self._captured_login = captured_login
+        self._token = _extract_token(captured_login, token_path) if captured_login else ""
 
     def is_login_request(self, method: str, path: str) -> bool:
         """Check if this is a POST to the login endpoint."""
@@ -56,9 +66,13 @@ class BearerAuthHandler(AuthHandler):
         body: bytes,
         headers: dict[str, str],
     ) -> RouteEntry | None:
-        """Return 201 with the token nested at token_path."""
+        """Serve the captured login response, or a synthesized 201 when there is none."""
         if not self.is_login_request(method, path):
             return None
+
+        if self._token:
+            _logger.debug("Mock server: bearer login served from capture at %s", path)
+            return self._captured_login
 
         _logger.debug("Mock server: bearer login accepted at %s", path)
         return RouteEntry(
@@ -69,22 +83,39 @@ class BearerAuthHandler(AuthHandler):
 
     def is_authenticated(self, headers: dict[str, str]) -> bool:
         """Require the issued token back on the Authorization header."""
-        return headers.get("authorization", "") == f"Bearer {_MOCK_TOKEN}"
+        return headers.get("authorization", "") == f"Bearer {self._token or _MOCK_TOKEN}"
 
     def get_challenge_response(self) -> RouteEntry:
         """Return 401 for requests arriving without the bearer token."""
         return RouteEntry(status=401, headers=[], body="Unauthorized")
 
-    def is_restart_request(self, method: str, path: str) -> bool:
-        """Check if this request targets the restart endpoint."""
-        if not self._restart_path:
-            return False
-        return method == self._restart_method and normalize_path(path) == self._restart_path
-
     def handle_restart(self) -> RouteEntry:
         """Accept restart — the modem is rebooting, so the token dies with it."""
         _logger.debug("Mock server: restart accepted — bearer token invalidated")
         return RouteEntry(status=200, headers=[], body="OK")
+
+
+def _extract_token(login_response: RouteEntry, token_path: str) -> str:
+    """Walk ``token_path`` down the captured login body; empty if it does not resolve."""
+    try:
+        value: Any = json.loads(login_response.body)
+    except (TypeError, ValueError):
+        return ""
+    for key in token_path.split("."):
+        if not isinstance(value, dict) or key not in value:
+            return ""
+        value = value[key]
+    return value if isinstance(value, str) else ""
+
+
+def _captured_login_response(
+    har_entries: list[dict[str, Any]] | None,
+    login_path: str,
+) -> RouteEntry | None:
+    """Return the captured POST response for the login endpoint, if the capture has one."""
+    if not har_entries:
+        return None
+    return build_routes(har_entries).get(("POST", normalize_path(login_path)))
 
 
 def create_handler(
@@ -96,10 +127,8 @@ def create_handler(
 
     auth = modem_config.auth
     assert isinstance(auth, BearerAuth)
-    actions = extract_action_config(modem_config)
     return BearerAuthHandler(
         login_path=auth.login_endpoint,
         token_path=auth.token_path,
-        restart_path=actions.restart_path,
-        restart_method=actions.restart_method,
+        captured_login=_captured_login_response(har_entries, auth.login_endpoint),
     )

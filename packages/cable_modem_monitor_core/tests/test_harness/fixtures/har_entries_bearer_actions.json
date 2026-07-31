@@ -1,0 +1,32 @@
+{
+  "_description": "HAR entries for a bearer-auth modem whose logout addresses the session in the URL: login response carries token and userId, logout is a DELETE at a path built from both",
+  "_entries": [
+    {
+      "request": {
+        "method": "POST",
+        "url": "http://192.168.100.1/rest/v1/user/login",
+        "postData": {"text": "{\"password\": \"secret\"}"}
+      },
+      "response": {
+        "status": 201,
+        "headers": [{"name": "Content-Type", "value": "application/json"}],
+        "content": {"text": "{\"created\": {\"token\": \"CAPTURED_TOKEN\", \"userId\": 7}}"}
+      }
+    },
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/rest/v1/data"},
+      "response": {"status": 200, "headers": [], "content": {"text": "{\"ok\": true}"}}
+    },
+    {
+      "request": {
+        "method": "DELETE",
+        "url": "http://192.168.100.1/rest/v1/user/7/token/CAPTURED_TOKEN"
+      },
+      "response": {
+        "status": 204,
+        "headers": [],
+        "content": {"text": ""}
+      }
+    }
+  ]
+}

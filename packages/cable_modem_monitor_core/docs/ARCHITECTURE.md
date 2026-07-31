@@ -875,7 +875,38 @@ declare (chunked transfer, gzip) before sending, recomputes
 `Content-Length`, and rewrites absolute `Location` targets to the
 harness origin so redirects stay inside the replay. A framing header
 it cannot reconstruct fails the request with a 500 rather than serving
-bytes that contradict the headers.
+bytes that contradict the headers. An entry that records no response
+at all (har-capture writes status `-1` when the modem tore the
+connection down mid-request) becomes no route, because there is
+nothing to replay.
+
+**Login, logout and restart are dispatched, not routed.** These three
+carry server-side session state, so the auth handler sees them before
+the route table does. Three rules keep that from drifting away from
+the capture:
+
+- **The capture answers when it has the exchange.** The handler is
+  consulted for the session side effect either way — clearing state,
+  invalidating a token — but a captured response wins over a
+  synthesized one. Most captures record data collection only, so a
+  synthesized response remains the common case for restart.
+- **Action matching is uniform.** Logout and restart are matched from
+  the declared `actions:` block for every strategy, not re-implemented
+  per handler. When each handler matched for itself, `basic` and
+  `none` never matched at all, so a declared restart fell through to
+  the route table and 404'd while its test still passed.
+- **A request the harness cannot honestly answer fails.** An
+  unresolved `{auth:…}` or `{cookie:…}` placeholder that survives to
+  the wire means Core could not fill it in, so the path was never one
+  the modem had; the harness answers 500 instead of routing it.
+
+The pass criterion follows. `ActionResult.success` is true for any HTTP
+response the executor received, so the runner also asserts the status
+code the result already carries, and a declared logout must have been
+dispatched and answered successfully during the poll. Core itself is
+unchanged: logout is best-effort at both call sites by design
+(ORCHESTRATION_SPEC), which is precisely why the harness is the only
+place a logout that never worked can be noticed.
 
 **Two usage modes:**
 

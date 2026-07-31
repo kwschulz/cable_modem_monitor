@@ -51,9 +51,6 @@ class FormPbkdf2AuthHandler(FormAuthHandler):
         csrf_init_endpoint: GET endpoint for CSRF token (empty if none).
         csrf_header: CSRF header name (empty if none).
         cookie_name: Session cookie name (empty for IP-based).
-        logout_path: Logout endpoint path (empty if no logout).
-        restart_path: Restart endpoint path (empty if no restart).
-        restart_method: HTTP method for restart.
         login_success: Key-value pairs the firmware returns on success
             (e.g., ``{"error": "ok"}``). When set, the mock success
             response body mirrors these pairs so the auth manager's
@@ -76,17 +73,11 @@ class FormPbkdf2AuthHandler(FormAuthHandler):
         csrf_init_endpoint: str = "",
         csrf_header: str = "",
         cookie_name: str = "",
-        logout_path: str = "",
-        restart_path: str = "",
-        restart_method: str = "POST",
         login_success: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             login_path=login_endpoint,
             cookie_name=cookie_name,
-            logout_path=logout_path,
-            restart_path=restart_path,
-            restart_method=restart_method,
         )
         self._salt_trigger = salt_trigger
         self._pbkdf2_iterations = pbkdf2_iterations
@@ -255,8 +246,5 @@ def create_handler(
         csrf_init_endpoint=auth.csrf_init_endpoint,
         csrf_header=auth.csrf_header,
         cookie_name=action_cfg.cookie_name,
-        logout_path=action_cfg.logout_path,
-        restart_path=action_cfg.restart_path,
-        restart_method=action_cfg.restart_method,
         login_success=auth.login_success or None,
     )

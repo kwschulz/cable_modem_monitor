@@ -16,7 +16,7 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
-from .base import AuthHandler
+from .base import AuthHandler, extract_action_config
 
 if TYPE_CHECKING:
     from ...models.modem_config import ModemConfig
@@ -45,7 +45,13 @@ def create_auth_handler(
         Auth handler instance.
     """
     if modem_config is None or modem_config.auth is None:
-        return AuthHandler()
+        # An omitted auth block is valid (ch8978e has none) and says
+        # nothing about actions, so a config that declares them still
+        # gets them matched.
+        no_auth = AuthHandler()
+        if modem_config is not None:
+            no_auth.configure_actions(extract_action_config(modem_config))
+        return no_auth
 
     strategy = modem_config.auth.strategy
 
@@ -62,4 +68,9 @@ def create_auth_handler(
             f"Add test_harness/auth/{strategy}.py with a create_handler() entry point."
         ) from exc
 
-    return module.create_handler(modem_config, har_entries)  # type: ignore[no-any-return]
+    handler: AuthHandler = module.create_handler(modem_config, har_entries)
+    # Action matching is uniform across strategies and driven by the
+    # declared actions block, so it is configured here rather than in
+    # each handler module.
+    handler.configure_actions(extract_action_config(modem_config))
+    return handler

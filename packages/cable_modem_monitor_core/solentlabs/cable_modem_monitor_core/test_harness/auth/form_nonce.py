@@ -37,9 +37,6 @@ class FormNonceAuthHandler(FormAuthHandler):
         login_path: Login endpoint path (``auth.action``).
         login_page_html: HTML body to serve on GET to ``login_path``.
         cookie_name: Session cookie name (empty for IP-based).
-        logout_path: Logout endpoint path (empty if no logout).
-        restart_path: Restart endpoint path (empty if no restart).
-        restart_method: HTTP method for restart.
     """
 
     def __init__(
@@ -47,16 +44,10 @@ class FormNonceAuthHandler(FormAuthHandler):
         login_path: str,
         login_page_html: str,
         cookie_name: str = "",
-        logout_path: str = "",
-        restart_path: str = "",
-        restart_method: str = "POST",
     ) -> None:
         super().__init__(
             login_path=login_path,
             cookie_name=cookie_name,
-            logout_path=logout_path,
-            restart_path=restart_path,
-            restart_method=restart_method,
         )
         self._login_page_html = login_page_html
 
@@ -113,7 +104,4 @@ def create_handler(
         login_path=login_path,
         login_page_html=login_page_html,
         cookie_name=action_cfg.cookie_name,
-        logout_path=action_cfg.logout_path,
-        restart_path=action_cfg.restart_path,
-        restart_method=action_cfg.restart_method,
     )

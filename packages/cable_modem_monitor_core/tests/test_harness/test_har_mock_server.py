@@ -21,6 +21,7 @@ from solentlabs.cable_modem_monitor_core.test_harness.auth import (
     HnapAuthHandler,
     create_auth_handler,
 )
+from solentlabs.cable_modem_monitor_core.test_harness.auth.base import ActionConfig
 from solentlabs.cable_modem_monitor_core.test_harness.routes import (
     RouteEntry,
     build_routes,
@@ -37,6 +38,31 @@ def _load_entries(name: str) -> list[dict[str, Any]]:
     """Load HAR entries from a fixture file."""
     data = load_fixture(FIXTURES_DIR / name)
     return list(data["_entries"])
+
+
+def _with_actions(
+    handler: AuthHandler,
+    *,
+    logout_path: str = "",
+    logout_method: str = "GET",
+    restart_path: str = "",
+    restart_method: str = "POST",
+) -> Any:
+    """Configure a directly-constructed handler's action endpoints.
+
+    The factory does this from modem.yaml; unit tests that build a
+    handler without one configure it here.
+    """
+    handler.configure_actions(
+        ActionConfig(
+            cookie_name="",
+            logout_method=logout_method,
+            logout_path=logout_path,
+            restart_method=restart_method,
+            restart_path=restart_path,
+        )
+    )
+    return handler
 
 
 def _make_config(data: dict[str, Any]) -> Any:
@@ -98,6 +124,21 @@ class TestBuildRoutes:
         routes = build_routes(entries)
 
         assert routes[("GET", "/missing.html")].status == 404
+
+    def test_entry_without_a_response_is_not_a_route(self) -> None:
+        """A request that never got a response cannot be replayed as one.
+
+        har-capture records status -1 when the modem tore the
+        connection down mid-request. Routing it served ``-1`` as an
+        HTTP status; the request must fall through instead.
+        """
+        entries = [
+            {
+                "request": {"method": "GET", "url": "http://192.168.100.1/logout.html"},
+                "response": {"status": -1, "headers": [], "content": {"text": ""}},
+            }
+        ]
+        assert build_routes(entries) == {}
 
     def test_empty_entries(self) -> None:
         """Empty HAR entries produce empty routes."""
@@ -424,15 +465,15 @@ class TestFormAuthHandler:
 
     def test_restart_request_detection(self) -> None:
         """POST to restart path is detected as restart request."""
-        handler = FormAuthHandler("/goform/login", restart_path="/goform/restart")
+        handler = _with_actions(FormAuthHandler("/goform/login"), restart_path="/goform/restart")
         assert handler.is_restart_request("POST", "/goform/restart")
         assert not handler.is_restart_request("GET", "/goform/restart")
         assert not handler.is_restart_request("POST", "/other")
 
     def test_restart_custom_method(self) -> None:
         """Restart with non-POST method (e.g. GET) is detected."""
-        handler = FormAuthHandler(
-            "/goform/login",
+        handler = _with_actions(
+            FormAuthHandler("/goform/login"),
             restart_path="/api/restart",
             restart_method="GET",
         )
@@ -441,7 +482,7 @@ class TestFormAuthHandler:
 
     def test_restart_clears_session(self) -> None:
         """Restart clears session state."""
-        handler = FormAuthHandler("/goform/login", restart_path="/goform/restart")
+        handler = _with_actions(FormAuthHandler("/goform/login"), restart_path="/goform/restart")
         handler.handle_login("POST", "/goform/login", b"user=admin", {})
         assert handler.is_authenticated({})
 
@@ -451,7 +492,7 @@ class TestFormAuthHandler:
 
     def test_logout_clears_session(self) -> None:
         """Logout clears session state (parity with restart)."""
-        handler = FormAuthHandler("/goform/login", logout_path="/goform/logout")
+        handler = _with_actions(FormAuthHandler("/goform/login"), logout_path="/goform/logout")
         handler.handle_login("POST", "/goform/login", b"user=admin", {})
         assert handler.is_authenticated({})
 
@@ -586,6 +627,169 @@ class TestHARMockServerNoAuth:
         with HARMockServer(entries, modem_config=config) as server:
             resp = requests.get(f"{server.base_url}/status.html")
             assert resp.text == "<html>DS data</html>"
+
+
+class TestHARMockServerActionFidelity:
+    """Logout and restart answer from the capture, and can fail.
+
+    The harness used to intercept every action before route lookup and
+    answer it from a per-strategy handler, so a captured action response
+    was unreachable and no action request could fail. Regression: a
+    bearer logout went out as an unresolved ``{auth:user_id}`` path,
+    got 501 from a server with no ``do_DELETE``, and passed.
+    """
+
+    @pytest.fixture()
+    def entries(self) -> list[dict[str, Any]]:
+        """Load bearer HAR entries with a captured DELETE logout."""
+        return _load_entries("har_entries_bearer_actions.json")
+
+    @pytest.fixture()
+    def config(self) -> Any:
+        """Bearer config whose logout addresses the session in the URL."""
+        return _make_config(
+            {
+                "auth": {
+                    "strategy": "bearer",
+                    "login_endpoint": "/rest/v1/user/login",
+                    "token_path": "created.token",
+                    "user_id_path": "created.userId",
+                },
+                "actions": {
+                    "logout": {
+                        "type": "http",
+                        "method": "DELETE",
+                        "endpoint": "/rest/v1/user/{auth:user_id}/token/{auth:token}",
+                        "requires_session": True,
+                    },
+                },
+            }
+        )
+
+    def test_delete_is_dispatched(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """A declared DELETE reaches the dispatcher instead of the stdlib's 501."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.delete(f"{server.base_url}/rest/v1/user/7/token/CAPTURED_TOKEN")
+            assert resp.status_code != 501
+
+    def test_captured_action_response_wins_over_handler(
+        self,
+        entries: list[dict[str, Any]],
+        config: Any,
+    ) -> None:
+        """The capture's 204 is served, not the handler's synthesized 200."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.delete(f"{server.base_url}/rest/v1/user/7/token/CAPTURED_TOKEN")
+            assert resp.status_code == 204
+
+    def test_unresolved_placeholder_fails_loudly(
+        self,
+        entries: list[dict[str, Any]],
+        config: Any,
+    ) -> None:
+        """A request still carrying ``{auth:…}`` is a Core bug, not a route miss.
+
+        Percent-encoded by ``requests`` on the way out, so the check has
+        to unquote before looking.
+        """
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.delete(f"{server.base_url}/rest/v1/user/{{auth:user_id}}/token/CAPTURED_TOKEN")
+            assert resp.status_code == 500
+            assert "auth:user_id" in resp.text
+
+    def test_action_served_status_is_recorded(
+        self,
+        entries: list[dict[str, Any]],
+        config: Any,
+    ) -> None:
+        """The server records what it answered, so a caller can assert on it."""
+        with HARMockServer(entries, modem_config=config) as server:
+            requests.delete(f"{server.base_url}/rest/v1/user/7/token/CAPTURED_TOKEN")
+            assert server.auth_handler.served_actions["logout"] == 204
+
+    def test_action_dispatched_for_strategy_without_its_own_matcher(self) -> None:
+        """Restart is matched from config for every strategy, not per-handler.
+
+        ``basic`` never implemented restart matching, so a declared
+        restart fell through to the route table and 404'd while the
+        action test still passed.
+        """
+        entries = _load_entries("har_entries_no_auth.json")
+        config = _make_config(
+            {
+                "auth": {"strategy": "basic"},
+                "actions": {
+                    "restart": {"type": "http", "method": "POST", "endpoint": "/goform/reboot"},
+                },
+            }
+        )
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.post(f"{server.base_url}/goform/reboot", data="x=1")
+            assert resp.status_code == 200
+            assert server.auth_handler.served_actions["restart"] == 200
+
+
+class TestHARMockServerBearerCaptureSeeding:
+    """The bearer handler issues the captured token, not a synthetic one.
+
+    A logout that addresses the session in its URL only replays if the
+    token Core carries is the token the captured logout path contains.
+    Enforcement compares against what the client sends, derived from the
+    login response body — never the captured ``Authorization`` header,
+    which har-capture sanitizes independently of the body.
+    """
+
+    @pytest.fixture()
+    def entries(self) -> list[dict[str, Any]]:
+        """Load bearer HAR entries with a captured login response."""
+        return _load_entries("har_entries_bearer_actions.json")
+
+    @pytest.fixture()
+    def config(self) -> Any:
+        """Bearer config matching the captured login response shape."""
+        return _make_config(
+            {
+                "auth": {
+                    "strategy": "bearer",
+                    "login_endpoint": "/rest/v1/user/login",
+                    "token_path": "created.token",
+                    "user_id_path": "created.userId",
+                },
+            }
+        )
+
+    def test_login_serves_the_captured_response(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """The captured login body reaches the client, userId included."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.post(f"{server.base_url}/rest/v1/user/login", json={"password": "pw"})
+            assert resp.status_code == 201
+            assert resp.json() == {"created": {"token": "CAPTURED_TOKEN", "userId": 7}}
+
+    def test_captured_token_is_enforced(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """Data requests need the captured token back on the Authorization header."""
+        with HARMockServer(entries, modem_config=config) as server:
+            ok = requests.get(
+                f"{server.base_url}/rest/v1/data",
+                headers={"Authorization": "Bearer CAPTURED_TOKEN"},
+            )
+            assert ok.status_code == 200
+
+    def test_synthetic_token_is_rejected(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """The old synthetic token no longer opens the session."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.get(
+                f"{server.base_url}/rest/v1/data",
+                headers={"Authorization": "Bearer mock-bearer-token"},
+            )
+            assert resp.status_code == 401
+
+    def test_falls_back_to_synthetic_token_without_a_capture(self, config: Any) -> None:
+        """A capture with no login response still yields a working login."""
+        entries = _load_entries("har_entries_no_auth.json")
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.post(f"{server.base_url}/rest/v1/user/login", json={"password": "pw"})
+            assert resp.status_code == 201
+            assert resp.json()["created"]["token"]
 
 
 class TestHARMockServerWireFraming:

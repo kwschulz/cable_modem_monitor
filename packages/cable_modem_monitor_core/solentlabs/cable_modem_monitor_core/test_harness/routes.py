@@ -62,6 +62,16 @@ def build_routes(
             route_path = f"{path}?{parsed.query}"
 
         status = response.get("status", 0)
+        # A non-positive status is har-capture's marker for a request
+        # that never received one — the modem tore the connection down,
+        # or the page navigated away mid-flight. There is no captured
+        # response to replay, so the entry must not become a route;
+        # serving it would put a status line on the wire that the modem
+        # never sent. One entry in the fleet is like this: the SB8200's
+        # logout GET, which used to replay as a literal -1.
+        if status <= 0:
+            continue
+
         headers = _extract_headers(response)
         body = _extract_body(response)
 
