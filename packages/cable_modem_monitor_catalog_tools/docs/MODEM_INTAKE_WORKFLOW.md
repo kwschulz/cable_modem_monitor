@@ -61,6 +61,20 @@ caused a modem that really returns bad tags to be processed
 incorrectly. The only sanctioned transformation is PII value
 sanitization at intake, which replaces values and never structure.
 
+### Hand-applied sanitization
+
+har-capture's automated pass misses some surfaces (URL paths, the
+HAR's structured `cookies` arrays, strings inside bundled JS assets).
+When a value must be sanitized by hand:
+
+- Substitute `[REDACTED]` for the value. Substitution only — never
+  delete an entry, a header, or a field.
+- Declare the substitution in the modem's `modem.yaml` `notes:`:
+  what was replaced, and why the automated pass missed it.
+
+Precedent: the Sagemcom F3896LG-ZG session token in a logout URL
+path, declared in that modem's notes.
+
 ### Assembled fixtures
 
 Not every fixture is a wire capture. Before har-capture existed,

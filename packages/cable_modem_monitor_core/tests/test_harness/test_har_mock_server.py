@@ -588,6 +588,79 @@ class TestHARMockServerNoAuth:
             assert resp.text == "<html>DS data</html>"
 
 
+class TestHARMockServerWireFraming:
+    """Wire re-framing: replayed headers must be true on the wire.
+
+    A HAR stores the decoded response body while keeping the original
+    headers, so a faithful replay must re-frame the body to match what
+    the headers promise (re-chunk, re-compress) and rewrite absolute
+    redirect targets to the harness origin. Regression: the TM1602A
+    fixture had Transfer-Encoding deleted to mask this gap.
+    """
+
+    @pytest.fixture()
+    def entries(self) -> list[dict[str, Any]]:
+        """Load wire-framing HAR entries from fixture."""
+        return _load_entries("har_entries_wire_framing.json")
+
+    def test_chunked_response_decodes_intact(self, entries: list[dict[str, Any]]) -> None:
+        """A chunked-marked body is re-chunked on the wire and decodes cleanly."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/chunked.html")
+            assert resp.status_code == 200
+            assert resp.text == "<html>chunked data</html>"
+            assert resp.headers["Transfer-Encoding"] == "chunked"
+            assert "Content-Length" not in resp.headers
+
+    def test_gzip_response_decodes_intact(self, entries: list[dict[str, Any]]) -> None:
+        """A gzip-marked body is re-compressed on the wire and decodes cleanly."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/gzipped.html")
+            assert resp.status_code == 200
+            assert resp.text == "<html>gzipped data</html>"
+            assert resp.headers["Content-Encoding"] == "gzip"
+
+    def test_chunked_gzip_combination(self, entries: list[dict[str, Any]]) -> None:
+        """Content-Encoding applies before Transfer-Encoding chunking."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/chunked-gzip.html")
+            assert resp.status_code == 200
+            assert resp.text == "<html>both encodings</html>"
+
+    def test_absolute_location_rewritten_to_harness_origin(self, entries: list[dict[str, Any]]) -> None:
+        """An absolute Location pointing at the captured host targets the harness."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/", allow_redirects=False)
+            assert resp.status_code == 302
+            assert resp.headers["Location"] == f"{server.base_url}/index.htm"
+
+    def test_absolute_redirect_can_be_followed(self, entries: list[dict[str, Any]]) -> None:
+        """Following a rewritten redirect stays inside the harness."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/", timeout=5)
+            assert resp.status_code == 200
+            assert resp.text == "<html>index</html>"
+
+    def test_relative_location_untouched(self, entries: list[dict[str, Any]]) -> None:
+        """A relative Location is replayed as captured."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/relative-redirect.html", allow_redirects=False)
+            assert resp.headers["Location"] == "/index.htm"
+
+    def test_unsupported_content_encoding_fails_loudly(self, entries: list[dict[str, Any]]) -> None:
+        """An encoding the harness cannot reconstruct returns 500, not a silent lie."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/brotli.html")
+            assert resp.status_code == 500
+            assert "br" in resp.text
+
+    def test_plain_response_gets_content_length(self, entries: list[dict[str, Any]]) -> None:
+        """Unframed responses carry an accurate Content-Length."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/index.htm")
+            assert resp.headers["Content-Length"] == str(len("<html>index</html>"))
+
+
 class TestHARMockServerFormAuth:
     """Integration tests for mock server with form auth."""
 

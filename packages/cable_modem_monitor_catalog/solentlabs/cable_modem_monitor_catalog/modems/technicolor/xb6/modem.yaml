@@ -45,6 +45,8 @@ notes: |
   Session cookie: DUKSID (vs XB7's "session"). CSRF: csrfp_token (OWASP CSRFP).
   Login form includes hidden field locale=false.
   Default IP: 10.0.0.1 (router mode).
+  One third-party author email in a bundled JS library was redacted
+  by hand: har-capture does not scan strings inside bundled assets.
 
 references:
   issues:

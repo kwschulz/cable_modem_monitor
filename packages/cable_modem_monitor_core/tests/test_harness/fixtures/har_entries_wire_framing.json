@@ -1,0 +1,33 @@
+{
+  "_description": "HAR entries whose response headers require wire re-framing on replay: chunked transfer, gzip content encoding, an absolute-URL redirect, and an encoding the harness cannot reconstruct",
+  "_entries": [
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/chunked.html"},
+      "response": {"status": 200, "headers": [{"name": "Transfer-Encoding", "value": "chunked"}, {"name": "Content-Type", "value": "text/html"}], "content": {"text": "<html>chunked data</html>"}}
+    },
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/gzipped.html"},
+      "response": {"status": 200, "headers": [{"name": "Content-Encoding", "value": "gzip"}, {"name": "Content-Type", "value": "text/html"}], "content": {"text": "<html>gzipped data</html>"}}
+    },
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/chunked-gzip.html"},
+      "response": {"status": 200, "headers": [{"name": "Transfer-Encoding", "value": "chunked"}, {"name": "Content-Encoding", "value": "gzip"}], "content": {"text": "<html>both encodings</html>"}}
+    },
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/"},
+      "response": {"status": 302, "headers": [{"name": "Location", "value": "http://192.168.100.1:80/index.htm"}], "content": {"text": ""}}
+    },
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/index.htm"},
+      "response": {"status": 200, "headers": [], "content": {"text": "<html>index</html>"}}
+    },
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/brotli.html"},
+      "response": {"status": 200, "headers": [{"name": "Content-Encoding", "value": "br"}], "content": {"text": "<html>brotli data</html>"}}
+    },
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/relative-redirect.html"},
+      "response": {"status": 302, "headers": [{"name": "Location", "value": "/index.htm"}], "content": {"text": ""}}
+    }
+  ]
+}

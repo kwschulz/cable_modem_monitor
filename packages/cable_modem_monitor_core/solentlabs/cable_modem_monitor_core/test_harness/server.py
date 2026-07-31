@@ -8,8 +8,10 @@ See ONBOARDING_SPEC.md Test Harness section.
 
 from __future__ import annotations
 
+import gzip
 import logging
 import threading
+import zlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -33,6 +35,14 @@ class _MockHandler(BaseHTTPRequestHandler):
     # stdlib dispatches by looking for methods named exactly do_GET,
     # do_POST, etc.  Renaming to snake_case would break dispatch.
 
+    @property
+    def _mock_server(self) -> HARMockServer:
+        """The owning HARMockServer, narrowed from the stdlib's BaseServer typing."""
+        server = self.server
+        if not isinstance(server, HARMockServer):
+            raise TypeError(f"handler requires HARMockServer, got {type(server).__name__}")
+        return server
+
     def do_GET(self) -> None:  # noqa: N802
         """Handle GET requests."""
         self._handle_request("GET")
@@ -47,7 +57,7 @@ class _MockHandler(BaseHTTPRequestHandler):
 
     def _handle_request(self, method: str) -> None:
         """Dispatch a request through auth then routes."""
-        server: HARMockServer = self.server  # type: ignore[assignment]
+        server = self._mock_server
         self._is_head = method == "HEAD"
         # HEAD uses GET routes for lookup
         lookup_method = "GET" if self._is_head else method
@@ -189,13 +199,26 @@ class _MockHandler(BaseHTTPRequestHandler):
         headers: list[tuple[str, str]],
         body: str,
     ) -> None:
-        """Send an HTTP response. HEAD requests get headers only."""
+        """Send a wire-framed HTTP response. HEAD requests get headers only."""
+        server = self._mock_server
+        try:
+            out_headers, payload = _frame_wire_response(headers, body, server.base_url)
+        except _UnsupportedFramingError as exc:
+            # Fail loudly rather than serve bytes that contradict the headers.
+            message = str(exc).encode("utf-8")
+            self.send_response(500)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(message)))
+            self.end_headers()
+            if not getattr(self, "_is_head", False):
+                self.wfile.write(message)
+            return
         self.send_response(status)
-        for name, value in headers:
+        for name, value in out_headers:
             self.send_header(name, value)
         self.end_headers()
-        if body and not getattr(self, "_is_head", False):
-            self.wfile.write(body.encode("utf-8"))
+        if payload and not getattr(self, "_is_head", False):
+            self.wfile.write(payload)
 
     def log_message(self, format: str, *args: Any) -> None:
         """Suppress default stderr logging."""
@@ -296,6 +319,84 @@ def _find_login_entry(
             continue
         return r
     return None
+
+
+class _UnsupportedFramingError(Exception):
+    """Raised when a captured framing header cannot be reconstructed on the wire."""
+
+
+def _frame_wire_response(
+    headers: list[tuple[str, str]],
+    body: str,
+    origin: str,
+) -> tuple[list[tuple[str, str]], bytes]:
+    """Re-frame a decoded HAR body so the captured headers stay true on the wire.
+
+    A HAR stores the decoded response body while keeping the original
+    headers. Serving both verbatim promises framing (chunked, gzip) the
+    bytes don't have, so the client errors; this re-applies the framing
+    the headers declare. Absolute Location targets are rewritten to the
+    harness origin so redirects stay inside the harness.
+    """
+    out, encoding, chunked = _transform_headers(headers, origin)
+    payload = _encode_payload(body.encode("utf-8"), encoding)
+    if chunked:
+        payload = _chunk_encode(payload)
+    else:
+        out.append(("Content-Length", str(len(payload))))
+    return out, payload
+
+
+def _transform_headers(
+    headers: list[tuple[str, str]],
+    origin: str,
+) -> tuple[list[tuple[str, str]], str, bool]:
+    """Filter and rewrite captured headers; returns (headers, content_encoding, chunked)."""
+    out: list[tuple[str, str]] = []
+    encoding = ""
+    chunked = False
+    for name, value in headers:
+        lower = name.lower()
+        if lower == "content-length":
+            # Recomputed by the caller; captured values drift after redaction.
+            continue
+        if lower == "content-encoding":
+            encoding = value.strip().lower()
+        elif lower == "transfer-encoding":
+            if value.strip().lower() != "chunked":
+                raise _UnsupportedFramingError(f"unsupported Transfer-Encoding: {value}")
+            chunked = True
+        out.append((name, _rewrite_location(value, origin) if lower == "location" else value))
+    return out, encoding, chunked
+
+
+def _encode_payload(payload: bytes, encoding: str) -> bytes:
+    """Apply the declared Content-Encoding to the payload bytes."""
+    if encoding in ("gzip", "x-gzip"):
+        return gzip.compress(payload)
+    if encoding == "deflate":
+        return zlib.compress(payload)
+    if encoding and encoding != "identity":
+        raise _UnsupportedFramingError(f"unsupported Content-Encoding: {encoding}")
+    return payload
+
+
+def _chunk_encode(payload: bytes) -> bytes:
+    """Wrap payload as a single HTTP chunk plus terminator."""
+    if not payload:
+        return b"0\r\n\r\n"
+    return f"{len(payload):X}\r\n".encode("ascii") + payload + b"\r\n0\r\n\r\n"
+
+
+def _rewrite_location(value: str, origin: str) -> str:
+    """Point an absolute redirect at the harness origin, keeping path and query."""
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return value
+    rebuilt = f"{origin}{parsed.path or '/'}"
+    if parsed.query:
+        rebuilt += f"?{parsed.query}"
+    return rebuilt
 
 
 class HARMockServer(HTTPServer):

@@ -33,7 +33,7 @@ and share a diagnostics snapshot.
 
 | Modem | Transport | ISPs | Capture |
 |-------|-----------|------|---------|
-| S34 | HNAP | Comcast, Cox, Spectrum, Xfinity | generated |
+| S34 | HNAP | Comcast, Cox, Spectrum, Xfinity | synthetic |
 | SB6141 | HTML | Comcast, Cox, Spectrum, TWC, Mediacom | hybrid |
 | SB8200 (Form Login CBN) | CBN | Comcast, Cox, Spectrum, Xfinity | synthetic |
 | G54 | HTML | Cox, Spectrum, Xfinity | generated |
@@ -44,7 +44,7 @@ and share a diagnostics snapshot.
 | CGA2121 | HTML | Telia | generated |
 | CGA4236 | HTML | Unknown | — |
 | CGA6444VF | HTML | Vodafone | — |
-| TC4400 | HTML | Comcast, Cox, Spectrum, Rogers, Shaw, Videotron, Vodafone Germany, Unitymedia, Teksavvy | generated |
+| TC4400 | HTML | Comcast, Cox, Spectrum, Rogers, Shaw, Videotron, Vodafone Germany, Unitymedia, Teksavvy | — |
 | XB8 | HTML | Rogers, Comcast, Xfinity, Cox | reconstructed |
 
 ## Pending Review

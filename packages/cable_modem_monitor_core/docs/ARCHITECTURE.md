@@ -869,6 +869,14 @@ coordinator, same parsers. The `HARMockServer`:
    for manual use)
 4. The pipeline runs against this server as if it were a real modem
 
+Replay is wire-faithful. A HAR stores the decoded body alongside the
+original headers, so the server re-applies the framing the headers
+declare (chunked transfer, gzip) before sending, recomputes
+`Content-Length`, and rewrites absolute `Location` targets to the
+harness origin so redirects stay inside the replay. A framing header
+it cannot reconstruct fails the request with a 500 rather than serving
+bytes that contradict the headers.
+
 **Two usage modes:**
 
 - **Automated regression testing** — the test runner (`runner.py`)
@@ -1314,7 +1322,7 @@ The test harness in Core consumes these fixtures. This means:
 ## Key Decisions
 
 Architecture decisions and their rationale live in
-[ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md), organised by
+[ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md), organized by
 theme with the reasoning and constraints for each. This document
 describes how the system is built; that one records why.
 
