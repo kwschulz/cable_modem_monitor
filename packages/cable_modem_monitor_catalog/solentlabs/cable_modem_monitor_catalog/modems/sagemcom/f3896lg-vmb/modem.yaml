@@ -61,6 +61,11 @@ notes: |
   the issue #82 response shapes, reboot flow confirmed via curl.
   Full declaration in the HAR's log.comment. Replace with a real
   full-session capture when a contributor provides one.
+
+  The synthesized login body carries a password and no username key,
+  the shape @edent's curl proved. It once carried a username because
+  it was written to match what Core sent, not what the firmware
+  accepts, and that made the fixture certify the client's own bug.
 references:
   issues:
     - "[#82 — [Modem Request] Virgin Media SuperHub - modem mode 5](https://github.com/solentlabs/cable_modem_monitor/issues/82)"

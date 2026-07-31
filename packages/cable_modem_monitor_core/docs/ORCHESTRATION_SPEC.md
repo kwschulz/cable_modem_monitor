@@ -965,18 +965,22 @@ class RestartResult:
 
     Attributes:
         success: True iff authentication succeeded, the action
-            executor ran, and the session was cleared without raising.
-            False on any failure during the command dispatch itself.
+            executor reported success, and the session was cleared
+            without raising. An executor that ran and was refused is
+            a failure.
         elapsed_seconds: Wall time of the ``restart()`` call. Typically
             a few seconds (auth + POST + session clear).
         error: Structured error token. Empty on success. On failure:
 
             * ``"command_failed"`` — authentication raised, the action
-              executor raised, or the session clear raised.
+              executor raised or reported failure, or the session
+              clear raised.
 
             No other error tokens are emitted. ``restart()`` does not
             time out, cannot be cancelled, and does not observe the
-            reboot.
+            reboot. What specifically refused the command is carried
+            by the ``RestartCommandFailed`` log line, not here; that
+            line is what a user pastes into an issue.
     """
 
     success: bool
@@ -1930,14 +1934,24 @@ Procedure:
    authenticates, and executes the action on it;
    `collector.authenticate()` is skipped entirely.
 3. Execute the `actions.restart` executor (`HTTP` or `HNAP` — see
-   § Action Executors).
+   § Action Executors). Stop here if it returns
+   `ActionResult(success=False)`: steps 4 and 5 are both premised on a
+   reboot that did not happen.
 4. Clear the collector session (forces fresh auth on the next poll;
    avoids the MB7621-class stale-cookie failure mode).
 5. Call `recovery.begin(reason="restart_command")` so subsequent
    polls run at recovery cadence. The call returns immediately; the
    recovery module owns what happens next.
 6. Return a `RestartResult` — success iff steps 2–5 completed
-   without raising.
+   without raising **and** step 3 reported success.
+
+**A returned failure is a failure.** Per-action auth can be refused
+and the modem can answer the command 401 or 404; neither raises, and
+neither rebooted anything. Dropping the `ActionResult` reported a
+reboot that never dispatched, opened a recovery window for it, and
+left the user watching an unchanged uptime counter (#82). The
+executor's result is the only evidence Core has that the command
+landed, so it is not optional to read.
 
 **Per-action auth (`action_auth` on `HttpAction`):** when
 `actions.restart.action_auth` is set, `execute_action` creates a
@@ -1954,8 +1968,8 @@ sees a flakey modem after a restart may want to try again; Core
 lets them. The command either dispatches (possibly re-rebooting
 an already-rebooting modem, which is the caller's intent) or
 fails cleanly with `error="command_failed"` if the modem isn't
-reachable. Serialization of rapid button presses is the consumer's
-responsibility — HA uses a short-lived mutex (see § Operation
+reachable or refuses it. Serialization of rapid button presses is
+the consumer's responsibility — HA uses a short-lived mutex (see § Operation
 Mutex in HA_ADAPTER_SPEC).
 
 **Why the session clear:** some firmware (observed on MB7621)
@@ -1982,7 +1996,9 @@ Every line includes `[MODEL]`. Two lines total — the command is
 one-shot.
 
 - INFO: `"Restart command sent [MODEL] — session cleared (0.4s)"`
-- ERROR: `"Restart command failed [MODEL]: <exc>"`
+- ERROR: `"Restart command failed [MODEL]: <reason>"` — an exception,
+  or the `ActionResult.message` when the executor reported failure
+  (e.g. `Per-action auth failed: Login returned HTTP 401`).
 
 ---
 
@@ -2281,7 +2297,9 @@ Phases:
 4. **Main request**: send the action request to the resolved endpoint.
 
 Connection errors and timeouts are treated as success (the modem is
-rebooting during restart). Returns `ActionResult`.
+rebooting during restart). Any response that arrives is judged on
+`resp.ok`: a 4xx or 5xx is a refused action, matching the CBN
+executor. Returns `ActionResult`.
 
 ### HNAP Executor
 
@@ -2304,9 +2322,10 @@ Returns `ActionResult`.
 ### ActionResult
 
 All executors return `ActionResult(success, message, details)`.
-Callers may use or ignore it — restart is fire-and-forget today,
-but the result is available for diagnostics and future recovery
-decisions.
+
+Restart must read it (§ Restart Action). Logout may ignore it —
+logout is best-effort at both call sites by design, and a modem that
+refuses one costs nothing but a stale server-side session.
 
 ---
 

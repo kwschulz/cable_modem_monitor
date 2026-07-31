@@ -795,7 +795,7 @@ User observes a flakey modem and wants to try restarting again.
 | Step | Action | Observable |
 |------|--------|------------|
 | 1 | Consumer calls `restart()` while recovery is active. | |
-| 2 | Orchestrator proceeds normally — authenticates, executes the action, clears session, calls `recovery.begin()`. | If modem is reachable and accepts the command: reboot re-triggers, recovery window restarts. If modem is unreachable: `error="command_failed"` returned. |
+| 2 | Orchestrator proceeds normally — authenticates, executes the action, clears session, calls `recovery.begin()`. | If modem is reachable and accepts the command: reboot re-triggers, recovery window restarts. If modem is unreachable or refuses the command: `error="command_failed"` returned. |
 
 **Assertions:**
 
@@ -878,8 +878,9 @@ User presses restart button. Recovery is not active.
 ### UC-46: (retired)
 
 Restart has no probe loop and no response timeout under the new
-model. The command either dispatches (success) or raises
-(`error="command_failed"`). If the modem never comes back after the
+model. The command either dispatches (success) or fails — raised,
+or refused by the modem (`error="command_failed"`). If the modem
+never comes back after the
 command, that shows up through normal polling during the recovery
 window (UNREACHABLE snapshots until/unless the modem returns, or
 until the window elapses and the coordinator falls back to normal
@@ -1966,3 +1967,34 @@ issued and recovery is already open from a signal-check trigger, the
 command is refused (UC-42). If the command is issued first, any
 subsequent reboot-signal match during the command's window is a no-op
 (window is already open; re-entry does nothing).
+
+---
+
+### UC-89: Restart refused by the modem
+
+**Preconditions:** `actions.restart` is declared. The user presses
+restart. Nothing raises: the modem answers, but it answers no.
+
+Two ways this arrives, both returning `ActionResult(success=False)`
+rather than an exception:
+
+| Step | Action | Observable |
+|------|--------|-----------|
+| 1 | `actions.restart` declares `action_auth` and the per-action login is refused (bad or missing credentials → HTTP 401). The command is never sent. | `Restart command failed [MODEL]: Per-action auth failed: Login returned HTTP 401` |
+| 2 | Or the command itself is sent and the modem answers 4xx/5xx. | `Restart command failed [MODEL]: Action refused with status 401` |
+
+**Assertions:**
+
+- `restart()` returns `success=False`, `error="command_failed"`
+- **No recovery window opens** — there is no reboot to poll through
+- **The collector session is not cleared** — the reason to clear it is
+  firmware invalidating it during a reboot, and no reboot happened
+- The consumer surfaces the failure. HA raises `HomeAssistantError`
+  from the button press, so the user sees it rather than a success
+  notification for a modem that never restarted
+
+**Why this is its own case.** A modem with no monitoring auth but a
+credentialed restart (`auth.strategy: none` + `action_auth`) has a
+config-entry state where monitoring works perfectly and restart cannot
+work at all: no password was ever stored, because nothing needed one.
+Silence here reads as success to the only person who can fix it (#82).

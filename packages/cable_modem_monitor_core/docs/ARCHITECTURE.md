@@ -899,14 +899,25 @@ the capture:
   unresolved `{auth:…}` or `{cookie:…}` placeholder that survives to
   the wire means Core could not fill it in, so the path was never one
   the modem had; the harness answers 500 instead of routing it.
+- **A JSON key the capture never carried is refused.** The same rule
+  one layer in. Routes and action matching key on method and path, so
+  nothing compared what Core *sent* against what the capture recorded,
+  and a synthesized fixture written to match Core's own request
+  certified Core against itself: the F3896LG-VMB login carried a
+  `username` key for as long as `BearerAuthManager` sent one, and every
+  replay passed (#82). The check runs one direction only — Core may
+  send fewer keys than the capture, never a key it lacks — and only
+  where the capture pins one body shape to one path. `/HNAP1/` carries
+  every action, and har-capture empties credential bodies to `{}`;
+  neither says anything about shape, so neither is indexed.
 
-The pass criterion follows. `ActionResult.success` is true for any HTTP
-response the executor received, so the runner also asserts the status
-code the result already carries, and a declared logout must have been
-dispatched and answered successfully during the poll. Core itself is
-unchanged: logout is best-effort at both call sites by design
-(ORCHESTRATION_SPEC), which is precisely why the harness is the only
-place a logout that never worked can be noticed.
+The pass criterion follows. `ActionResult.success` now carries the
+response status for HTTP actions, and the runner asserts it, plus the
+status code the result records for transports that report none through
+`success` alone. A declared logout must also have been dispatched and
+answered successfully during the poll — logout is best-effort at both
+call sites by design (ORCHESTRATION_SPEC), which is precisely why the
+harness is the only place a logout that never worked can be noticed.
 
 **Two usage modes:**
 

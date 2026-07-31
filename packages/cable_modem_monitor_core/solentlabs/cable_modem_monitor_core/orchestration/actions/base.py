@@ -10,9 +10,9 @@ from typing import Any
 class ActionResult:
     """Result of an action execution.
 
-    All action executors return this.  Callers may use or ignore the
-    result — restart actions are fire-and-forget today, but the result
-    is available for diagnostics and future smarter recovery decisions.
+    All action executors return this.  Restart must read it — a
+    refused command is not a sent one (ORCHESTRATION_SPEC § Restart
+    Action).  Logout may ignore it; logout is best-effort by design.
 
     Attributes:
         success: Whether the action succeeded.

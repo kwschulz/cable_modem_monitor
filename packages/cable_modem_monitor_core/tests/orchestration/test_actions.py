@@ -60,6 +60,7 @@ class TestExecuteHttpAction:
         session = MagicMock(spec=requests.Session)
         resp = MagicMock()
         resp.status_code = 200
+        resp.ok = True
         session.request.return_value = resp
         action = HttpAction(
             type="http",
@@ -80,6 +81,34 @@ class TestExecuteHttpAction:
             headers={"X-Token": "abc"},
             timeout=5,
         )
+
+    @pytest.mark.parametrize("status", [401, 403, 404, 500])
+    def test_rejected_status_is_failure(self, status: int) -> None:
+        """A response the modem refused is a failed action, not a sent one."""
+        session = MagicMock(spec=requests.Session)
+        resp = MagicMock()
+        resp.status_code = status
+        resp.ok = False
+        session.request.return_value = resp
+        action = HttpAction(type="http", method="POST", endpoint="/rest/v1/system/reboot")
+
+        result = execute_http_action(session, "http://192.168.100.1", action)
+
+        assert result.success is False
+        assert result.details["status_code"] == status
+
+    def test_redirect_status_is_success(self) -> None:
+        """A 3xx still reached the modem — ``resp.ok`` is the pass line."""
+        session = MagicMock(spec=requests.Session)
+        resp = MagicMock()
+        resp.status_code = 302
+        resp.ok = True
+        session.request.return_value = resp
+        action = HttpAction(type="http", method="POST", endpoint="/goform/restart")
+
+        result = execute_http_action(session, "http://192.168.100.1", action)
+
+        assert result.success is True
 
 
 # ------------------------------------------------------------------
@@ -1000,6 +1029,7 @@ class TestHttpActionWithActionAuth:
         login_resp.json.return_value = {"created": {"token": token}}
         action_resp = MagicMock()
         action_resp.status_code = 200
+        action_resp.ok = True
         fresh.post.return_value = login_resp
         fresh.request.return_value = action_resp
         return fresh

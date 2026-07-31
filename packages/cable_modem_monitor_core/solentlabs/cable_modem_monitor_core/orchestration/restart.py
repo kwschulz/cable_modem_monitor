@@ -53,7 +53,7 @@ def run_restart(
        — unless ``actions.restart`` has ``action_auth`` set, in which
        case ``execute_action`` authenticates on a separate fresh session
        and the monitoring session is not needed for the restart command.
-    3. Execute the restart action.
+    3. Execute the restart action, and stop if it reports failure.
     4. Clear the collector session (forces fresh auth on the next
        poll — some firmware invalidates sessions after a reboot).
     5. Call ``recovery.begin("restart_command")`` so subsequent polls
@@ -61,7 +61,8 @@ def run_restart(
     6. Return a ``RestartResult``.
 
     Typical duration: 2–5 seconds. The caller does not block on the
-    reboot itself. Any exception between steps 2 and 4 yields
+    reboot itself. Any exception between steps 2 and 4, or a failed
+    ``ActionResult`` from step 3, yields
     ``RestartResult(success=False, error="command_failed")`` — the
     only error token this function emits.
     """
@@ -105,7 +106,21 @@ def run_restart(
         # timeouts inside the HTTP executor are already swallowed
         # there (the modem IS rebooting during the POST); anything
         # that surfaces here is a genuine dispatch failure.
-        execute_action(collector, modem_config, actions.restart)
+        #
+        # A returned failure is one too: per-action auth can be refused,
+        # or the modem can answer the command 401/404. Neither raises,
+        # and neither rebooted anything (#82).
+        action_result = execute_action(collector, modem_config, actions.restart)
+        if not action_result.success:
+            elapsed = time.monotonic() - start
+            log_event(_logger, RestartCommandFailed(model=model, reason=action_result.message))
+            # No command reached the modem, so the monitoring session is
+            # still good and there is no reboot for recovery to watch.
+            return RestartResult(
+                success=False,
+                elapsed_seconds=elapsed,
+                error="command_failed",
+            )
 
         # Step 4 — clear the session locally. MB7621-class firmware
         # invalidates sessions server-side during the reboot while

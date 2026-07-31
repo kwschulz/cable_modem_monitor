@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import json
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -83,6 +84,79 @@ def build_routes(
             routes[key] = RouteEntry(status=status, headers=headers, body=body)
 
     return routes
+
+
+def build_json_body_keys(
+    har_entries: list[dict[str, Any]],
+) -> dict[tuple[str, str], frozenset[str]]:
+    """Map ``(method, path)`` to the top-level keys of the JSON body captured there.
+
+    Indexed only when the capture pins **one** body shape to the
+    endpoint. A body qualifies by parsing as a JSON object, not by its
+    declared ``mimeType`` — real captures omit that field, and a
+    form-encoded body never parses as one anyway. Three exclusions, all
+    because the comparison would mean nothing:
+
+    - Form-encoded posts. A browser submits hidden fields Core has no
+      reason to replicate.
+    - Endpoints the capture posted more than one shape to. HNAP carries
+      every action over ``/HNAP1/``, so the path names the transport
+      rather than the operation, and ``Login`` would look invented
+      beside a captured ``GetMultipleHNAPs``.
+    - Bodies with no keys at all. har-capture empties a credential body
+      to ``{}`` (observed on the TG3442DE login), which says the
+      sanitizer ran, not that the firmware accepts nothing.
+
+    What is left is the REST-shaped case, where one path means one
+    request and the capture is a statement about its body.
+    """
+    seen: dict[tuple[str, str], frozenset[str]] = {}
+    multiplexed: set[tuple[str, str]] = set()
+
+    for entry in har_entries:
+        request = entry.get("request", {})
+        post = request.get("postData", {})
+        parsed_keys = _top_level_keys(str(post.get("text", "")))
+        if not parsed_keys:
+            continue
+        path = normalize_path(urlparse(request.get("url", "")).path)
+        if not path:
+            continue
+        key = (request.get("method", "GET").upper(), path)
+        if key in seen and seen[key] != parsed_keys:
+            multiplexed.add(key)
+        seen[key] = parsed_keys
+
+    return {key: value for key, value in seen.items() if key not in multiplexed}
+
+
+def _top_level_keys(text: str) -> frozenset[str] | None:
+    """Return the top-level keys of a JSON object body; ``None`` if it is not one."""
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return frozenset(parsed)
+
+
+def unrecorded_body_keys(
+    captured: frozenset[str],
+    body: bytes,
+) -> frozenset[str]:
+    """Return the keys Core sent that the capture never recorded.
+
+    One direction only. Core sending *fewer* keys than the capture is
+    routine — a browser posts fields the client has no reason to. Core
+    sending a key the firmware was never handed is the failure: nothing
+    in the capture says how it answers one, and a synthesized fixture
+    written to match Core will happily accept it forever (#82).
+    """
+    sent = _top_level_keys(body.decode("utf-8", errors="replace"))
+    if sent is None:
+        return frozenset()
+    return sent - captured
 
 
 def normalize_path(path: str) -> str:

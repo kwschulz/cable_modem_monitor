@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from ..models.modem_config import ModemConfig
 
 from .auth import create_auth_handler
-from .routes import build_routes, normalize_path
+from .routes import build_json_body_keys, build_routes, normalize_path, unrecorded_body_keys
 
 _logger = logging.getLogger(__name__)
 
@@ -91,14 +91,7 @@ class _MockHandler(BaseHTTPRequestHandler):
         method = lookup_method
         auth = server.auth_handler
 
-        # A placeholder that survived to the wire means Core could not
-        # resolve it, so the request targets a path the modem never had.
-        # Routing it would hide the bug behind whatever the lookup does
-        # next; the ZG's logout reached the modem as a literal
-        # {auth:user_id} for exactly this reason.
-        unresolved = _UNRESOLVED_PLACEHOLDER_RE.search(unquote(path))
-        if unresolved:
-            self._fail_request(f"unresolved placeholder in request path: {unresolved.group(0)}")
+        if self._reject_dishonest_request(server, method, path, body):
             return
 
         # Login request — handle auth and serve response
@@ -220,6 +213,43 @@ class _MockHandler(BaseHTTPRequestHandler):
         for name, value in extra_headers.items():
             response_headers.append((name, value))
         self._send_response(route.status, response_headers, route.body)
+
+    def _reject_dishonest_request(
+        self,
+        server: HARMockServer,
+        method: str,
+        path: str,
+        body: bytes,
+    ) -> bool:
+        """Fail requests the capture cannot honestly answer; True when one was failed.
+
+        Two forms, same rule one layer apart:
+
+        - A placeholder that survived to the wire means Core could not
+          resolve it, so the request targets a path the modem never had.
+          The ZG's logout reached the modem as a literal
+          ``{auth:user_id}`` for exactly this reason.
+        - A JSON key the capture never carried means the modem was never
+          asked this body. Routing it lets a fixture certify Core
+          against Core — the F3896LG login carried a username key for as
+          long as Core sent one, and every replay passed (#82).
+        """
+        unresolved = _UNRESOLVED_PLACEHOLDER_RE.search(unquote(path))
+        if unresolved:
+            self._fail_request(f"unresolved placeholder in request path: {unresolved.group(0)}")
+            return True
+
+        captured_keys = server.json_body_keys.get((method, path))
+        if captured_keys:
+            invented = unrecorded_body_keys(captured_keys, body)
+            if invented:
+                self._fail_request(
+                    f"request body keys not in the capture: {', '.join(sorted(invented))} "
+                    f"(captured: {', '.join(sorted(captured_keys))})"
+                )
+                return True
+
+        return False
 
     def _fail_request(self, message: str) -> None:
         """Answer 500 with a diagnostic — the harness cannot honestly serve this request."""
@@ -467,6 +497,7 @@ class HARMockServer(HTTPServer):
         port: int = 0,
     ) -> None:
         self.routes = build_routes(har_entries)
+        self.json_body_keys = build_json_body_keys(har_entries)
         self.auth_handler = create_auth_handler(modem_config, har_entries)
         self.login_page = _extract_login_page(modem_config)
         self.token_prefix = _extract_token_prefix(modem_config)

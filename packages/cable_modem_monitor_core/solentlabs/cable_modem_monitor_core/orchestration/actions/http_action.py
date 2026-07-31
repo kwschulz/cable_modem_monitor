@@ -117,9 +117,12 @@ def execute_http_action(
                 level=level,
             ),
         )
+        # A status the modem refused is a refused action. Only a lost
+        # connection is read as success, and only because the reboot
+        # itself is what drops it.
         return ActionResult(
-            success=True,
-            message=f"Action completed with status {resp.status_code}",
+            success=resp.ok,
+            message=f"Action {'completed' if resp.ok else 'refused'} with status {resp.status_code}",
             details={"status_code": resp.status_code},
         )
     except (requests.ConnectionError, requests.Timeout):

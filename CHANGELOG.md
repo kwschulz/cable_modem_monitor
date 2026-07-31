@@ -37,6 +37,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A refused restart reported success.** The restart command dropped
+  the result its action executor returned, so a modem that answered the
+  reboot with 401 or 404 — or a per-action login the modem rejected —
+  logged "Restart command sent", notified the user of a dispatch that
+  never happened, and opened a recovery window for a reboot nobody
+  asked for. The executor also reported any response it received as
+  success, including refusals. Both now fail: the HTTP executor judges
+  the response the way the CBN executor already did, and a failed
+  action ends the restart before the session clear and the recovery
+  window, since neither has a reboot to be premised on. The specific
+  refusal reaches the log, so a report carries it. Affects the
+  Hub 5 (F3896LG-VMB), whose restart authenticates separately from
+  monitoring and so can fail on its own. (Related to #82)
+
+- **A synthesized fixture could certify the client against itself.**
+  The Hub 5's assembled login entry recorded the body Core sent rather
+  than the one the firmware accepts, so a replay of the wrong request
+  shape passed for as long as Core sent it. The fixture is corrected to
+  the evidenced password-only body, and the mock server now refuses a
+  JSON key the capture never carried instead of routing it — one
+  direction only, and only where the capture pins a single body shape
+  to a path. (Related to #82)
+
 - **Six modems published non-canonical modulation values.** The
   SB8200 (CBN), G54, Hub 5 (F3896LG-VMB), CGA4236, CGA6444VF, and
   TC4400 passed firmware spellings straight through (`256QAM`,

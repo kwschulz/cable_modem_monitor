@@ -97,6 +97,13 @@ that must declare itself:
 - The assembly is only valid when it round-trips: run the parser over
   the assembled HAR and diff the output against the evidence — zero
   mismatches required.
+- **Request bodies come from the evidence, never from what Core sends.**
+  A body written to match the client turns the fixture into a mirror:
+  the replay passes because Core agrees with itself, and the firmware
+  is never consulted. The F3896LG-VMB login carried a `username` key
+  copied from Core's own request, and the restart it certified could
+  not work on hardware (#82). If the evidence does not show a body,
+  leave the entry out rather than inventing one.
 
 **Partial evidence.** Sometimes no full session exists: a contributor
 can share diagnostics or page source but not run a capture, a sanitizer

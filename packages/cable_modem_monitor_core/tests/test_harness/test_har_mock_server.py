@@ -792,6 +792,73 @@ class TestHARMockServerBearerCaptureSeeding:
             assert resp.json()["created"]["token"]
 
 
+class TestHARMockServerRequestBodyShape:
+    """A JSON key the capture never carried is refused, not routed.
+
+    Routes and action matching key on method and path, so nothing
+    compared what Core sent against what the capture recorded. A
+    synthesized fixture written to match Core's own request therefore
+    certified Core against itself: the F3896LG login carried a
+    ``username`` key for as long as ``BearerAuthManager`` sent one, and
+    every replay passed (#82).
+    """
+
+    @pytest.fixture()
+    def entries(self) -> list[dict[str, Any]]:
+        """Bearer entries whose captured login body is password-only."""
+        return _load_entries("har_entries_bearer_actions.json")
+
+    @pytest.fixture()
+    def config(self) -> Any:
+        """Bearer config matching the captured login."""
+        return _make_config(
+            {
+                "auth": {
+                    "strategy": "bearer",
+                    "login_endpoint": "/rest/v1/user/login",
+                    "token_path": "created.token",
+                },
+            }
+        )
+
+    def test_captured_shape_is_served(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """The body the capture recorded replays normally."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.post(f"{server.base_url}/rest/v1/user/login", json={"password": "pw"})
+            assert resp.status_code == 201
+
+    def test_invented_key_fails_loudly(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """The exact #82 defect: a username key the firmware was never sent."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.post(
+                f"{server.base_url}/rest/v1/user/login",
+                json={"username": "admin", "password": "pw"},
+            )
+            assert resp.status_code == 500
+            assert "username" in resp.text
+
+    def test_subset_of_captured_keys_is_allowed(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """Sending fewer keys than the capture is routine, not a defect."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.post(f"{server.base_url}/rest/v1/user/login", json={})
+            assert resp.status_code == 201
+
+    def test_form_encoded_body_is_not_compared(self) -> None:
+        """Form posts carry browser-only fields; key comparison says nothing.
+
+        The fixture's captured login body is ``username=admin&password=secret``
+        — a real form post, so the endpoint must stay unindexed. Pointing
+        this at a capture with no POST at all would pass whatever the
+        exclusion did.
+        """
+        entries = _load_entries("har_entries_form_auth.json")
+        config = _make_config({"auth": {"strategy": "form", "action": "/goform/login"}})
+        with HARMockServer(entries, modem_config=config) as server:
+            assert ("POST", "/goform/login") not in server.json_body_keys
+            resp = requests.post(f"{server.base_url}/goform/login", json={"invented": "1"})
+            assert resp.status_code != 500
+
+
 class TestHARMockServerWireFraming:
     """Wire re-framing: replayed headers must be true on the wire.
 

@@ -16,6 +16,7 @@ Use case coverage:
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -290,3 +291,102 @@ def test_no_action_auth_calls_collector_authenticate() -> None:
 
     assert result.success is True
     collector.authenticate.assert_called_once()
+
+
+# ------------------------------------------------------------------
+# A rejected action is a failed restart (issue #82)
+# ------------------------------------------------------------------
+
+
+def _make_fresh_session_login_rejected() -> MagicMock:
+    """Fresh session mock whose per-action login is refused."""
+    fresh = MagicMock()
+    fresh.headers = {}
+    login_resp = MagicMock()
+    login_resp.status_code = 401
+    fresh.post.return_value = login_resp
+    return fresh
+
+
+def test_action_auth_failure_returns_command_failed() -> None:
+    """A refused per-action login never sends the reboot, so the restart failed."""
+    config = _config_with_action_auth()
+    collector = _collector()
+    recovery = _recovery(config, collector)
+
+    with patch(_ACTION_AUTH_PATCH, return_value=_make_fresh_session_login_rejected()):
+        result = run_restart(collector, config, recovery)
+
+    assert result.success is False
+    assert result.error == "command_failed"
+    assert recovery.active is False
+
+
+def test_action_auth_failure_logs_what_refused_it(caplog: pytest.LogCaptureFixture) -> None:
+    """The log line is the whole diagnostic path — ``error`` is only a token.
+
+    A user reporting a failed restart pastes this line, so it has to
+    name the layer that refused the command. ``command_failed`` alone
+    tells them, and us, nothing (#82).
+    """
+    config = _config_with_action_auth()
+    collector = _collector()
+    recovery = _recovery(config, collector)
+
+    with (
+        patch(_ACTION_AUTH_PATCH, return_value=_make_fresh_session_login_rejected()),
+        caplog.at_level(logging.ERROR),
+    ):
+        run_restart(collector, config, recovery)
+
+    assert "Restart command failed [Hub5]" in caplog.text
+    assert "Per-action auth failed" in caplog.text
+    assert "401" in caplog.text
+
+
+def test_action_auth_failure_leaves_monitoring_session_intact() -> None:
+    """No reboot was dispatched, so there is no stale-cookie risk to clear against."""
+    config = _config_with_action_auth()
+    collector = _collector()
+    recovery = _recovery(config, collector)
+
+    with patch(_ACTION_AUTH_PATCH, return_value=_make_fresh_session_login_rejected()):
+        run_restart(collector, config, recovery)
+
+    collector.clear_session.assert_not_called()
+
+
+def _collector_refusing_the_command(status: int = 401) -> MagicMock:
+    """Collector whose session answers the action request with a refusal."""
+    collector = _collector()
+    rejected = MagicMock()
+    rejected.status_code = status
+    rejected.ok = False
+    collector._session.request.return_value = rejected
+    return collector
+
+
+def test_rejected_restart_request_returns_command_failed() -> None:
+    """The modem answering 401 to the reboot POST is a failed restart."""
+    config = _config()
+    collector = _collector_refusing_the_command()
+    recovery = _recovery(config, collector)
+
+    result = run_restart(collector, config, recovery)
+
+    assert result.success is False
+    assert result.error == "command_failed"
+    assert recovery.active is False
+
+
+def test_rejected_restart_request_logs_the_status(caplog: pytest.LogCaptureFixture) -> None:
+    """The refusing status reaches the log, where a user can report it."""
+    config = _config()
+    collector = _collector_refusing_the_command(403)
+    recovery = _recovery(config, collector)
+
+    with caplog.at_level(logging.ERROR):
+        run_restart(collector, config, recovery)
+
+    assert "Restart command failed [T100]" in caplog.text
+    assert "403" in caplog.text

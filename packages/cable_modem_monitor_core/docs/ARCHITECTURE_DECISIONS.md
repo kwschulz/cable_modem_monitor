@@ -1210,7 +1210,8 @@ the dashboard tells the user what's actually happening.
 
 **Constrains:** Restart never waits, never times out, never
 cancels. Its only failure mode is `command_failed` (auth or action
-executor raised). Recovery cannot be triggered by caller request
+executor raised, or the executor reported failure).
+Recovery cannot be triggered by caller request
 other than the three defined paths (command, observed failure,
 reboot-signal check). Consumers cannot observe recovery window
 progress — they see the snapshot stream and react to that.

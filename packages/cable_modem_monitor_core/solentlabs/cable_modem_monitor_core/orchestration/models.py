@@ -311,13 +311,16 @@ class RestartResult:
 
     Attributes:
         success: True iff authentication succeeded, the action
-            executor ran, and the session was cleared without
-            raising.
+            executor reported success, and the session was cleared
+            without raising. An executor that ran and was refused is
+            a failure.
         elapsed_seconds: Wall time of the ``run_restart`` call.
             Typically a few seconds (auth + POST + session clear).
         error: Structured error token. Empty on success.
             ``"command_failed"`` on any dispatch failure — no other
-            tokens are emitted.
+            tokens are emitted. What specifically refused the command
+            is carried by the ``RestartCommandFailed`` log line, not
+            here; that line is what a user pastes into an issue.
     """
 
     success: bool

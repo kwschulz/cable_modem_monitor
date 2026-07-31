@@ -144,10 +144,10 @@ def run_modem_restart_test(test_case: RestartTestCase) -> ActionTestResult:
             test_name=test_case.name, passed=False, error=result.message or "Action returned failure"
         )
 
-    # The HTTP executor reports success for any response it received, so
-    # ``success`` alone cannot tell a restart the modem accepted from one
-    # it 404'd. The status code it already records can. HNAP validates its
-    # own SOAP result and records no status, so this skips it.
+    # Belt and braces. The HTTP and CBN executors already fail a refused
+    # status, but HNAP validates its own SOAP result and records no
+    # status, so a transport that starts reporting one is checked here
+    # rather than trusted.
     status = result.details.get("status_code")
     if status is not None and not 200 <= int(status) < 400:
         return ActionTestResult(
