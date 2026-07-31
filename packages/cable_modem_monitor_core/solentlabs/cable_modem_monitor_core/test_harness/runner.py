@@ -17,7 +17,7 @@ Two entry points:
 Both share the same config loading, golden file comparison, and
 ``TestResult`` format.
 
-See ONBOARDING_SPEC.md Test Execution Flow section.
+See catalog_tools' ONBOARDING_SPEC.md § Test Execution Flow.
 """
 
 from __future__ import annotations

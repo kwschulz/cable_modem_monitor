@@ -154,7 +154,8 @@ POST to `{base_url}/HNAP1/`:
                           )
    "FAILED"              -> wrong username or password (AUTH_FAILED)
    "LOCKUP" | "REBOOT"   -> firmware anti-brute-force triggered
-                            (raise via collector as AUTH_LOCKOUT;
+                            (raises LoginLockoutError, which the
+                             collector maps to AUTH_LOCKOUT;
                              see § Lockout behaviour below)
    anything else         -> unexpected protocol state (AUTH_FAILED)
 
@@ -177,19 +178,29 @@ lock, modem rejects further attempts for a cool-down window) or
 lock).
 
 `HnapAuthManager._login_with_credentials` detects these values and
-returns an `AuthResult` with `success=False` and an error carrying
-the raw `LoginResult`. The collector converts this into a
-`LoginLockoutError` (raised only for HNAP strategies) which the
-outer poll loop maps to `CollectorSignal.AUTH_LOCKOUT`. The
-orchestrator applies backoff so the poll cycle does not hammer the
-modem during the firmware cool-down.
+raises `LoginLockoutError` directly --- the only exception any auth
+strategy raises past the collector's own error handling.
+`ModemDataCollector` catches it and returns
+`CollectorSignal.AUTH_LOCKOUT`; the orchestrator never sees the
+exception. `SignalPolicy` trips the circuit breaker on the first
+occurrence, so polling stops outright.
 
-This is why HNAP has a distinct exit path
-(`LoginLockoutError` -> `AUTH_LOCKOUT`) rather than collapsing into
-generic `AUTH_FAILED`: the collector must stop retrying quickly to
-avoid extending the lockout or provoking a reboot loop. See
-ORCHESTRATION_SPEC.md § Exceptions and
-RUNTIME_POLLING_SPEC.md for the backoff policy.
+There is no lockout backoff and no login suppression window. A modem
+refusing logins to protect itself gains nothing from a slower retry,
+so the policy is one attempt then stop rather than a cool-down timer
+(ARCHITECTURE_DECISIONS.md § Session reuse across polls). Session
+reuse is the primary defence against ever reaching lockout; the
+circuit breaker is the safety net.
+
+HNAP keeps a distinct exit path (`LoginLockoutError` ->
+`AUTH_LOCKOUT`) rather than collapsing into generic `AUTH_FAILED`.
+Today the two are treated alike downstream: both trip the breaker on
+the first occurrence, and the HA adapter maps both to `invalid_auth`
+(`config_flow_helpers.py`). The only surviving difference is the
+WARNING log. Whether lockout should carry its own user-facing message
+--- a modem protecting itself is not a wrong password --- is open,
+not settled here. See ORCHESTRATION_SPEC.md § Exceptions and
+§ Auth Circuit Breaker.
 
 ## Firmware Assumptions
 
@@ -290,8 +301,9 @@ Each `ModemSummary` carries `manufacturer`, `model`, `status`,
   recognised as anti-brute-force responses. Any other non-success
   `LoginResult` value currently falls into the generic
   `unexpected result` error path and is surfaced as `AUTH_FAILED`
-  rather than `AUTH_LOCKOUT`, so the collector would retry instead
-  of backing off. No alternative lockout tokens have been observed
+  rather than `AUTH_LOCKOUT`. Both trip the circuit breaker on the
+  first occurrence, so polling stops either way; what is lost is the
+  lockout WARNING. No alternative lockout tokens have been observed
   but the protocol spec doesn't enumerate them.
 - **Timestamp collision within a session**: HNAP_AUTH uses a
   millisecond timestamp modulo `2_000_000_000_000`. Two HMAC

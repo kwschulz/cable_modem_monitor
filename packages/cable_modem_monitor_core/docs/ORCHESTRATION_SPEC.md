@@ -1263,7 +1263,6 @@ grows and the circuit trips — same as wrong credentials.
 
 | State | Purpose | Lifetime |
 |-------|---------|----------|
-| Login backoff counter | Anti-brute-force suppression | Decremented each get_modem_data(), cleared by orchestrator reconstruction |
 | Auth failure streak | Circuit breaker — consecutive auth-related failures | Reset on successful collection, cleared by orchestrator reconstruction |
 | Circuit open flag | Stops collection when streak reaches threshold | Set when tripped, cleared by orchestrator reconstruction |
 | Circuit trip status code | Keeps blocked-poll advice matched to the trip cause (404 vs credentials) | Set on immediate trip, cleared by orchestrator reconstruction |
@@ -1393,7 +1392,7 @@ first-poll output.
 **Auth lifecycle:**
 
 - INFO (first poll) / DEBUG (after): `"Poll [MODEL] — auth: FormAuth, url: ..., credentials: yes, session: none"`
-- WARNING: `"Auth lockout [MODEL] — firmware anti-brute-force triggered, suppressing login for 3 polls (streak: 3/6)"`
+- WARNING: `"Auth lockout [MODEL] — firmware anti-brute-force triggered, stopping immediately (streak: 3)"`
 - ERROR: `"Circuit breaker OPEN [MODEL] — polling stopped. Reconfigure credentials to resume."`
 - ERROR (404 trip): `"Circuit breaker OPEN [MODEL] — login endpoint not found (HTTP 404). Polling stopped. Reload the integration to retry."`
 

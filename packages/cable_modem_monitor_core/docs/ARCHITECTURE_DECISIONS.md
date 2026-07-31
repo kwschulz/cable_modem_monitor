@@ -1102,12 +1102,13 @@ error reporting).
 to do about it, callers inherit hidden policy they can't override.
 Keeping signal and policy separate gives the orchestrator full
 visibility and full control. Auth strategies raise
-`LoginLockoutError` but don't track lockout state. The orchestrator
-sets backoff counters and suppresses login attempts.
+`LoginLockoutError` but don't track lockout state or decide the
+response; `SignalPolicy` trips the circuit breaker (see § Session
+reuse across polls for why lockout stops rather than backs off).
 
 **Constrains:** Protocol layers never retry, back off, or decide what
-to do about failures. All policy state (backoff counters, session
-reuse decisions) lives on the orchestrator.
+to do about failures. All policy state (failure streaks, connectivity
+backoff, session reuse decisions) lives on the orchestrator.
 
 ### Session reuse across polls
 
