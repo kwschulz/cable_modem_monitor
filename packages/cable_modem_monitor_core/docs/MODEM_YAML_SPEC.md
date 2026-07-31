@@ -905,10 +905,11 @@ exposes `<LockedOut>` and `<AccessDenied>` fields. When `LockedOut`
 is not `"Disable"`, the modem has temporarily locked the account
 after too many failed attempts.
 
-Evidence: Compal CH7465MT (Magenta AT / UPC / Ziggo / Virgin Media
-"Connect Box"). The `CBN_Encrypt` function is in `encrypt_cryptoJS.js`
-which loads CryptoJS v3.1.2 (`AES.js`, `sha256.js`, `md5.js`).
-Related modems CH7466CE and CH7465CE share the same auth flow.
+Evidence: Compal
+[CH7465MT](../../cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/compal/ch7465mt/modem.yaml)
+(Magenta AT / UPC / Ziggo / Virgin Media "Connect Box"). The
+`CBN_Encrypt` function is in `encrypt_cryptoJS.js` which loads CryptoJS
+v3.1.2 (`AES.js`, `sha256.js`, `md5.js`).
 
 ---
 

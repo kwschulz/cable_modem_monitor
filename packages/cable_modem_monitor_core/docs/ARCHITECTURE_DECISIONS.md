@@ -8,7 +8,7 @@ files; this document explains the choices that shaped them.
 
 | Section | What it covers |
 |---------|----------------|
-| [Package Boundaries](#package-boundaries) | Runtime package split, dependency direction, where each piece lives |
+| [Package Boundaries](#package-boundaries) | Runtime package split, dependency direction, where each piece lives, specs citing the catalog rather than restating its coverage |
 | [Core Schema Model](#core-schema-model) | What enters Core's schema vs what stays user-side; catalog stores source-faithful strings and maps only observed values, display normalizes; derived and dynamic fields, health as its own structure |
 | [Transport and Constraint Model](#transport-and-constraint-model) | Transport as protocol identifier, generated constraint tables, implicit capabilities, shared protocol primitives, config as parameters |
 | [Auth Architecture](#auth-architecture) | Strategy discreteness, session lifecycle, failure logging, credential reconfiguration as reconstruction |
@@ -218,6 +218,33 @@ named `cable_modem_monitor_*`.
 
 **Rationale:** PyPI uniqueness, consistent branding, and a name that
 ties the libraries to the HA integration they power.
+
+---
+
+### Specs cite catalog artifacts; they never enumerate coverage
+
+**Decision:** A modem model named in a Core spec links to the catalog
+file that evidences the claim. Specs never carry a list of which
+modems a strategy, transport, or format covers.
+
+**Rationale:** The catalog is the single source of truth for coverage,
+and it is the only copy anything enforces — the index and audit are
+generated and CI fails when they drift, and `link-check` fails when a
+citation stops resolving. A bare model name in prose has neither gate,
+so it is wrong the moment the fleet moves and nothing says so.
+ARCHITECTURE.md claimed the CBN strategy covered `CH7465MT, CH7466CE,
+CH7465CE`: a list naming one model no source supports, omitting the
+SB8200 CBN variant the catalog does carry. MODEM_YAML_SPEC.md repeated
+the same model, with no source behind it, inside a paragraph headed
+"Evidence:".
+
+**Constrains:**
+
+- A model name earns its place by linking to that modem's
+  `modem.yaml`, `parser.yaml`, or a file under its `test_data/`.
+  CHANNEL_IDENTIFICATION_SPEC.md is the reference example.
+- Coverage questions are answered by the generated catalog index and
+  CATALOG_AUDIT.md, never by prose in a spec.
 
 ---
 
@@ -1670,8 +1697,9 @@ no hardware version at all and the third reports a value the catalog
 does not use.
 
 **Constrains:** A variant's filename stem is user-facing text, so it
-must name the real distinguisher. A misleading stem is renamed rather
-than relabelled; there is deliberately no label-override field, since
+must name what really sets the variant apart. A misleading stem is
+renamed rather than relabelled; there is deliberately no
+label-override field, since
 that would only dress up a bad name. `hw_version` stays recorded, and
 earns a place in the label only where variants genuinely differ by
 hardware alone (the S33 generations).

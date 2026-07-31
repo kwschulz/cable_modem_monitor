@@ -54,7 +54,7 @@ notes: |
 
 references:
   issues:
-    - "[#77 — [Modem Request] Compal CH7465CE](https://github.com/solentlabs/cable_modem_monitor/issues/77)"
-    - "[#80 — [Modem Request] Compal CH7466CE](https://github.com/solentlabs/cable_modem_monitor/issues/80)"
+    - "[#77 — [Modem Request] Compal CH7465 used by Vodafone Germany](https://github.com/solentlabs/cable_modem_monitor/issues/77)"
+    - "[#80 — [Modem Request] Compal CH7466CE as used by Vodafone Germany](https://github.com/solentlabs/cable_modem_monitor/issues/80)"
   prs:
     - "[#129 — CH7465MT implementation](https://github.com/solentlabs/cable_modem_monitor/pull/129)"

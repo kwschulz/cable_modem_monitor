@@ -68,6 +68,7 @@ words:
   - hass
   - hassfest
   - homeassistant
+  - websession
 
   # DOCSIS / cable protocol
   - AESCCM

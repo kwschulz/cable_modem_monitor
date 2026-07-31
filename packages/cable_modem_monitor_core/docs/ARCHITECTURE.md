@@ -257,7 +257,7 @@ choosing `json` format doesn't require `form_pbkdf2` auth.
 - Single endpoint (`getter.xml`/`setter.xml`) with `fun=N` parameters
 - AES-256-CBC encrypted auth (`CBN_Encrypt` from `encrypt_cryptoJS.js`)
 - Rotating session token on every response
-- One strategy handles all CBN modems (CH7465MT, CH7466CE, CH7465CE)
+- One strategy handles all CBN modems
 
 ### HTTP — Independent Axes
 
