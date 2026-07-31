@@ -469,7 +469,7 @@ poll reports `AUTH_FAILED`; at the threshold the auth circuit breaker
 opens and blocks further polling. The breaker does not close on its
 own — the HA layer starts a reauth flow, and completing it reloads
 the config entry, which is what clears the state. See
-[RUNTIME_POLLING_SPEC.md](RUNTIME_POLLING_SPEC.md) § Auth Circuit
+[ORCHESTRATION_SPEC.md](ORCHESTRATION_SPEC.md) § Auth Circuit
 Breaker and UC-19.
 
 **Scope:** Only applies to HTTP transport, HTML format responses.

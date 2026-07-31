@@ -81,8 +81,7 @@ exists for HA, the documented exception is the honest answer.
 imports in Core (restated from the package-split decision). The HA
 adapter must never call Core from the event loop — blocking calls
 belong in executor jobs, and any blocking I/O found on the loop is
-a bug (see the config-flow `read_text` fix), not a candidate for
-loosening this rule. Everything *around* the boundary is still held
+a bug, not a candidate for loosening this rule. Everything *around* the boundary is still held
 to full strictness: executor discipline, session teardown, graceful
 failure. HA-layer quality audits assess all other quality-scale
 rules at face value and cite this entry for the two declined ones.
@@ -656,10 +655,11 @@ guard delegates to it rather than reimplementing a narrower check.
 CBN transport always embeds the session token by protocol; `requires_session`
 is absent from `CbnAction` by type-system design.
 
-**Fleet values (2026-06-10):** MB7621 GET `/logout.asp` and SB8200 basic GET
-`/logout.html` — no cookie in HAR request → `requires_session: false`.
-TG3442DE — logout present in YAML but no logout request captured in HAR →
-`requires_session: true` (conservative; contributor verification open).
+**How intake picks the value:** a logout request captured in the HAR without
+a session cookie is evidence for `false`. Absent that evidence — the YAML
+declares logout but the capture never shows the call — the value is `true`,
+which costs a skipped logout rather than a failed one. The catalog carries
+the current settings; `rg requires_session` over `modems/` is the list.
 
 **Constrains:** Any modem with `actions.logout` configured is treated as
 single-session. There is no mechanism to configure logout without triggering
@@ -670,8 +670,11 @@ single-session semantics.
 **Decision:** `BaseAuthManager.auth_failure_mode()` returns how a 401/403
 arriving *after* a successful `authenticate()` should be read. The base
 returns `CREDENTIALS_SUSPECT`; a strategy overrides to `SESSION_REJECTED`
-only when it rejects a bad password at login time. Core's failure hint and
-the HA config-flow error key both derive from it.
+only when it rejects a bad password at login time, or to `NOT_CONFIGURED`
+when it sends no credential at all and a 401 therefore means the catalog
+entry is wrong rather than the password. `AuthFailureMode` in
+`auth/base.py` is the authoritative set. Core's failure hint and the HA
+config-flow error key both derive from it.
 
 **Rationale:** `LOAD_AUTH` does not mean the login succeeded — it means the
 strategy *believed* it did. `basic` never validates a credential at all
@@ -842,10 +845,10 @@ loader's exception message means the contributor's first failure
 log paste IS the diff input.
 
 **Constrains:** Auth strategies own which header names carry
-session tokens — they declare them via ``BaseAuthManager.headers()``
-(default ``frozenset({"cookie"})``; ``Basic`` adds
-``authorization``; ``HNAP`` adds ``hnap_auth``; ``form_sjcl`` /
-``form_pbkdf2`` add the configured ``csrf_header``). Loaders treat
+session tokens — they declare them via ``BaseAuthManager.headers()``,
+which defaults to ``frozenset({"cookie"})`` and is overridden by every
+strategy that puts a credential somewhere else. That method is the
+authoritative set; this entry does not restate it. Loaders treat
 this set as opaque — a Core-layer ``headers`` parameter, no
 "sensitive" qualifier in the loader API. The wire request is never
 modified; redaction only applies when ``describe_request`` formats
@@ -960,9 +963,10 @@ orchestrator. `parser.py` is an optional post-processor.
 
 **Rationale:** The original design conflated extraction, orchestration,
 and customization into one class — a god class risk. Separating them
-makes each independently testable. The coordinator is a thin ~50-line
-orchestrator. Extraction complexity lives in `BaseParser`
-implementations. parser.py is a hook, not an inheritance override.
+makes each independently testable. The coordinator sequences extraction
+and post-processing and owns nothing else; extraction complexity lives in
+`BaseParser` implementations, and parser.py is a hook, not an inheritance
+override.
 
 **Constrains:** parser.py cannot subclass `BaseParser` or the
 coordinator. It receives extraction output + raw resources and returns
@@ -1155,7 +1159,7 @@ Status comes from ICMP + TCP. HEAD measures latency only and never
 changes status. A recent successful collection skips HEAD and TCP,
 which would only re-prove what it already showed. For probe order and
 per-configuration outcomes, see ORCHESTRATION_SPEC § Probe
-Configurations Matrix.
+Configurations.
 
 **Rationale:** One HTTP-latency number was averaging two different
 things: the modem's cached response and its handler execution. The same
@@ -1325,9 +1329,9 @@ per-reading boolean (RESPONSIVE and ICMP_BLOCKED are up; DEGRADED,
 UNRESPONSIVE, and UNKNOWN are down). Recovery is a down → up edge of
 that boolean. No consumer enumerates health states or state
 transitions for reachability decisions. Current consumers: Core's
-connectivity-backoff clear (ORCHESTRATION_SPEC § get_modem_data
-step 2) and the HA adapter's health sync listeners (HA_ADAPTER_SPEC
-§ Health Sync Listeners).
+connectivity-backoff clear (ORCHESTRATION_SPEC § Collection Flow) and
+the HA adapter's health sync listeners (HA_ADAPTER_SPEC § Health Sync
+Listeners).
 
 **Rationale:** State enumeration produced three field bugs from the
 same root: a startup UNKNOWN misread as recovery, DEGRADED missing

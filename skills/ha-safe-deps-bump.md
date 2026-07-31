@@ -130,7 +130,7 @@ commit, and `make validate-ci` before push.
 
 ## Notes
 
-- The HA-compat policy is CLAUDE.md § HA compatibility gate;
+- The HA-compat policy is CLAUDE.md § Pre-Push Verification;
   `scripts/check_ha_compat.py` / `make ha-compat-check` enforce that every
   declared floor is satisfiable under HA's `package_constraints.txt`.
 - `scripts/check_owned_deps.py` reports only packages we declare directly,
