@@ -193,8 +193,8 @@ collection and golden file validation for that specific model.
 
 A separate entry also requires its own evidence — a HAR capture in
 `test_data/`. Until a capture exists for a rebadged or sibling
-product, it is recorded as an alias on the evidenced entry (e.g.,
-`MB8612` on the MB8611) and graduates to its own entry when evidence
+product, it is recorded as an alias on the evidenced entry — see
+`model_aliases` below — and graduates to its own entry when evidence
 arrives.
 
 **model_aliases** (alternate user-facing names — shown in the model
@@ -275,7 +275,7 @@ auth:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `challenge_cookie` | bool | `false` | If `true`, retry with server-set cookie on initial 401. Some modems (CM1200 HTTPS) return a challenge cookie that must be included in the retry. |
+| `challenge_cookie` | bool | `false` | If `true`, retry with server-set cookie on initial 401. Some firmware returns a challenge cookie that must be included in the retry. |
 | `cookie_name` | string | `""` | Session cookie produced by login. Empty = stateless. Auth owns the cookie it produces — see ARCHITECTURE_DECISIONS.md "Session is lifecycle, auth owns the cookie." |
 
 **Success detection:** Always succeeds. Basic auth is per-request
@@ -749,9 +749,9 @@ are UTF-8 encoded.
 **Success detection:** The login response JSON `p_status` field must
 be `"AdminMatch"` or `"Match"`. Any other value is treated as failure.
 
-Evidence: Arris Touchstone gateway firmwares (e.g., TG3442DE) that
-embed the SJCL library in their web interface. Constants are found
-in `base_95x.js` or similar JS files in HAR captures.
+Evidence: Arris Touchstone gateway firmwares that embed the SJCL
+library in their web interface. Constants are found in `base_95x.js`
+or similar JS files in HAR captures.
 
 ### `bearer`
 

@@ -1120,9 +1120,9 @@ rows:
       "TDMA": "ofdma"
 ```
 
-The `TDMA` row above is the Technicolor `.jst` platform's value set
-(XB6/XB7/XB8/XB10), where `TDMA` means OFDMA. Map what the capture
-shows; do not copy a mapping from another modem's page.
+The `TDMA` row above is the Technicolor `.jst` platform's value set,
+where `TDMA` means OFDMA. Map what the capture shows; do not copy a
+mapping from another modem's page.
 
 **HNAP** (channel mapping):
 

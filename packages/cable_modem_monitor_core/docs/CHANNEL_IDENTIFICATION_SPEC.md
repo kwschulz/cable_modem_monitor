@@ -75,10 +75,10 @@ findings that change the design.
 DOCSIS 3.1 modems report both QAM and OFDM downstream channels, but
 firmware varies in how it presents them:
 
-- **HNAP modems** (S34, MB8611) deliver QAM and OFDM in a single
+- **HNAP modems** deliver QAM and OFDM in a single
   response with unified position numbering (1-34). Positions are
   type-agnostic — the CMTS determines the QAM/OFDM mix.
-- **JavaScript modems** (CM1200, CM2000) report QAM and OFDM from
+- **JavaScript modems** report QAM and OFDM from
   separate JS functions, each with its own 1-based numbering. The
   modem's web UI renders them as separate tables ("Downstream Bonded
   Channels" and "Downstream OFDM Channels").
