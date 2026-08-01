@@ -29,7 +29,12 @@ _logger = logging.getLogger(__name__)
 # The two placeholder namespaces MODEM_YAML_SPEC defines. Matched
 # against the path only — a captured query string may legitimately
 # carry braces (an XB10 entry passes JSON in one).
-_UNRESOLVED_PLACEHOLDER_RE = re.compile(r"\{(?:auth|cookie):[^}/]+\}")
+#
+# `{` is excluded from the body along with `}` and `/`. No placeholder
+# nests one, and allowing it makes the match quadratic: on a path of
+# repeated `{auth:` with no closing brace, every start position scans
+# to the end before failing (py/polynomial-redos).
+_UNRESOLVED_PLACEHOLDER_RE = re.compile(r"\{(?:auth|cookie):[^}/{]+\}")
 
 
 class _MockHandler(BaseHTTPRequestHandler):

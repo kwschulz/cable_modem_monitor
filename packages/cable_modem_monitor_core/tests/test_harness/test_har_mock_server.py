@@ -27,7 +27,11 @@ from solentlabs.cable_modem_monitor_core.test_harness.routes import (
     build_routes,
     normalize_path,
 )
-from solentlabs.cable_modem_monitor_core.test_harness.server import HARMockServer, _find_route
+from solentlabs.cable_modem_monitor_core.test_harness.server import (
+    _UNRESOLVED_PLACEHOLDER_RE,
+    HARMockServer,
+    _find_route,
+)
 
 from tests._helpers import load_fixture
 
@@ -696,6 +700,28 @@ class TestHARMockServerActionFidelity:
             resp = requests.delete(f"{server.base_url}/rest/v1/user/{{auth:user_id}}/token/CAPTURED_TOKEN")
             assert resp.status_code == 500
             assert "auth:user_id" in resp.text
+
+    def test_placeholder_body_does_not_span_a_nested_brace(self) -> None:
+        """`{` is excluded from the placeholder body, which keeps the match linear.
+
+        Allowing it makes the scan quadratic: on a path of repeated
+        `{auth:` with no closing brace, every start position runs to the
+        end of the string before failing (py/polynomial-redos). No real
+        placeholder nests a brace, so the exclusion costs nothing —
+        asserted here so the character class cannot quietly regress.
+        """
+        assert _UNRESOLVED_PLACEHOLDER_RE.search("/v1/{auth:user_id}/t") is not None
+        assert _UNRESOLVED_PLACEHOLDER_RE.search("/v1/{cookie:sessionToken}") is not None
+        assert _UNRESOLVED_PLACEHOLDER_RE.search("/v1/user/7/token/abc") is None
+
+        # The pathological shape: opener repeated, never closed.
+        assert _UNRESOLVED_PLACEHOLDER_RE.search("{auth:" * 64) is None
+
+        # A real placeholder buried in junk is still caught, but the match
+        # starts at the inner brace rather than spanning from the outer one.
+        nested = _UNRESOLVED_PLACEHOLDER_RE.search("{auth:{auth:x}")
+        assert nested is not None
+        assert nested.group(0) == "{auth:x}"
 
     def test_action_served_status_is_recorded(
         self,
