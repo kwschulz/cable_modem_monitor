@@ -26,14 +26,13 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import requests
 from pydantic import TypeAdapter
 from solentlabs.cable_modem_monitor_core.auth import create_auth_manager
 from solentlabs.cable_modem_monitor_core.auth.base import AuthFailureMode
-from solentlabs.cable_modem_monitor_core.models.modem_config import ModemConfig
 from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
     AuthConfig,
     get_strategy_display_labels,
@@ -41,6 +40,12 @@ from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
 from solentlabs.cable_modem_monitor_core.orchestration.auth_failure import (
     _auth_failure_hint,
 )
+
+# Only the ``cast`` below names it, and that cast is a string, so the
+# import never runs. Under TYPE_CHECKING it still resolves for pyright
+# and mypy without reading as dead code to a scanner (py/unused-import).
+if TYPE_CHECKING:
+    from solentlabs.cable_modem_monitor_core.models.modem_config import ModemConfig
 
 # ┌───────────────┬──────────────────────┬────────────────────────────────────┐
 # │ strategy      │ declared mode        │ why                                │
