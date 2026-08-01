@@ -26,13 +26,14 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import pytest
 import requests
 from pydantic import TypeAdapter
 from solentlabs.cable_modem_monitor_core.auth import create_auth_manager
 from solentlabs.cable_modem_monitor_core.auth.base import AuthFailureMode
+from solentlabs.cable_modem_monitor_core.models.modem_config import ModemConfig
 from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
     AuthConfig,
     get_strategy_display_labels,
@@ -40,12 +41,6 @@ from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
 from solentlabs.cable_modem_monitor_core.orchestration.auth_failure import (
     _auth_failure_hint,
 )
-
-# Only the ``cast`` below names it, and that cast is a string, so the
-# import never runs. Under TYPE_CHECKING it still resolves for pyright
-# and mypy without reading as dead code to a scanner (py/unused-import).
-if TYPE_CHECKING:
-    from solentlabs.cable_modem_monitor_core.models.modem_config import ModemConfig
 
 # ┌───────────────┬──────────────────────┬────────────────────────────────────┐
 # │ strategy      │ declared mode        │ why                                │
@@ -103,7 +98,11 @@ def _manager_for(strategy: str) -> Any:
     auth = TypeAdapter(AuthConfig).validate_python({"strategy": strategy, **_MINIMAL_AUTH[strategy]})
     # create_auth_manager only reads .auth; a full ModemConfig would add
     # a dozen unrelated required fields to every row of _MINIMAL_AUTH.
-    return create_auth_manager(cast("ModemConfig", SimpleNamespace(auth=auth)))
+    # ModemConfig is named unquoted so the import is a live reference: a
+    # string cast reads as an unused import to CodeQL (py/unused-import),
+    # and moving it under TYPE_CHECKING relocates that finding rather
+    # than resolving it.
+    return create_auth_manager(cast(ModemConfig, SimpleNamespace(auth=auth)))
 
 
 # ---------------------------------------------------------------------------
