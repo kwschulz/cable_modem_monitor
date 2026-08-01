@@ -1,7 +1,10 @@
 """Tests for ModemDataCollector.
 
-Covers signal classification, session lifecycle, logout, and login
-page detection. Uses the HAR mock server for integration tests.
+Covers signal classification, session lifecycle, logout, and the
+loader's login-page handling. Uses the HAR mock server for
+integration tests. The gate that decides *whether* detection runs
+lives in ``auth_failure.py`` and is covered by
+``test_auth_failure.py``.
 
 Use case coverage (collector level):
 - UC-01: First poll — fresh login
@@ -16,7 +19,7 @@ Use case coverage (collector level):
 
 from __future__ import annotations
 
-import json
+import logging
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
@@ -26,7 +29,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 from solentlabs.cable_modem_monitor_core.auth.base import AuthContext, AuthResult
-from solentlabs.cable_modem_monitor_core.loaders.fetch_list import ResourceTarget
+from solentlabs.cable_modem_monitor_core.fetch_list import ResourceTarget
 from solentlabs.cable_modem_monitor_core.loaders.hnap import HNAPLoadError
 from solentlabs.cable_modem_monitor_core.loaders.http import (
     HTTPResourceLoader,
@@ -37,9 +40,9 @@ from solentlabs.cable_modem_monitor_core.models.modem_config.actions import (
     CbnAction,
     HttpAction,
 )
-from solentlabs.cable_modem_monitor_core.orchestration.auth_failure import (
-    _auth_failure_hint,
-    _should_detect_login_pages,
+from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
+    BasicAuth,
+    NoneAuth,
 )
 from solentlabs.cable_modem_monitor_core.orchestration.collector import (
     LoginLockoutError,
@@ -52,6 +55,8 @@ from solentlabs.cable_modem_monitor_core.parsers.diagnostics import (
     AnchorCount,
     ParseDiagnostics,
 )
+
+from tests._helpers import load_fixture
 
 # ------------------------------------------------------------------
 # Helpers — minimal modem configs as plain objects
@@ -67,6 +72,8 @@ def _make_config(
     requires_session: bool = False,
     logout_action: HttpAction | CbnAction | None = None,
     timeout: int = 10,
+    post_login_endpoints: list[str] | None = None,
+    query_params: dict[str, str] | None = None,
 ) -> Any:
     """Build a minimal ModemConfig-like object for testing.
 
@@ -81,10 +88,6 @@ def _make_config(
 
     # Auth
     if auth_type == "none":
-        from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
-            NoneAuth,
-        )
-
         config.auth = NoneAuth(strategy="none")
     elif auth_type == "form":
         config.auth = MagicMock()
@@ -93,10 +96,6 @@ def _make_config(
         config.auth.username_field = "username"
         config.auth.password_field = "password"
     elif auth_type == "basic":
-        from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
-            BasicAuth,
-        )
-
         config.auth = BasicAuth(strategy="basic")
     else:
         config.auth = MagicMock()
@@ -107,10 +106,11 @@ def _make_config(
     if hasattr(config.auth, "cookie_name") or isinstance(config.auth, MagicMock):
         config.auth.cookie_name = cookie_name
 
-    # Session (lifecycle only: headers, query_params)
+    # Session (lifecycle only: headers, query_params, post-login calls)
     config.session = MagicMock()
     config.session.headers = {}
-    config.session.query_params = {}
+    config.session.query_params = query_params or {}
+    config.session.post_login_endpoints = post_login_endpoints or []
 
     # Actions — logout_action wins; fall back to building HttpAction from endpoint.
     if logout_action is not None:
@@ -142,6 +142,9 @@ class _SimpleHandler(BaseHTTPRequestHandler):
         """Serve configured responses."""
         server: _SimpleServer = self.server  # type: ignore[assignment]
         path = self.path.split("?")[0]
+        # Record the full request target, query string included, so tests
+        # can assert session.query_params actually reach the wire.
+        server.requested_paths.append(self.path)
 
         response = server.responses.get(path)
         if response is None:
@@ -164,6 +167,8 @@ class _SimpleServer(HTTPServer):
 
     def __init__(self, responses: dict[str, tuple[int, str]]) -> None:
         self.responses = responses
+        # GET targets in arrival order — lets tests assert request sequencing.
+        self.requested_paths: list[str] = []
         super().__init__(("127.0.0.1", 0), _SimpleHandler)
 
     @property
@@ -190,45 +195,6 @@ class _SimpleServer(HTTPServer):
 
 _LOGIN_PAGE_HTML = '<html><form><input type="password" name="pw"></form></html>'
 _DATA_PAGE_HTML = "<html><table><tr><td>data</td></tr></table></html>"
-
-
-# ------------------------------------------------------------------
-# Tests — login page detection utility (table-driven)
-# ------------------------------------------------------------------
-
-# ┌────────────┬───────────┬──────────┬──────────────────────┐
-# │ auth_type  │ transport │ expected │ description          │
-# ├────────────┼───────────┼──────────┼──────────────────────┤
-# │ "none"     │ "http"    │ False    │ no-auth              │
-# │ "basic"    │ "http"    │ False    │ stateless            │
-# │ "form"     │ "http"    │ True     │ form-based           │
-# │ "hnap"     │ "hnap"    │ False    │ hnap transport       │
-# │ None       │ "http"    │ False    │ no auth config       │
-# └────────────┴───────────┴──────────┴──────────────────────┘
-#
-# fmt: off
-LOGIN_PAGE_DETECTION_CASES = [
-    # (auth_type,  transport, set_none, expected, description)
-    ("none",       "http",    False,    False,    "no-auth — detection disabled"),
-    ("basic",      "http",    False,    False,    "stateless — detection disabled"),
-    ("form",       "http",    False,    True,     "form-based — detection enabled"),
-    ("hnap",       "hnap",    False,    False,    "hnap transport — detection disabled"),
-    ("none",       "http",    True,     False,    "no auth config — detection disabled"),
-]
-# fmt: on
-
-
-@pytest.mark.parametrize(
-    "auth_type,transport,set_none,expected,desc",
-    LOGIN_PAGE_DETECTION_CASES,
-    ids=[c[4] for c in LOGIN_PAGE_DETECTION_CASES],
-)
-def test_should_detect_login_pages(auth_type: str, transport: str, set_none: bool, expected: bool, desc: str) -> None:
-    """_should_detect_login_pages returns correct value per auth strategy."""
-    config = _make_config(auth_type=auth_type, transport=transport)
-    if set_none:
-        config.auth = None
-    assert _should_detect_login_pages(config) is expected
 
 
 # ------------------------------------------------------------------
@@ -590,6 +556,136 @@ class TestSuccessfulCollection:
         assert result.modem_data["downstream"] == []
 
 
+class TestPostLoginEndpoints:
+    """session.post_login_endpoints — lifecycle GETs issued after a fresh login."""
+
+    # Recorded into the server's path log by the stubbed load phase, so a
+    # single sequence proves the endpoints precede the data fetch.
+    _LOAD_MARKER = "<load>"
+
+    _ESTABLISH = "/establish.html"
+    _MENU = "/menu.html"
+
+    @staticmethod
+    def _make_collector(
+        server: _SimpleServer,
+        endpoints: list[str],
+        query_params: dict[str, str] | None = None,
+    ) -> ModemDataCollector:
+        """Collector against ``server`` whose login always succeeds."""
+        config = _make_config(
+            auth_type="form",
+            cookie_name="SID",
+            post_login_endpoints=endpoints,
+            query_params=query_params,
+        )
+        collector = ModemDataCollector(config, MagicMock(), None, server.base_url, "user", "pw")
+
+        def _login(session: Any, *_args: Any, **_kwargs: Any) -> AuthResult:
+            # Set the cookie the real login would — session_is_valid keys
+            # off it, so the second execute() takes the reuse path.
+            session.cookies.set("SID", "token")
+            return AuthResult(success=True, auth_context=AuthContext())
+
+        stub = MagicMock(side_effect=_login)
+        collector._auth_manager.authenticate = stub  # type: ignore[method-assign]  # stub must outlive this helper
+        return collector
+
+    def _execute(self, collector: ModemDataCollector, server: _SimpleServer) -> Any:
+        """Run execute() with the load and parse phases stubbed."""
+
+        def _load(_auth_result: Any) -> tuple[dict[str, Any], list[Any]]:
+            server.requested_paths.append(self._LOAD_MARKER)
+            return {"data": "ok"}, []
+
+        parsed = ({"downstream": [], "upstream": [], "system_info": {}}, ParseDiagnostics())
+        with (
+            patch.object(collector, "_load_resources", side_effect=_load),
+            patch.object(collector, "_parse", return_value=parsed),
+        ):
+            return collector.execute()
+
+    def test_endpoints_fetched_in_order_before_data(self) -> None:
+        """Declared endpoints are GET in order, ahead of the data fetch."""
+        responses = {self._ESTABLISH: (200, "{}"), self._MENU: (200, "{}")}
+        with _SimpleServer(responses) as server:
+            collector = self._make_collector(server, [self._ESTABLISH, self._MENU])
+            result = self._execute(collector, server)
+
+            assert result.success is True
+            assert server.requested_paths == [self._ESTABLISH, self._MENU, self._LOAD_MARKER]
+
+    def test_nothing_fetched_when_unconfigured(self) -> None:
+        """No extra request is made when no endpoint is declared."""
+        with _SimpleServer({}) as server:
+            collector = self._make_collector(server, [])
+            result = self._execute(collector, server)
+
+            assert result.success is True
+            assert server.requested_paths == [self._LOAD_MARKER]
+
+    def test_non_2xx_warns_without_failing_auth(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A failed post-login GET logs a WARNING and collection continues.
+
+        Login already succeeded — reporting AUTH_FAILED here would tell
+        the user their working credentials are wrong (#120).
+        """
+        with _SimpleServer({}) as server:  # every path 404s
+            collector = self._make_collector(server, [self._ESTABLISH])
+            with caplog.at_level(logging.WARNING):
+                result = self._execute(collector, server)
+
+            assert result.success is True
+            assert result.signal == CollectorSignal.OK
+            assert self._ESTABLISH in caplog.text
+            assert "404" in caplog.text
+
+    def test_transport_error_warns_without_failing_auth(self, caplog: pytest.LogCaptureFixture) -> None:
+        """A connection error on a post-login GET is best-effort, like logout."""
+        with _SimpleServer({}) as server:
+            collector = self._make_collector(server, [self._ESTABLISH])
+            with (
+                caplog.at_level(logging.WARNING),
+                patch.object(collector._session, "get", side_effect=requests.ConnectionError("refused")),
+            ):
+                result = self._execute(collector, server)
+
+            assert result.success is True
+            assert self._ESTABLISH in caplog.text
+
+    def test_not_refetched_on_session_reuse(self) -> None:
+        """Endpoints fire on a fresh login only, not on a reused session."""
+        with _SimpleServer({self._ESTABLISH: (200, "{}")}) as server:
+            collector = self._make_collector(server, [self._ESTABLISH])
+            self._execute(collector, server)
+            self._execute(collector, server)
+
+            assert server.requested_paths.count(self._ESTABLISH) == 1
+
+    def test_fetched_by_bare_authenticate(self) -> None:
+        """A fresh login fetches them even when no collection follows.
+
+        restart.py authenticates and dispatches its action without ever
+        entering execute(), so firmware that needs the call to treat a
+        session as established needs it on that path too.
+        """
+        with _SimpleServer({self._ESTABLISH: (200, "{}")}) as server:
+            collector = self._make_collector(server, [self._ESTABLISH])
+
+            collector.authenticate()
+
+            assert server.requested_paths == [self._ESTABLISH]
+
+    def test_carries_session_query_params(self) -> None:
+        """Declared session.query_params ride along, as on every other fetch."""
+        with _SimpleServer({self._ESTABLISH: (200, "{}")}) as server:
+            collector = self._make_collector(server, [self._ESTABLISH], query_params={"_n": "42"})
+
+            collector.authenticate()
+
+            assert server.requested_paths == [f"{self._ESTABLISH}?_n=42"]
+
+
 class TestPostProcessorResourcesFetch:
     """parser.py resources declarations reach the HTTP loader's fetch list."""
 
@@ -600,7 +696,7 @@ class TestPostProcessorResourcesFetch:
         )
 
         fixture = Path(__file__).parent.parent / "models" / "fixtures" / "parser_config" / "valid" / "table_single.json"
-        parser_config = ParserConfig.model_validate(json.loads(fixture.read_text()))
+        parser_config = ParserConfig.model_validate(load_fixture(fixture))
 
         class PostProcessor:
             resources = {"/extra.json": "json"}
@@ -827,30 +923,44 @@ _HTTP_LOGOUT_REQUIRES_SESSION = HttpAction(type="http", method="GET", endpoint="
 _CBN_LOGOUT = CbnAction(type="cbn", fun=16)
 
 
+# Session states the requires_session guard has to tell apart, as
+# (auth_type, cookie_name, set_cookie). The guard reads session_is_valid,
+# not the cookie jar: "header" is a live bearer session with an empty jar,
+# which a cookie test would have read as no session at all (#185).
+_SESSION_STATES: dict[str, tuple[str, str, bool]] = {
+    "no_session": ("form", "PHPSESSID", False),
+    "cookie_session": ("form", "PHPSESSID", True),
+    "header_session": ("bearer", "", False),
+}
+
+
 @pytest.mark.parametrize(
-    "logout_action, set_cookie, expected_fires",
+    "logout_action, session_state, expected_fires",
     [
-        pytest.param(None, False, False, id="no_logout_action"),
-        pytest.param(_HTTP_LOGOUT_DEFAULT, False, True, id="http_default_no_cookies"),
-        pytest.param(_HTTP_LOGOUT_DEFAULT, True, True, id="http_default_has_cookies"),
-        pytest.param(_HTTP_LOGOUT_REQUIRES_SESSION, False, False, id="http_requires_session_guard_fires"),
-        pytest.param(_HTTP_LOGOUT_REQUIRES_SESSION, True, True, id="http_requires_session_has_cookies"),
-        # CBN embeds the session token by protocol — the isinstance guard never
-        # fires, so logout proceeds regardless of local cookie state.
-        pytest.param(_CBN_LOGOUT, False, True, id="cbn_no_cookies"),
-        pytest.param(_CBN_LOGOUT, True, True, id="cbn_has_cookies"),
+        pytest.param(None, "cookie_session", False, id="no_logout_action"),
+        pytest.param(_HTTP_LOGOUT_DEFAULT, "no_session", True, id="http_default_no_session"),
+        pytest.param(_HTTP_LOGOUT_DEFAULT, "cookie_session", True, id="http_default_cookie_session"),
+        pytest.param(_HTTP_LOGOUT_REQUIRES_SESSION, "no_session", False, id="http_requires_session_guard_fires"),
+        pytest.param(_HTTP_LOGOUT_REQUIRES_SESSION, "cookie_session", True, id="http_requires_session_cookie"),
+        pytest.param(_HTTP_LOGOUT_REQUIRES_SESSION, "header_session", True, id="http_requires_session_header"),
+        # CBN embeds the session token by protocol, so the isinstance guard
+        # never fires and logout proceeds regardless of local session state.
+        pytest.param(_CBN_LOGOUT, "no_session", True, id="cbn_no_session"),
+        pytest.param(_CBN_LOGOUT, "cookie_session", True, id="cbn_cookie_session"),
     ],
 )
 def test_attempt_logout_before_retry_matrix(
     logout_action: HttpAction | CbnAction | None,
-    set_cookie: bool,
+    session_state: str,
     expected_fires: bool,
 ) -> None:
     """Table-driven guard matrix for attempt_logout_before_retry."""
-    config = _make_config(logout_action=logout_action)
+    auth_type, cookie_name, set_cookie = _SESSION_STATES[session_state]
+    config = _make_config(auth_type=auth_type, cookie_name=cookie_name, logout_action=logout_action)
     collector = ModemDataCollector(config, MagicMock(), None, "http://localhost", "", "")
+    collector._auth_context = AuthContext()
     if set_cookie:
-        collector._session.cookies.set("PHPSESSID", "abc123")
+        collector._session.cookies.set(cookie_name, "abc123")
 
     with patch("solentlabs.cable_modem_monitor_core.orchestration.collector.execute_action") as mock_action:
         collector.attempt_logout_before_retry()
@@ -1062,11 +1172,17 @@ class TestMockServerLogout:
         from solentlabs.cable_modem_monitor_core.test_harness.auth import (
             FormAuthHandler,
         )
+        from solentlabs.cable_modem_monitor_core.test_harness.auth.base import ActionConfig
 
-        handler = FormAuthHandler(
-            login_path="/login.htm",
-            cookie_name="sid",
-            logout_path="/logout",
+        handler = FormAuthHandler(login_path="/login.htm", cookie_name="sid")
+        handler.configure_actions(
+            ActionConfig(
+                cookie_name="sid",
+                logout_method="GET",
+                logout_path="/logout",
+                restart_method="POST",
+                restart_path="",
+            )
         )
 
         # Authenticate
@@ -1093,39 +1209,6 @@ class TestMockServerLogout:
 
         handler = FormAuthHandler(login_path="/login.htm")
         assert handler.is_logout_request("GET", "/logout") is False
-
-
-# ------------------------------------------------------------------
-# Tests — _auth_failure_hint (table-driven)
-# ------------------------------------------------------------------
-
-# ┌───────────┬──────────────────────────────────────────┬──────────────┐
-# │ auth_type │ expected_hint                            │ description  │
-# ├───────────┼──────────────────────────────────────────┼──────────────┤
-# │ "none"    │ "modem requires authentication (check …" │ no-auth      │
-# │ "basic"   │ "credentials rejected"                   │ basic auth   │
-# │ "form"    │ "session expired"                        │ form auth    │
-# └───────────┴──────────────────────────────────────────┴──────────────┘
-#
-# fmt: off
-_AUTH_HINT_CASES = [
-    # (auth_type, expected_substring,               description)
-    ("none",      "modem requires authentication",  "no-auth modem"),
-    ("basic",     "credentials rejected",           "basic auth"),
-    ("form",      "session expired",                "form auth"),
-]
-# fmt: on
-
-
-@pytest.mark.parametrize(
-    "auth_type,expected,desc",
-    _AUTH_HINT_CASES,
-    ids=[c[2] for c in _AUTH_HINT_CASES],
-)
-def test_auth_failure_hint(auth_type: str, expected: str, desc: str) -> None:
-    """_auth_failure_hint: {desc}."""
-    config = _make_config(auth_type=auth_type)
-    assert expected in _auth_failure_hint(config)
 
 
 # ------------------------------------------------------------------

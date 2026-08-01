@@ -66,7 +66,7 @@ Finding 3). Unlike other formats, HNAP parsers do **not** auto-assign
 | 6 | power (dBmV) | `47.0` | `40.0` |
 
 **Channel type values vary by manufacturer.** The examples above are
-from Arris S33/S33v2. Other HNAP modems (MB8611) may use different
+from Arris S33/S33v2. Other HNAP modems may use different
 strings for the same DOCSIS technology. The `channel_type.map` in
 parser.yaml normalizes manufacturer-specific strings to canonical
 types (`qam`, `ofdm`, `atdma`, `ofdma`).

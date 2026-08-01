@@ -3,24 +3,38 @@
 Supports two lifecycle modes: ephemeral (context manager for automated
 tests) and persistent (``serve_forever()`` for manual integration testing).
 
-See ONBOARDING_SPEC.md Test Harness section.
+See ARCHITECTURE.md § Test Harness for the replay-fidelity rules this
+server implements.
 """
 
 from __future__ import annotations
 
+import gzip
 import logging
+import re
 import threading
+import zlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 if TYPE_CHECKING:
     from ..models.modem_config import ModemConfig
 
 from .auth import create_auth_handler
-from .routes import build_routes, normalize_path
+from .routes import build_json_body_keys, build_routes, normalize_path, unrecorded_body_keys
 
 _logger = logging.getLogger(__name__)
+
+# The two placeholder namespaces MODEM_YAML_SPEC defines. Matched
+# against the path only — a captured query string may legitimately
+# carry braces (an XB10 entry passes JSON in one).
+#
+# `{` is excluded from the body along with `}` and `/`. No placeholder
+# nests one, and allowing it makes the match quadratic: on a path of
+# repeated `{auth:` with no closing brace, every start position scans
+# to the end before failing (py/polynomial-redos).
+_UNRESOLVED_PLACEHOLDER_RE = re.compile(r"\{(?:auth|cookie):[^}/{]+\}")
 
 
 class _MockHandler(BaseHTTPRequestHandler):
@@ -32,6 +46,14 @@ class _MockHandler(BaseHTTPRequestHandler):
     # N802: Method names are dictated by BaseHTTPRequestHandler — the
     # stdlib dispatches by looking for methods named exactly do_GET,
     # do_POST, etc.  Renaming to snake_case would break dispatch.
+
+    @property
+    def _mock_server(self) -> HARMockServer:
+        """The owning HARMockServer, narrowed from the stdlib's BaseServer typing."""
+        server = self.server
+        if not isinstance(server, HARMockServer):
+            raise TypeError(f"handler requires HARMockServer, got {type(server).__name__}")
+        return server
 
     def do_GET(self) -> None:  # noqa: N802
         """Handle GET requests."""
@@ -45,9 +67,17 @@ class _MockHandler(BaseHTTPRequestHandler):
         """Handle POST requests."""
         self._handle_request("POST")
 
+    def do_PUT(self) -> None:  # noqa: N802
+        """Handle PUT requests."""
+        self._handle_request("PUT")
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        """Handle DELETE requests — REST firmwares end a session with one."""
+        self._handle_request("DELETE")
+
     def _handle_request(self, method: str) -> None:
         """Dispatch a request through auth then routes."""
-        server: HARMockServer = self.server  # type: ignore[assignment]
+        server = self._mock_server
         self._is_head = method == "HEAD"
         # HEAD uses GET routes for lookup
         lookup_method = "GET" if self._is_head else method
@@ -59,36 +89,42 @@ class _MockHandler(BaseHTTPRequestHandler):
         headers = {k.lower(): v for k, v in self.headers.items()}
 
         body = b""
-        if method == "POST":
+        if method in ("POST", "PUT", "DELETE"):
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
 
         method = lookup_method
         auth = server.auth_handler
 
+        if self._reject_dishonest_request(server, method, path, body):
+            return
+
         # Login request — handle auth and serve response
         if auth.is_login_request(method, path):
             self._handle_login(server, method, path, route_path, body, headers)
             return
 
-        # Logout request — clear session and respond
-        if auth.is_logout_request(method, path):
-            logout_response = auth.handle_logout()
-            self._send_response(
-                logout_response.status,
-                logout_response.headers,
-                logout_response.body,
+        # Logout / restart — the capture answers when it has the
+        # exchange; the handler contributes the session side effect
+        # either way (clearing state, invalidating a token).
+        for kind, matches, handle in (
+            ("logout", auth.is_logout_request, auth.handle_logout),
+            ("restart", auth.is_restart_request, auth.handle_restart),
+        ):
+            if not matches(method, path):
+                continue
+            synthesized = handle()
+            captured = _find_route(
+                server.routes,
+                method,
+                path,
+                route_path,
+                login_page=server.login_page,
+                token_prefix=server.token_prefix,
             )
-            return
-
-        # Restart request — accept and clear session
-        if auth.is_restart_request(method, path):
-            restart_response = auth.handle_restart()
-            self._send_response(
-                restart_response.status,
-                restart_response.headers,
-                restart_response.body,
-            )
+            response = captured if captured is not None else synthesized
+            auth.record_action(kind, response.status)
+            self._send_response(response.status, response.headers, response.body)
             return
 
         # Non-login request — check auth
@@ -117,6 +153,11 @@ class _MockHandler(BaseHTTPRequestHandler):
             token_prefix=server.token_prefix,
         )
         if route is None:
+            # Trimmed captures rarely include these side-effect calls, so
+            # synthesize a response only when the route table has none.
+            if path in server.post_login_endpoints:
+                self._send_response(200, [("Content-Type", "application/json")], '{"error": "ok"}')
+                return
             self._send_response(404, [], "Not Found")
             return
 
@@ -178,19 +219,73 @@ class _MockHandler(BaseHTTPRequestHandler):
             response_headers.append((name, value))
         self._send_response(route.status, response_headers, route.body)
 
+    def _reject_dishonest_request(
+        self,
+        server: HARMockServer,
+        method: str,
+        path: str,
+        body: bytes,
+    ) -> bool:
+        """Fail requests the capture cannot honestly answer; True when one was failed.
+
+        Two forms, same rule one layer apart:
+
+        - A placeholder that survived to the wire means Core could not
+          resolve it, so the request targets a path the modem never had.
+          The ZG's logout reached the modem as a literal
+          ``{auth:user_id}`` for exactly this reason.
+        - A JSON key the capture never carried means the modem was never
+          asked this body. Routing it lets a fixture certify Core
+          against Core — the F3896LG login carried a username key for as
+          long as Core sent one, and every replay passed (#82).
+        """
+        unresolved = _UNRESOLVED_PLACEHOLDER_RE.search(unquote(path))
+        if unresolved:
+            self._fail_request(f"unresolved placeholder in request path: {unresolved.group(0)}")
+            return True
+
+        captured_keys = server.json_body_keys.get((method, path))
+        if captured_keys:
+            invented = unrecorded_body_keys(captured_keys, body)
+            if invented:
+                self._fail_request(
+                    f"request body keys not in the capture: {', '.join(sorted(invented))} "
+                    f"(captured: {', '.join(sorted(captured_keys))})"
+                )
+                return True
+
+        return False
+
+    def _fail_request(self, message: str) -> None:
+        """Answer 500 with a diagnostic — the harness cannot honestly serve this request."""
+        payload = message.encode("utf-8")
+        self.send_response(500)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if not getattr(self, "_is_head", False):
+            self.wfile.write(payload)
+
     def _send_response(
         self,
         status: int,
         headers: list[tuple[str, str]],
         body: str,
     ) -> None:
-        """Send an HTTP response. HEAD requests get headers only."""
+        """Send a wire-framed HTTP response. HEAD requests get headers only."""
+        server = self._mock_server
+        try:
+            out_headers, payload = _frame_wire_response(headers, body, server.base_url)
+        except _UnsupportedFramingError as exc:
+            # Fail loudly rather than serve bytes that contradict the headers.
+            self._fail_request(str(exc))
+            return
         self.send_response(status)
-        for name, value in headers:
+        for name, value in out_headers:
             self.send_header(name, value)
         self.end_headers()
-        if body and not getattr(self, "_is_head", False):
-            self.wfile.write(body.encode("utf-8"))
+        if payload and not getattr(self, "_is_head", False):
+            self.wfile.write(payload)
 
     def log_message(self, format: str, *args: Any) -> None:
         """Suppress default stderr logging."""
@@ -293,6 +388,84 @@ def _find_login_entry(
     return None
 
 
+class _UnsupportedFramingError(Exception):
+    """Raised when a captured framing header cannot be reconstructed on the wire."""
+
+
+def _frame_wire_response(
+    headers: list[tuple[str, str]],
+    body: str,
+    origin: str,
+) -> tuple[list[tuple[str, str]], bytes]:
+    """Re-frame a decoded HAR body so the captured headers stay true on the wire.
+
+    A HAR stores the decoded response body while keeping the original
+    headers. Serving both verbatim promises framing (chunked, gzip) the
+    bytes don't have, so the client errors; this re-applies the framing
+    the headers declare. Absolute Location targets are rewritten to the
+    harness origin so redirects stay inside the harness.
+    """
+    out, encoding, chunked = _transform_headers(headers, origin)
+    payload = _encode_payload(body.encode("utf-8"), encoding)
+    if chunked:
+        payload = _chunk_encode(payload)
+    else:
+        out.append(("Content-Length", str(len(payload))))
+    return out, payload
+
+
+def _transform_headers(
+    headers: list[tuple[str, str]],
+    origin: str,
+) -> tuple[list[tuple[str, str]], str, bool]:
+    """Filter and rewrite captured headers; returns (headers, content_encoding, chunked)."""
+    out: list[tuple[str, str]] = []
+    encoding = ""
+    chunked = False
+    for name, value in headers:
+        lower = name.lower()
+        if lower == "content-length":
+            # Recomputed by the caller; captured values drift after redaction.
+            continue
+        if lower == "content-encoding":
+            encoding = value.strip().lower()
+        elif lower == "transfer-encoding":
+            if value.strip().lower() != "chunked":
+                raise _UnsupportedFramingError(f"unsupported Transfer-Encoding: {value}")
+            chunked = True
+        out.append((name, _rewrite_location(value, origin) if lower == "location" else value))
+    return out, encoding, chunked
+
+
+def _encode_payload(payload: bytes, encoding: str) -> bytes:
+    """Apply the declared Content-Encoding to the payload bytes."""
+    if encoding in ("gzip", "x-gzip"):
+        return gzip.compress(payload)
+    if encoding == "deflate":
+        return zlib.compress(payload)
+    if encoding and encoding != "identity":
+        raise _UnsupportedFramingError(f"unsupported Content-Encoding: {encoding}")
+    return payload
+
+
+def _chunk_encode(payload: bytes) -> bytes:
+    """Wrap payload as a single HTTP chunk plus terminator."""
+    if not payload:
+        return b"0\r\n\r\n"
+    return f"{len(payload):X}\r\n".encode("ascii") + payload + b"\r\n0\r\n\r\n"
+
+
+def _rewrite_location(value: str, origin: str) -> str:
+    """Point an absolute redirect at the harness origin, keeping path and query."""
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return value
+    rebuilt = f"{origin}{parsed.path or '/'}"
+    if parsed.query:
+        rebuilt += f"?{parsed.query}"
+    return rebuilt
+
+
 class HARMockServer(HTTPServer):
     """Auth-aware HAR replay HTTP server.
 
@@ -329,9 +502,11 @@ class HARMockServer(HTTPServer):
         port: int = 0,
     ) -> None:
         self.routes = build_routes(har_entries)
+        self.json_body_keys = build_json_body_keys(har_entries)
         self.auth_handler = create_auth_handler(modem_config, har_entries)
         self.login_page = _extract_login_page(modem_config)
         self.token_prefix = _extract_token_prefix(modem_config)
+        self.post_login_endpoints = _extract_post_login_endpoints(modem_config)
         self._thread: threading.Thread | None = None
 
         super().__init__((host, port), _MockHandler)
@@ -369,3 +544,10 @@ def _extract_token_prefix(modem_config: ModemConfig | None) -> str:
     if modem_config is None or modem_config.auth is None:
         return ""
     return getattr(modem_config.auth, "token_prefix", "") or ""
+
+
+def _extract_post_login_endpoints(modem_config: ModemConfig | None) -> frozenset[str]:
+    """Return normalized ``session.post_login_endpoints`` paths."""
+    if modem_config is None or modem_config.session is None:
+        return frozenset()
+    return frozenset(normalize_path(p) for p in modem_config.session.post_login_endpoints)

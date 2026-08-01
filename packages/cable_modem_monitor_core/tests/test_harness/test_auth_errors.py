@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import MagicMock
 
+import pytest
 from solentlabs.cable_modem_monitor_core.test_harness.auth.base import AuthHandler
+from solentlabs.cable_modem_monitor_core.test_harness.auth.bearer import BearerAuthHandler
 from solentlabs.cable_modem_monitor_core.test_harness.auth.factory import (
     create_auth_handler,
 )
@@ -28,12 +30,14 @@ from solentlabs.cable_modem_monitor_core.test_harness.auth.hnap import (
     HnapAuthHandler,
 )
 
+from tests._helpers import load_fixture
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def _load_entries(name: str) -> list[dict[str, Any]]:
     """Load HAR entries from a fixture file."""
-    data = json.loads((FIXTURES_DIR / name).read_text())
+    data = load_fixture(FIXTURES_DIR / name)
     return list(data["_entries"])
 
 
@@ -315,6 +319,69 @@ class TestFactoryFallback:
         config.auth = None
         handler = create_auth_handler(config)
         assert type(handler) is AuthHandler
+
+
+class TestFactoryMissingHandler:
+    """A strategy with no handler module raises rather than degrading."""
+
+    def test_missing_handler_module_raises(self) -> None:
+        """An unresolvable strategy must not silently degrade to no-auth."""
+        config = _make_config(
+            {
+                "auth": {
+                    "strategy": "bearer",
+                    "login_endpoint": "/rest/v1/user/login",
+                    "token_path": "created.token",
+                },
+            }
+        )
+        # Every shipped strategy has a handler module, so the missing-module
+        # branch is only reachable by naming one that does not exist.
+        config.auth.strategy = "no_such_strategy"  # type: ignore[assignment] # rationale: strategy is a Literal, so only an out-of-model value can reach the factory's ModuleNotFoundError branch
+        with pytest.raises(ModuleNotFoundError, match="no_such_strategy"):
+            create_auth_handler(config)
+
+
+class TestBearerHandler:
+    """BearerAuthHandler issues a token and then demands it back."""
+
+    def _handler(self, token_path: str = "created.token") -> BearerAuthHandler:
+        return BearerAuthHandler(
+            login_path="/rest/v1/user/login",
+            token_path=token_path,
+        )
+
+    def test_login_answers_201_with_token_nested_at_token_path(self) -> None:
+        """Login returns 201 and a body the configured token_path walks."""
+        handler = self._handler()
+        response = handler.handle_login("POST", "/rest/v1/user/login", b"{}", {})
+
+        assert response is not None
+        assert response.status == 201
+        assert json.loads(response.body)["created"]["token"]
+
+    def test_shallow_token_path_nests_one_level(self) -> None:
+        """A single-segment token_path produces a flat body."""
+        handler = self._handler(token_path="token")
+        response = handler.handle_login("POST", "/rest/v1/user/login", b"{}", {})
+
+        assert response is not None
+        assert list(json.loads(response.body)) == ["token"]
+
+    def test_issued_token_is_required_on_later_requests(self) -> None:
+        """Only the issued token authenticates; absent or wrong tokens do not."""
+        handler = self._handler()
+        response = handler.handle_login("POST", "/rest/v1/user/login", b"{}", {})
+        assert response is not None
+        token = json.loads(response.body)["created"]["token"]
+
+        assert handler.is_authenticated({"authorization": f"Bearer {token}"}) is True
+        assert handler.is_authenticated({"authorization": "Bearer wrong"}) is False
+        assert handler.is_authenticated({}) is False
+
+    def test_challenge_is_401(self) -> None:
+        """Unauthenticated requests get a 401 challenge."""
+        assert self._handler().get_challenge_response().status == 401
 
 
 # ------------------------------------------------------------------

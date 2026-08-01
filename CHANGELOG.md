@@ -7,6 +7,180 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.17] - 2026-07-31
+
+### Added
+
+- **Technicolor XB6 (CGM4140COM) confirmed on hardware.** Verified via
+  contributor diagnostics: 32 downstream + 4 upstream channels locked,
+  form auth, all signals nominal. Downstream modulation now normalizes to
+  canonical `QAM256`, and upstream channel type reads the "Channel Type"
+  column directly (the firmware reports a bare "QAM" with no
+  constellation, so the unmappable modulation field is omitted, matching
+  the XB7 and XB10). (Related to #111)
+
+- **Virgin Media Hub 5 (Sagemcom F3896LG-VMB) confirmed on hardware.**
+  Verified via contributor diagnostics on beta.16: 33 downstream + 6
+  upstream channels locked, 134 days uptime, all signals nominal. The
+  unauthenticated `state_` endpoint the parser reads carries no version
+  field, so neither hardware nor software version is published. The
+  restart action remains unverified on hardware. (Related to #82)
+
+- **`{auth:token}` and `{auth:user_id}` placeholders in action
+  endpoints.** Some firmware addresses the session in the URL itself:
+  the Sagemcom F3896LG-ZG ends one with
+  `DELETE /rest/v1/user/{userId}/token/{token}`, both values coming from
+  the login response. `HttpAction.endpoint` was a plain string, and the
+  only dynamic-endpoint mechanism scraped a form action out of
+  pre-fetched HTML, so that logout could not be expressed at all — which
+  on single-session firmware leaves the integration holding the user's
+  only session slot. A fixed two-key set resolved from the auth context
+  at action time, not a template language: modem.yaml names an
+  already-captured value and the auth strategy decides what gets
+  captured. `BearerAuth` gains `user_id_path` alongside `token_path`.
+
+- **`session.post_login_endpoints` in modem.yaml.** Some SPA firmware
+  treats the browser's first call after login as part of establishing
+  the session and rejects data requests until it has been made. A modem
+  can now declare those paths, and they are fetched in order on every
+  fresh login, ahead of any data request. Responses are discarded, and
+  a failure logs a warning rather than reporting an auth error, since
+  the login itself already succeeded. The Technicolor CGA6444VF declares
+  `/api/v1/session/menu` on this basis. (Related to #120)
+
+### Changed
+
+- **A data-page 401 or 403 now logs the request line and response
+  body.** The line carried only the status and the path, which cannot
+  distinguish a rejected session from a missing header, a missing
+  cookie, or a refused request — the point where diagnosis has
+  repeatedly stalled. The body is sanitized by the collector, the only
+  layer that knows the password. Nothing about what is sent changes.
+  (Related to #120)
+
+- **Unimplemented cases fail instead of degrading quietly.** The
+  test-harness auth factory fell back to a no-auth handler when a
+  strategy had no handler module, and the HTTP loader coerced any
+  unrecognized format to BeautifulSoup. The first turns a missing
+  implementation into a passing test, the second into structurally
+  valid garbage. Neither branch is reachable through a validated config,
+  and neither had a test asserting the fallback.
+
+- **Spec conformance now gates every modem, not just confirmed ones.**
+  The check skipped anything still `awaiting_verification`, so
+  non-canonical output accumulated unseen and then failed at promotion
+  time, mid-confirmation with a contributor waiting. It now runs on
+  every entry, and a new modem must be conformant on the commit that
+  adds it.
+
+### Fixed
+
+- **A modem refusing a data page no longer reads as a bad password.** A
+  401 on a data page arrives *after* a successful login, so the
+  credentials are known good, but it mapped to `invalid_auth` and sent
+  users to re-verify a password the modem had already accepted. That is
+  the path an already configured modem takes: a streak opens the circuit
+  breaker and prompts for reauthentication, landing a user with correct
+  credentials on a form telling them to check their password. These now
+  map to a new `session_rejected` message, and the integrity variant,
+  previously unmapped, no longer reaches the user as "unknown".
+
+  The reading is per auth strategy rather than blanket, because it only
+  holds where the strategy actually verified the password at login.
+  Basic auth never validates, and plain form auth accepts any response
+  under HTTP 400, so on those a wrong password would still have reported
+  the password as fine. Each strategy declares which it is, and only one
+  that proves it with a bad-password test may claim the modem verified
+  the credential. A wrong password on an MB7621 still correctly reports
+  invalid credentials, confirmed on hardware. A failed validation attempt
+  also closes its collector now, instead of stranding a server-side
+  session on single-session firmware and colliding with the user's next
+  try. (Related to #120)
+
+- **HNAP firmware lockout was reported as rejected credentials.** The
+  lockout exception was raised by the v3.13 HNAP module and lost when
+  that module was retired, leaving the v3.14 manager returning a plain
+  auth failure. Polling stopped either way, since both trip the circuit
+  breaker identically, but a firmware lockout and a wrong password have
+  different remedies and the user was shown the wrong one. The distinct
+  signal and its event fire again. (Related to #117)
+
+- **Bearer login could never succeed on the Sagemcom F3896LG.** It
+  required exactly HTTP 200 and always sent a username key. Both are
+  wrong for that REST API, which two Liberty Global operators ship:
+  Virgin Media and Ziggo each authenticate on a password alone, and
+  token creation answers 201. Any 2xx carrying the token now succeeds,
+  and `auth.username_field` names the credential key — empty omits it
+  entirely, following the same empty-means-unused convention
+  `cookie_name` and `login_page` already use. (Related to #82, #185)
+
+- **A resource that failed to decode read as a clean parse.** The loader
+  logs the failure and omits the path, but three shapes hang their paths
+  off something else and went unchecked: XML `tables[]`, multi-array
+  JSON `arrays[]`, and resources declared by a parser's post-processor.
+  For those, a missing resource meant silently fewer channels or absent
+  system info while the poll reported success — on CBN surfacing as a
+  false "no signal" rather than a load failure. Every declared path is
+  now accounted for, and absence reaches the integrity signal by the
+  established route.
+
+- **A refused restart reported success.** The restart command dropped
+  the result its action executor returned, so a modem that answered the
+  reboot with 401 or 404 — or a per-action login the modem rejected —
+  logged "Restart command sent", notified the user of a dispatch that
+  never happened, and opened a recovery window for a reboot nobody
+  asked for. The executor also reported any response it received as
+  success, including refusals. Both now fail: the HTTP executor judges
+  the response the way the CBN executor already did, and a failed
+  action ends the restart before the session clear and the recovery
+  window, since neither has a reboot to be premised on. The specific
+  refusal reaches the log, so a report carries it. Affects the
+  Hub 5 (F3896LG-VMB), whose restart authenticates separately from
+  monitoring and so can fail on its own. (Related to #82)
+
+- **A synthesized fixture could certify the client against itself.**
+  The Hub 5's assembled login entry recorded the body Core sent rather
+  than the one the firmware accepts, so a replay of the wrong request
+  shape passed for as long as Core sent it. The fixture is corrected to
+  the evidenced password-only body, and the mock server now refuses a
+  JSON key the capture never carried instead of routing it — one
+  direction only, and only where the capture pins a single body shape
+  to a path. (Related to #82)
+
+- **Six modems published non-canonical modulation values.** The
+  SB8200 (CBN), G54, Hub 5 (F3896LG-VMB), CGA4236, CGA6444VF, and
+  TC4400 passed firmware spellings straight through (`256QAM`,
+  `64QAM`, `qam_256`, `256-QAM`, `16-qam`), which now normalize to
+  canonical form. The TC4400 additionally published an IUC list on its
+  OFDM channel and restated the channel type on its upstream rows;
+  neither names a modulation scheme, so both are omitted. Downstream
+  and upstream `modulation` attributes change value on these modems,
+  and the TC4400's upstream `modulation` attribute goes away.
+
+- **Speculative `TDMA` channel-type mappings removed.** The MB7621,
+  SB6190, and CODA56 each mapped an upstream `TDMA` value that appears
+  nowhere in their captures, and the MB7621 and SB6190 mapped it to
+  `tdma`, which is not one of the four allowed channel types. The
+  CM1100 keeps its mapping (the value appears in that firmware's own
+  page source), as do the Technicolor .jst modems, whose shared
+  three-way map is documented domain knowledge about that platform.
+
+- **OFDM channels no longer leak non-modulation strings.** The parser
+  stripped an enumerated list of known channel-type restatements from
+  OFDM/OFDMA channels, which missed profile IDs and IUC lists. It now
+  strips any value that names no real modulation scheme, so real PLC
+  values like `QAM4096` still survive.
+
+- **Spec conformance no longer flags unlocked channels for a missing
+  `channel_type`.** The unlocked-channel nulling rule strips every key
+  except `channel_number` and `lock_status`, so the identity requirement
+  cannot apply there, but the validator checked it anyway. The false
+  failure had never fired because no confirmed modem's golden carries an
+  unlocked channel; the first one to capture a not-locked channel would
+  have failed the gate mid-confirmation. PARSING_SPEC is reconciled to
+  match, and the positive fixture now models real coordinator output
+  instead of an assumed shape.
+
 ## [3.14.0-beta.16] - 2026-07-24
 
 ### Added

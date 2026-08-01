@@ -1,4 +1,4 @@
-"""Helpers that build and PII-sanitize ``AuthFailed`` events."""
+"""Helpers that build and PII-sanitize auth-failure events."""
 
 from __future__ import annotations
 
@@ -7,35 +7,67 @@ from urllib.parse import urlparse, urlunparse
 
 import requests
 
-from ..models.modem_config.auth import BasicAuth, NoneAuth
-from .events import AuthFailed
+from ..auth.base import AuthFailureMode
+from .events import AuthFailed, HttpStatusError
 
 # Maximum response body characters stored in auth-failure logs (log-line budget).
 _FAILURE_BODY_SNIPPET_MAX: Final[int] = 500
 _REDACTED: Final[str] = "[REDACTED]"
 
 
-def _auth_failure_hint(modem_config: Any) -> str:
+_HINTS: Final[dict[AuthFailureMode, str]] = {
+    AuthFailureMode.NOT_CONFIGURED: "modem requires authentication (check config)",
+    AuthFailureMode.CREDENTIALS_SUSPECT: "credentials rejected",
+    AuthFailureMode.SESSION_REJECTED: "session expired",
+}
+
+
+def _auth_failure_hint(auth_manager: Any) -> str:
     """Return a context-appropriate hint for a 401/403 during resource loading."""
-    if modem_config.auth is None or isinstance(modem_config.auth, NoneAuth):
-        return "modem requires authentication (check config)"
-    if isinstance(modem_config.auth, BasicAuth):
-        return "credentials rejected"
-    return "session expired"
+    # The strategy owns this, not an isinstance chain here: the answer
+    # depends on whether its login flow verifies the credential, which
+    # only the strategy knows. See BaseAuthManager.auth_failure_mode.
+    return _HINTS[auth_manager.auth_failure_mode()]
+
+
+def _build_http_status_error_event(
+    model: str,
+    path: str,
+    status_code: int | None,
+    reason: str,
+    request_line: str,
+    content_type: str,
+    response_body: str,
+    password: str,
+) -> HttpStatusError:
+    """Build a sanitized HttpStatusError carrying 401/403 wire detail."""
+    body = _scrub_password(response_body[:_FAILURE_BODY_SNIPPET_MAX], password)
+    if len(response_body) > _FAILURE_BODY_SNIPPET_MAX:
+        body = body + "... (truncated)"
+
+    return HttpStatusError(
+        model=model,
+        path=path,
+        status_code=status_code,
+        reason=reason,
+        request_line=request_line,
+        content_type=content_type,
+        response_body=body,
+    )
 
 
 def _should_detect_login_pages(modem_config: Any) -> bool:
     """Determine if login page detection should be enabled.
 
-    Only applicable to form-based HTTP auth strategies where the
-    modem may silently serve a login page at data URLs when the
-    session expires. Not applicable to none, basic, or hnap.
+    Derived from the strategy's own ClassVars, not an isinstance
+    chain: a stateless strategy holds no session that can expire, and
+    only the HTTP loader can substitute a login page for a data page.
+    See ARCHITECTURE.md § Auth Manager for the published table.
     """
-    if modem_config.auth is None:
+    auth = modem_config.auth
+    if auth is None:
         return False
-    if isinstance(modem_config.auth, NoneAuth | BasicAuth):
-        return False
-    return bool(modem_config.transport != "hnap")
+    return not auth.stateless and auth.transport == "http"
 
 
 # ---------------------------------------------------------------------------

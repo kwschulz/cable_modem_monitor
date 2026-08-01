@@ -280,7 +280,10 @@ def _is_safe_ipv6(match: str) -> bool:
 
 
 def _is_safe_private_ip(match: str) -> bool:
-    return is_safe_ip(match) or match.startswith("10.")
+    # SAFE_IP_VALUES holds exact firmware-embedded addresses; the public-IP
+    # handler already consults it, and a private example address is no less
+    # safe for being RFC1918.
+    return is_safe_ip(match) or match.startswith("10.") or match in SAFE_IP_VALUES
 
 
 # Dispatch from pattern name → safe-finding handler. Adding a new

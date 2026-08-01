@@ -14,7 +14,7 @@ downstream:
           type: lock_status
         - key: "modulation"
           field: modulation
-          type: string
+          type: modulation
         - key: "frequency"
           field: frequency
           type: integer
@@ -52,7 +52,7 @@ downstream:
           type: integer
         - key: "modulation"
           field: modulation
-          type: string
+          type: modulation
         # See FIELD_REGISTRY.md § frequency semantics — OFDM/OFDMA
         # frequency is the lower edge of the active subcarrier band.
         - key: "firstFrequency"
@@ -112,7 +112,7 @@ upstream:
           unit: "KSym/sec"
         - key: "modulation"
           field: modulation
-          type: string
+          type: modulation
       filter:
         channel_type:
           not: "UNSUPPORTED"
@@ -126,7 +126,7 @@ upstream:
           type: integer
         - key: "modulation"
           field: modulation
-          type: string
+          type: modulation
         # See FIELD_REGISTRY.md § frequency semantics.
         - key: "firstFrequency"
           field: frequency

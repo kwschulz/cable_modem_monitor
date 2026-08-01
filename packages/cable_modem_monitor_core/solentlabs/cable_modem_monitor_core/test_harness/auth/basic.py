@@ -38,6 +38,7 @@ class BasicAuthHandler(AuthHandler):
         challenge_cookie: bool = False,
         cookie_name: str = "",
     ) -> None:
+        super().__init__()
         self._challenge_cookie = challenge_cookie
         self._cookie_name = cookie_name
 

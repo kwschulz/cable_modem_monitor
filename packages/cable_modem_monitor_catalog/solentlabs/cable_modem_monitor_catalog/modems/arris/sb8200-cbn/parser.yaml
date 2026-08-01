@@ -19,7 +19,7 @@ downstream:
           type: float
         - source: mod
           field: modulation
-          type: string
+          type: modulation
       channel_type:
         fixed: "qam"
       lock_status:

@@ -83,6 +83,8 @@ class ModemDataCollector:
 
         Sequence:
         1. Auth Manager: validate session → reuse or authenticate
+           (a fresh login also GETs each session.post_login_endpoints
+            path, best-effort — see Post-login endpoints below)
         2. Resource Loader: fetch all resources (all-or-nothing)
         3. Parser: extract channels + system_info → ModemData
         4. Post-parse filter: apply restart-window filter if configured
@@ -122,15 +124,18 @@ class ModemDataCollector:
         Called by the orchestrator immediately before clear_session() when
         LOAD_AUTH or LOAD_INTEGRITY triggers a retry. Releases any active
         server-side session so the subsequent re-authentication can succeed.
-        Does not inspect or clear session cookies — that is clear_session()'s
-        responsibility. The firmware's logout endpoint does not require
-        credentials (confirmed on SB8200 v6), so the call succeeds whether or
-        not the session has cookies. Failure is silently ignored; the retry
-        proceeds regardless.
+        Does not inspect or clear session state — that is clear_session()'s
+        responsibility. Failure is silently ignored; the retry proceeds
+        regardless.
 
-        No-op unless ``actions.logout`` is configured.
-        When ``actions.logout.requires_session`` is true and the session
-        has no cookies, the call is skipped (session already lost).
+        No-op unless ``actions.logout`` is configured. With
+        ``requires_session: false`` the call always proceeds — such endpoints
+        clear a server-side session without credentials (confirmed on
+        SB8200 v6). With ``requires_session: true`` the call is skipped when
+        ``session_is_valid`` is False, because the credential the endpoint
+        needs is already gone. The test is session validity, not cookie
+        presence: header-authenticated strategies (``bearer``) hold a live
+        session with an empty cookie jar.
         """
 ```
 
@@ -201,7 +206,7 @@ class CollectorSignal(Enum):
 | `AUTH_LOCKOUT` | Trip circuit breaker immediately, report `auth_failed` |
 | `CONNECTIVITY` | Abort, report `unreachable`, apply connectivity backoff |
 | `LOAD_ERROR` | Abort, report `unreachable` |
-| `LOAD_AUTH` | For single-session modems (`actions.logout` configured): attempt logout (best-effort; skipped if `requires_session: true` and no cookies) before clearing session. Then clear session, retry once in same poll, increment auth streak if retry fails, report `auth_failed` (see UC-17, UC-18) |
+| `LOAD_AUTH` | For single-session modems (`actions.logout` configured): attempt logout (best-effort; skipped if `requires_session: true` and the session is not valid) before clearing session. Then clear session, retry once in same poll, increment auth streak if retry fails, report `auth_failed` (see UC-17, UC-18) |
 | `LOAD_INTEGRITY` | Same as `LOAD_AUTH` — for single-session modems, attempt logout (best-effort) before clearing session. Clear session, retry once in same poll, increment auth streak if retry fails, report `auth_failed` (see UC-19a) |
 | `PARSE_ERROR` | Abort, report `parser_issue` |
 
@@ -283,6 +288,26 @@ This mirrors the existing `log_level` pattern used by action execution
 (both HTTP and HNAP actions). Auth managers use the level for all
 non-error log calls during `authenticate()`. Errors and warnings are
 always logged regardless of `log_level`.
+
+### Post-login endpoints
+
+`authenticate()` owns this, not `execute()`. On the fresh-login branch,
+after a successful result and before returning, the collector GETs each
+`session.post_login_endpoints` path in order. Responses are discarded.
+The calls carry `session.query_params` like every other fetch.
+
+Placing it in `authenticate()` rather than in `execute()`'s sequence is
+what makes it reach the restart path: `restart.py` calls
+`collector.authenticate()` and dispatches its action without ever
+entering `execute()`. Firmware that requires the call to establish a
+session requires it there too.
+
+Best-effort by design. A non-2xx response or a transport error emits
+`PostLoginFetchFailed` at WARNING and proceeds. Login already
+succeeded, so failing the collection here would report bad credentials
+for a working password; a genuinely required call surfaces anyway as
+the data fetch's own 401 alongside this warning. Config surface and
+evidence bar: MODEM_YAML_SPEC.md § Post-login endpoints.
 
 ### Auth-Failure Detail Log
 
@@ -940,18 +965,22 @@ class RestartResult:
 
     Attributes:
         success: True iff authentication succeeded, the action
-            executor ran, and the session was cleared without raising.
-            False on any failure during the command dispatch itself.
+            executor reported success, and the session was cleared
+            without raising. An executor that ran and was refused is
+            a failure.
         elapsed_seconds: Wall time of the ``restart()`` call. Typically
             a few seconds (auth + POST + session clear).
         error: Structured error token. Empty on success. On failure:
 
             * ``"command_failed"`` — authentication raised, the action
-              executor raised, or the session clear raised.
+              executor raised or reported failure, or the session
+              clear raised.
 
             No other error tokens are emitted. ``restart()`` does not
             time out, cannot be cancelled, and does not observe the
-            reboot.
+            reboot. What specifically refused the command is carried
+            by the ``RestartCommandFailed`` log line, not here; that
+            line is what a user pastes into an issue.
     """
 
     success: bool
@@ -1238,7 +1267,6 @@ grows and the circuit trips — same as wrong credentials.
 
 | State | Purpose | Lifetime |
 |-------|---------|----------|
-| Login backoff counter | Anti-brute-force suppression | Decremented each get_modem_data(), cleared by orchestrator reconstruction |
 | Auth failure streak | Circuit breaker — consecutive auth-related failures | Reset on successful collection, cleared by orchestrator reconstruction |
 | Circuit open flag | Stops collection when streak reaches threshold | Set when tripped, cleared by orchestrator reconstruction |
 | Circuit trip status code | Keeps blocked-poll advice matched to the trip cause (404 vs credentials) | Set on immediate trip, cleared by orchestrator reconstruction |
@@ -1368,7 +1396,7 @@ first-poll output.
 **Auth lifecycle:**
 
 - INFO (first poll) / DEBUG (after): `"Poll [MODEL] — auth: FormAuth, url: ..., credentials: yes, session: none"`
-- WARNING: `"Auth lockout [MODEL] — firmware anti-brute-force triggered, suppressing login for 3 polls (streak: 3/6)"`
+- WARNING: `"Auth lockout [MODEL] — firmware anti-brute-force triggered, stopping immediately (streak: 3)"`
 - ERROR: `"Circuit breaker OPEN [MODEL] — polling stopped. Reconfigure credentials to resume."`
 - ERROR (404 trip): `"Circuit breaker OPEN [MODEL] — login endpoint not found (HTTP 404). Polling stopped. Reload the integration to retry."`
 
@@ -1906,14 +1934,24 @@ Procedure:
    authenticates, and executes the action on it;
    `collector.authenticate()` is skipped entirely.
 3. Execute the `actions.restart` executor (`HTTP` or `HNAP` — see
-   § Action Executors).
+   § Action Executors). Stop here if it returns
+   `ActionResult(success=False)`: steps 4 and 5 are both premised on a
+   reboot that did not happen.
 4. Clear the collector session (forces fresh auth on the next poll;
    avoids the MB7621-class stale-cookie failure mode).
 5. Call `recovery.begin(reason="restart_command")` so subsequent
    polls run at recovery cadence. The call returns immediately; the
    recovery module owns what happens next.
 6. Return a `RestartResult` — success iff steps 2–5 completed
-   without raising.
+   without raising **and** step 3 reported success.
+
+**A returned failure is a failure.** Per-action auth can be refused
+and the modem can answer the command 401 or 404; neither raises, and
+neither rebooted anything. Dropping the `ActionResult` reported a
+reboot that never dispatched, opened a recovery window for it, and
+left the user watching an unchanged uptime counter (#82). The
+executor's result is the only evidence Core has that the command
+landed, so it is not optional to read.
 
 **Per-action auth (`action_auth` on `HttpAction`):** when
 `actions.restart.action_auth` is set, `execute_action` creates a
@@ -1930,8 +1968,8 @@ sees a flakey modem after a restart may want to try again; Core
 lets them. The command either dispatches (possibly re-rebooting
 an already-rebooting modem, which is the caller's intent) or
 fails cleanly with `error="command_failed"` if the modem isn't
-reachable. Serialization of rapid button presses is the consumer's
-responsibility — HA uses a short-lived mutex (see § Operation
+reachable or refuses it. Serialization of rapid button presses is
+the consumer's responsibility — HA uses a short-lived mutex (see § Operation
 Mutex in HA_ADAPTER_SPEC).
 
 **Why the session clear:** some firmware (observed on MB7621)
@@ -1958,7 +1996,9 @@ Every line includes `[MODEL]`. Two lines total — the command is
 one-shot.
 
 - INFO: `"Restart command sent [MODEL] — session cleared (0.4s)"`
-- ERROR: `"Restart command failed [MODEL]: <exc>"`
+- ERROR: `"Restart command failed [MODEL]: <reason>"` — an exception,
+  or the `ActionResult.message` when the executor reported failure
+  (e.g. `Per-action auth failed: Login returned HTTP 401`).
 
 ---
 
@@ -2257,7 +2297,9 @@ Phases:
 4. **Main request**: send the action request to the resolved endpoint.
 
 Connection errors and timeouts are treated as success (the modem is
-rebooting during restart). Returns `ActionResult`.
+rebooting during restart). Any response that arrives is judged on
+`resp.ok`: a 4xx or 5xx is a refused action, matching the CBN
+executor. Returns `ActionResult`.
 
 ### HNAP Executor
 
@@ -2280,9 +2322,10 @@ Returns `ActionResult`.
 ### ActionResult
 
 All executors return `ActionResult(success, message, details)`.
-Callers may use or ignore it — restart is fire-and-forget today,
-but the result is available for diagnostics and future recovery
-decisions.
+
+Restart must read it (§ Restart Action). Logout may ignore it —
+logout is best-effort at both call sites by design, and a modem that
+refuses one costs nothing but a stale server-side session.
 
 ---
 

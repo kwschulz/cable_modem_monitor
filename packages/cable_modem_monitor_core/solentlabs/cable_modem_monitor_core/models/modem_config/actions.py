@@ -5,7 +5,7 @@ Per MODEM_YAML_SPEC.md Actions section.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NamedTuple, get_args
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
 
@@ -72,3 +72,37 @@ class ActionsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     restart: ActionConfig | None = None
     logout: ActionConfig | None = None
+
+
+# ---------------------------------------------------------------------------
+# Registry, co-located with the ActionConfig union. Adding an action
+# type requires adding the model class here AND to the union above.
+# This list is sorted alphabetically by type literal; the union keeps
+# its own ordering.
+# ---------------------------------------------------------------------------
+
+_ACTION_MODELS: list[type[BaseModel]] = [CbnAction, HnapAction, HttpAction]
+
+
+class ActionTypeRow(NamedTuple):
+    """One action type's self-description, read off its model fields."""
+
+    action_type: str
+    supports_action_auth: bool
+
+
+def get_action_type_rows() -> list[ActionTypeRow]:
+    """Return every action type's constraint row, sorted by type literal.
+
+    An action type is valid for exactly the transport it is named
+    after (``_check_action_types`` in config.py), so this doubles as
+    the transport → action-type column of the published constraint
+    tables. See ``scripts/generate_constraint_tables.py``.
+    """
+    return sorted(
+        ActionTypeRow(
+            action_type=get_args(m.model_fields["type"].annotation)[0],
+            supports_action_auth="action_auth" in m.model_fields,
+        )
+        for m in _ACTION_MODELS
+    )

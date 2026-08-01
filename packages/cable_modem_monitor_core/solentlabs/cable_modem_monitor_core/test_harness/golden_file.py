@@ -5,7 +5,7 @@ Compares ModemData pipeline output against a validated golden file
 checkpoint — first run: user validates output is correct; every
 subsequent run: pipeline output must match that validated snapshot.
 
-See ONBOARDING_SPEC.md Golden File Comparison section.
+See catalog_tools' ONBOARDING_SPEC.md § Golden File Comparison.
 """
 
 from __future__ import annotations

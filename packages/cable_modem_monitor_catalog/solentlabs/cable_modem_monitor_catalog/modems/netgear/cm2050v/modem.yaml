@@ -38,6 +38,9 @@ notes: |
   ATDMA + OFDMA upstream. Same tagValueList format as CM2000/CM1200.
   XSRF_TOKEN cookie set on first GET, sent with all subsequent requests.
   Login page at /, POST to /goform/Login.
+  The XSRF_TOKEN value in the HAR's structured cookies arrays was
+  redacted by hand: har-capture masks cookie headers but not the
+  cookies arrays.
 
 references:
   issues:

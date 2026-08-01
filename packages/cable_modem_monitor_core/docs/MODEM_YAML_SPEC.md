@@ -193,8 +193,8 @@ collection and golden file validation for that specific model.
 
 A separate entry also requires its own evidence — a HAR capture in
 `test_data/`. Until a capture exists for a rebadged or sibling
-product, it is recorded as an alias on the evidenced entry (e.g.,
-`MB8612` on the MB8611) and graduates to its own entry when evidence
+product, it is recorded as an alias on the evidenced entry — see
+`model_aliases` below — and graduates to its own entry when evidence
 arrives.
 
 **model_aliases** (alternate user-facing names — shown in the model
@@ -275,7 +275,7 @@ auth:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `challenge_cookie` | bool | `false` | If `true`, retry with server-set cookie on initial 401. Some modems (CM1200 HTTPS) return a challenge cookie that must be included in the retry. |
+| `challenge_cookie` | bool | `false` | If `true`, retry with server-set cookie on initial 401. Some firmware returns a challenge cookie that must be included in the retry. |
 | `cookie_name` | string | `""` | Session cookie produced by login. Empty = stateless. Auth owns the cookie it produces — see ARCHITECTURE_DECISIONS.md "Session is lifecycle, auth owns the cookie." |
 
 **Success detection:** Always succeeds. Basic auth is per-request
@@ -749,9 +749,9 @@ are UTF-8 encoded.
 **Success detection:** The login response JSON `p_status` field must
 be `"AdminMatch"` or `"Match"`. Any other value is treated as failure.
 
-Evidence: Arris Touchstone gateway firmwares (e.g., TG3442DE) that
-embed the SJCL library in their web interface. Constants are found
-in `base_95x.js` or similar JS files in HAR captures.
+Evidence: Arris Touchstone gateway firmwares that embed the SJCL
+library in their web interface. Constants are found in `base_95x.js`
+or similar JS files in HAR captures.
 
 ### `bearer`
 
@@ -762,7 +762,8 @@ walking a dot-separated path, and injects
 subsequent requests.
 
 The login request sends `{"username": "<username>", "password": "<password>"}` as the
-JSON body.
+JSON body. Set `username_field: ""` for password-only firmwares — the
+username key is then omitted entirely rather than sent empty.
 
 ```yaml
 auth:
@@ -776,6 +777,8 @@ auth:
 | `strategy` | string | yes | Always `"bearer"` |
 | `login_endpoint` | string | yes | Path to POST the JSON login body to |
 | `token_path` | string | yes | Dot-separated JSON path to the token in the response (e.g., `"created.token"` extracts `response["created"]["token"]`) |
+| `username_field` | string | no | Key carrying the username, default `"username"`. Empty string omits the username from the body — required for firmwares that authenticate on a password alone. |
+| `user_id_path` | string | no | Dot-separated JSON path to a user identifier in the login response, resolved the same way as `token_path`. Set it only when an action endpoint needs the value. |
 
 **Login request:**
 
@@ -785,14 +788,30 @@ Content-Type: application/json
 {"username": "<username>", "password": "<password>"}
 ```
 
+With `username_field: ""` the body is `{"password": "<password>"}`.
+
 **Token extraction:** the `token_path` value is split on `.` and used
 to walk the parsed JSON response. For example, `"created.token"` with
 response `{"created": {"token": "abc", "userLevel": "regular"}}`
 extracts `"abc"`. Returns an error if any key in the path is missing
 or the response is not valid JSON.
 
-**Success detection:** HTTP non-200 → `AuthResult(success=False)`.
-Missing token path → `AuthResult(success=False)`. Non-JSON response →
+**Downstream values:** the extracted token is also stored in
+`AuthContext.token`, and `user_id_path` (when set) in
+`AuthContext.user_id`. Action endpoints reference both as
+`{auth:token}` and `{auth:user_id}` — see
+[Auth-value placeholders](#auth-value-placeholders). Firmwares that end
+a session by addressing it in the URL path need them; re-reading the
+token out of the `Authorization` header would be indirect, and the user
+id never reaches the header at all. A `user_id_path` resolving to a
+number is stored as its string form. Missing or unresolvable
+`user_id_path` leaves `AuthContext.user_id` empty and does not fail the
+login.
+
+**Success detection:** any 2xx carrying the token succeeds — token
+creation legitimately answers `201 Created`. Non-2xx →
+`AuthResult(success=False)`. Missing token path →
+`AuthResult(success=False)`. Non-JSON response →
 `AuthResult(success=False)`.
 
 **Transport:** `http` only.
@@ -800,9 +819,12 @@ Missing token path → `AuthResult(success=False)`. Non-JSON response →
 **Header injected:** `Authorization: Bearer <token>`. The strategy's
 `headers()` method returns `frozenset({"authorization", "cookie"})`.
 
-Evidence: Virgin Media Hub 5 REST API — monitoring endpoints are
-public (no auth), but the restart endpoint at `/rest/v1/system/reboot`
-requires a Bearer token from `/rest/v1/user/login`. See issue #82.
+Evidence: Sagemcom F3896LG REST API, shipped by two Liberty Global
+operators. On Virgin Media (Hub 5) the monitoring endpoints are public
+and only the restart endpoint at `/rest/v1/system/reboot` needs a token
+(issue #82). On Ziggo the capture shows the token on every request
+(issue #185). Both firmwares authenticate on a password alone and
+answer `POST /rest/v1/user/login` with `201`.
 
 ---
 
@@ -883,10 +905,11 @@ exposes `<LockedOut>` and `<AccessDenied>` fields. When `LockedOut`
 is not `"Disable"`, the modem has temporarily locked the account
 after too many failed attempts.
 
-Evidence: Compal CH7465MT (Magenta AT / UPC / Ziggo / Virgin Media
-"Connect Box"). The `CBN_Encrypt` function is in `encrypt_cryptoJS.js`
-which loads CryptoJS v3.1.2 (`AES.js`, `sha256.js`, `md5.js`).
-Related modems CH7466CE and CH7465CE share the same auth flow.
+Evidence: Compal
+[CH7465MT](../../cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/compal/ch7465mt/modem.yaml)
+(Magenta AT / UPC / Ziggo / Virgin Media "Connect Box"). The
+`CBN_Encrypt` function is in `encrypt_cryptoJS.js` which loads CryptoJS
+v3.1.2 (`AES.js`, `sha256.js`, `md5.js`).
 
 ---
 
@@ -907,7 +930,38 @@ For HNAP, session is implicit (always `uid` + `PrivateKey` cookies,
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `headers` | map | `{}` | Static headers added to all requests for this session (e.g., `X-Requested-With: XMLHttpRequest` for SPA-style modems). Header values support the `{base_url}` placeholder, which resolves to the modem's URL at session-build time — used for `Referer`/`Origin` headers that some modems validate against their own origin. Dynamic headers (CSRF tokens, HNAP signatures, auth tokens) are managed by auth strategies — each strategy defines its own fields for token acquisition and header injection. |
-| `query_params` | map | `{}` | Static query parameters appended to all data-fetch URLs (e.g., `_n: "12345"` for Arris firmware that requires a cache-buster nonce on AJAX requests). Not used for auth-managed tokens — those go through `auth.token_prefix`. |
+| `query_params` | map | `{}` | Static query parameters appended to every URL Core fetches for this session — data resources, `post_login_endpoints`, and actions alike (e.g., `_n: "12345"` for Arris firmware that requires a cache-buster nonce on AJAX requests). Not used for auth-managed tokens — those go through `auth.token_prefix`. |
+| `post_login_endpoints` | list | `[]` | Paths to GET, in order, on every fresh login, ahead of any data request. See [Post-login endpoints](#post-login-endpoints). |
+
+### Post-login endpoints
+
+Some SPA firmware treats the browser's first post-login call as part of
+establishing the session, and rejects data requests until it has been
+made. Declare those paths and Core GETs them, in order, after a fresh
+login and before the first data fetch:
+
+```yaml
+session:
+  post_login_endpoints:
+    - "/api/v1/session/menu"
+```
+
+Responses are discarded — this is lifecycle, not data. The calls belong
+to login, so they run on every successful fresh authentication and
+nothing runs on a reused session. That includes a restart action, which
+authenticates without ever collecting data.
+
+A non-2xx response or a transport error logs a WARNING and collection
+continues. Login already succeeded, so failing here would report bad
+credentials for a working password; if the call really was required,
+the data fetch reports the failure itself with the warning naming the
+missed call alongside it.
+
+Evidence: a path the browser requests immediately after login that the
+firmware rejects when unauthenticated. Cite the capture, and any
+independent non-browser client that makes the same call — a headless
+client has no UI to render, so it is strong evidence the call is
+session establishment rather than chrome.
 
 ### Stateless
 
@@ -955,8 +1009,8 @@ When `actions.logout` is configured, logout fires in two places:
   never released. Whether the call proceeds depends on `requires_session`
   (see below).
 
-The integration cannot clear another client's session — it doesn't
-have their cookie. If a third-party session holds the slot and the
+The integration cannot clear another client's session — it holds no
+credential for one. If a third-party session holds the slot and the
 pre-retry logout doesn't free it, login fails with
 `AuthResult.FAILURE` and status reports `auth_failed`. Recovery
 happens when the other session ends (explicit logout or modem-side
@@ -1006,8 +1060,8 @@ Both actions share the same schema with two type discriminators:
 **Logout call sites:** Core invokes `actions.logout` in two places:
 after a successful poll (session always valid), and before a same-poll
 auth retry (`attempt_logout_before_retry`). The retry call is guarded
-by `requires_session` — if `true` and no session cookies are present,
-the call is skipped. See [Single-session modems](#single-session-modems)
+by `requires_session` — if `true` and the session is not valid, the
+call is skipped. See [Single-session modems](#single-session-modems)
 for the full call-site semantics.
 
 ### Action schema — `type: http`
@@ -1030,8 +1084,8 @@ actions:
 |-------|------| :--------: |-------------|
 | `type` | enum | yes | `http`, `hnap`, or `cbn` |
 | `method` | string | yes | HTTP method (`GET`, `POST`, etc.). No default — must be explicit. |
-| `endpoint` | string | yes | URL path to send the request to |
-| `requires_session` | bool | `false` | *Logout only.* `false` = endpoint is unauthenticated and can clear any active server-side session without credentials. `true` = endpoint requires a valid session cookie; Core skips the pre-retry logout call when no session cookie is present. |
+| `endpoint` | string | yes | URL path to send the request to. May contain `{auth:token}` / `{auth:user_id}` placeholders — see [Auth-value placeholders](#auth-value-placeholders). |
+| `requires_session` | bool | `false` | *Logout only.* `false` = endpoint is unauthenticated and can clear any active server-side session without credentials. `true` = endpoint needs a live session; Core skips the pre-retry logout call when the session is not valid. |
 | `params` | map | no | Form parameters. If present, body is `application/x-www-form-urlencoded`. Mutually exclusive with `json_body`. |
 | `json_body` | map | no | JSON request body. If present, body is `application/json`. Mutually exclusive with `params`. Use for REST APIs that accept JSON. |
 | `headers` | map | no | Per-action headers. Merged with session-level `headers` (action wins on conflict). |
@@ -1164,6 +1218,64 @@ the action fires. If the named cookie is absent from the jar when the
 action executes, the placeholder is left unresolved and the param value
 is sent as the literal string `{cookie:name}` — callers should ensure
 the cookie exists via `pre_fetch_url`.
+
+### Auth-value placeholders
+
+Some REST firmwares address the session itself in the URL. The
+Sagemcom F3896LG ends one with
+`DELETE /rest/v1/user/{userId}/token/{token}`, where both values come
+from the login response body and neither is a cookie. Use `{auth:…}`
+placeholders in an action `endpoint`:
+
+```yaml
+auth:
+  strategy: bearer
+  login_endpoint: "/rest/v1/user/login"
+  token_path: "created.token"
+  user_id_path: "created.userId"
+
+actions:
+  logout:
+    type: http
+    method: DELETE
+    endpoint: "/rest/v1/user/{auth:user_id}/token/{auth:token}"
+    requires_session: true
+```
+
+Two keys are defined, both resolved from `AuthContext` at action time:
+
+| Placeholder | Source |
+|-------------|--------|
+| `{auth:token}` | `AuthContext.token` — the session token the auth strategy obtained |
+| `{auth:user_id}` | `AuthContext.user_id` — the account identifier, when the strategy captures one |
+
+An unresolved placeholder (empty `AuthContext` field, or no
+authenticated session) leaves the literal `{auth:key}` text in the
+endpoint, matching how `{cookie:name}` behaves in `params`. For a
+logout that means the request goes to a nonsense path and fails
+harmlessly; `requires_session: true` is what prevents the call being
+attempted with no session at all.
+
+**Scope:** placeholders resolve in `endpoint` only, not in `params`,
+`json_body`, or `headers`. No modem has needed them there. `params`
+has its own `{cookie:name}` resolution, which is unrelated and stays
+as it is.
+
+### Architecture Decision: a fixed key set, not a template language
+
+`{auth:…}` accepts two known keys, not arbitrary expressions or paths
+into the login response. Which values Core captures is decided in the
+auth strategy (`token_path`, `user_id_path`); modem.yaml only names an
+already-captured value. This is the same division as
+`endpoint_pattern`: the config declares *what* to use, Core owns *how*
+it is obtained.
+
+**Why not `{response:created.userId}`?** That pushes JSON-path
+evaluation into endpoint strings, makes every login response
+permanently addressable, and turns a two-key substitution into a
+template evaluator with its own failure modes. A third key, if one is
+ever observed, is a field on `AuthContext` and a row in the table
+above.
 
 **Extensibility:** If a future modem needs non-form extraction (e.g.,
 JavaScript variable), add an `extraction_mode` field to the schema and
@@ -1433,15 +1545,17 @@ session, and format are configured independently, subject to the
 [auth-session-action consistency](#auth-session-action-consistency)
 rules below.
 
+<!-- BEGIN GENERATED: yaml-constraints (from the auth, format, and action models; run packages/cable_modem_monitor_core/scripts/generate_constraint_tables.py) -->
 | Transport | Valid auth strategies | Valid session | Valid formats | Valid action types |
-|-----------|---------------------|--------------|---------------|-------------------|
-| `http` | `none`, `basic`, `bearer`, `form`, `form_nonce`, `url_token`, `form_pbkdf2`, `form_sjcl` | stateless, cookie, CSRF, url_token | `table`, `table_transposed`, `html_fields`, `javascript`, `javascript_json`, `json`, `json_transposed` | `http` (with optional `action_auth` on `HttpAction`) |
-| `hnap` | `hnap` | implicit (uid + HNAP_AUTH) | `hnap` | `hnap` |
+|-----------|-----------------------|---------------|---------------|--------------------|
 | `cbn` | `form_cbn` | cookie (rotating sessionToken + stable SID) | `xml` | `cbn` |
+| `hnap` | `hnap` | implicit (uid cookie + HNAP_AUTH header) | `hnap` | `hnap` |
+| `http` | `basic`, `bearer`, `form`, `form_nonce`, `form_pbkdf2`, `form_sjcl`, `none`, `url_token` | stateless, cookie, CSRF, or url_token | `html_fields`, `javascript`, `javascript_json`, `javascript_vars`, `json`, `json_transposed`, `table`, `table_transposed` | `http` (optional `action_auth`) |
+<!-- END GENERATED: yaml-constraints -->
 
 The format field in parser.yaml determines how the response is decoded.
-HTML formats produce `BeautifulSoup`, structured formats (`json`, `xml`)
-produce `dict` or `Element`. See ARCHITECTURE.md Constraint Summary.
+See ARCHITECTURE.md Constraint Summary for the format-to-value-type
+mapping.
 
 Violations are rejected at both **build time** (Pydantic validation in
 Catalog's dev-gate) and **load time** (`load_modem_config()` in Core)

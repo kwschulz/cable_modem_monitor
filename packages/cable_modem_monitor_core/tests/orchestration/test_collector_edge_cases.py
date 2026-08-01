@@ -73,6 +73,7 @@ def _make_config(
     config.session = MagicMock()
     config.session.headers = {}
     config.session.query_params = {}
+    config.session.post_login_endpoints = []
 
     if logout_action is not None:
         config.actions = MagicMock()

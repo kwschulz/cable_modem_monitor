@@ -25,7 +25,7 @@ downstream:
             "sc_qam": "qam"
         - key: "modulation"
           field: modulation
-          type: string
+          type: modulation
         - key: "frequency"
           field: frequency
           type: integer
@@ -58,7 +58,7 @@ downstream:
           type: string
         - key: "modulation"
           field: modulation
-          type: string
+          type: modulation
         - key: "power"
           field: power
           type: float
@@ -99,7 +99,7 @@ upstream:
           type: string
         - key: "modulation"
           field: modulation
-          type: string
+          type: modulation
         - key: "frequency"
           field: frequency
           type: integer
@@ -125,7 +125,7 @@ upstream:
           type: string
         - key: "modulation"
           field: modulation
-          type: string
+          type: modulation
         - key: "power"
           field: power
           type: float

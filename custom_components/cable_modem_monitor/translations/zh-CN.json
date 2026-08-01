@@ -62,6 +62,7 @@
       "network_unreachable": "无法访问调制解调器。\n\n请检查：\n1. 您已连接到调制解调器的网络（非访客 WiFi）\n2. VPN 已断开\n3. IP 地址正确（通常是 192.168.100.1）\n4. 可以在浏览器中访问调制解调器的 Web 界面",
       "cannot_connect": "调制解调器无响应。\n\n请检查：\n1. IP 地址正确\n2. 尝试包含协议（例如 http://192.168.100.1）\n3. 调制解调器的 Web 界面可从 Home Assistant 网络访问",
       "invalid_auth": "登录失败。\n\n请检查：\n1. 用户名正确（通常为「admin」）\n2. 密码正确（查看调制解调器标签）\n3. 先尝试通过浏览器登录以验证凭据",
+      "session_rejected": "登录成功，但调制解调器拒绝了数据请求。\n\n登录已成功，因此这不是用户名或密码的问题。Home Assistant 日志中已有关于该失败请求的警告，其中包含调制解调器的返回内容。",
       "parse_failed": "已连接但无法读取调制解调器数据。\n\n这可能意味着您的调制解调器需要选择不同的变体。请尝试返回并选择其他选项，或检查您的调制解调器固件是否受支持。",
       "unknown": "意外错误。请查看 Home Assistant 日志了解详情。"
     },
@@ -101,6 +102,7 @@
       "network_unreachable": "无法访问调制解调器。请检查 IP 地址和网络连接。",
       "cannot_connect": "调制解调器无响应。请检查 IP 地址和协议。",
       "invalid_auth": "登录失败。请检查用户名和密码。",
+      "session_rejected": "登录成功，但调制解调器拒绝了数据请求。这不是凭据问题；请查看 Home Assistant 日志中的警告。",
       "parse_failed": "已连接但无法读取调制解调器数据。",
       "unknown": "意外错误。请查看 Home Assistant 日志。"
     },

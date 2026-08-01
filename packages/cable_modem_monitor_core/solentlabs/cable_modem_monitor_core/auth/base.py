@@ -11,8 +11,34 @@ from __future__ import annotations
 import abc
 import logging
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 import requests
+
+
+class AuthFailureMode(StrEnum):
+    """How to read a 401/403 that arrives *after* authenticate() succeeded.
+
+    The answer depends on whether the strategy actually verified the
+    login. A strategy that cannot tell a bad password from a good one
+    reports success regardless, so a later 401 is very often the
+    rejected credential surfacing late.
+    """
+
+    NOT_CONFIGURED = "not_configured"
+    CREDENTIALS_SUSPECT = "credentials_suspect"
+    SESSION_REJECTED = "session_rejected"
+
+
+class LoginLockoutError(Exception):
+    """Firmware anti-brute-force triggered.
+
+    Raised by HNAP auth strategies when the modem responds with
+    ``LoginResult: "LOCKUP"`` or ``"REBOOT"``. The orchestrator
+    catches this and applies backoff policy. Defined here rather than
+    in orchestration so the auth layer can raise it without importing
+    upward.
+    """
 
 
 @dataclass
@@ -20,15 +46,20 @@ class AuthContext:
     """Typed downstream state from auth managers.
 
     Each auth strategy populates the fields it produces; the runner
-    reads them by attribute based on ``modem_config.transport``.
+    reads them by attribute based on ``modem_config.transport``, and
+    action endpoints reference them as ``{auth:...}`` placeholders.
 
     Attributes:
         url_token: Session token for URL query string auth (``url_token`` strategy).
         private_key: HMAC signing key for HNAP requests (``hnap`` strategy).
+        token: Session token from the login response (``bearer`` strategy).
+        user_id: Account identifier from the login response (``bearer`` strategy).
     """
 
     url_token: str = ""
     private_key: str = ""
+    token: str = ""
+    user_id: str = ""
 
 
 @dataclass
@@ -140,3 +171,18 @@ class BaseAuthManager(abc.ABC):
         with a session cookie on the wire.
         """
         return frozenset({"cookie"})
+
+    def auth_failure_mode(self) -> AuthFailureMode:
+        """How a post-login 401/403 should be read for this strategy.
+
+        The default is deliberately pessimistic: assume the credential
+        is suspect. Overriding to ``SESSION_REJECTED`` is a claim that
+        this strategy rejects a bad password at login time, and that
+        claim must be backed by a mock-server test proving it — see
+        ARCHITECTURE_DECISIONS.md "Post-login 401 is read per auth
+        strategy". A strategy that inherits this default produces a
+        message that is merely less specific; one that overrides it
+        without proof tells users their working password is fine when
+        it is not.
+        """
+        return AuthFailureMode.CREDENTIALS_SUSPECT

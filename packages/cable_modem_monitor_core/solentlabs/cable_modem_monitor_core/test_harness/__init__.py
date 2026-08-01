@@ -9,7 +9,9 @@ Two use cases share the same ``HARMockServer`` component:
 2. **Manual integration testing** — ``python -m solentlabs.cable_modem_monitor_core.test_harness``
    starts a persistent server for testing against a real HA instance.
 
-See ONBOARDING_SPEC.md Test Harness section.
+See ARCHITECTURE.md § Test Harness for the replay and pass-criterion
+rules; catalog_tools' ONBOARDING_SPEC.md § Testing for how intake
+drives it.
 
 Public API for Catalog's pytest integration::
 

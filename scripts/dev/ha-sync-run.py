@@ -151,6 +151,36 @@ def container_exists() -> bool:
         return False
 
 
+def run_with_progress(
+    label: str,
+    cmd: list,
+    timeout: int,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess:
+    """Run a command with output captured, printing a dot per second while it works.
+
+    Docker calls here can stall for a minute or more when the engine is slow to
+    respond. With output captured there is nothing on screen to distinguish that
+    from a hang, so emit the same dot ticker Step 2 uses.
+    """
+    print(f"   {label}", end="", flush=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd)
+    start = time.time()
+    timed_out = False
+    while proc.poll() is None:
+        if time.time() - start > timeout:
+            proc.kill()
+            timed_out = True
+            break
+        time.sleep(1)
+        print(".", end="", flush=True)
+    stdout, stderr = proc.communicate()
+    print()
+    if timed_out:
+        stderr = f"{stderr}\nTimed out after {timeout}s waiting for: {' '.join(cmd)}"
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+
 def wait_for_http(port: int, timeout: int = 60) -> bool:
     """Wait for HTTP to respond on the given port."""
     start = time.time()
@@ -346,15 +376,13 @@ def start_container() -> bool:
 
     # Clean up any existing container
     if container_exists():
-        print_info("Removing existing container...")
-        subprocess.run(["docker", "stop", "-t", "30", CONTAINER_NAME], capture_output=True, timeout=60)
+        run_with_progress("Removing existing container", ["docker", "stop", "-t", "30", CONTAINER_NAME], timeout=60)
         subprocess.run(["docker", "rm", "-f", CONTAINER_NAME], capture_output=True, timeout=30)
 
     # Start container
-    result = subprocess.run(
+    result = run_with_progress(
+        "Creating container",
         compose_cmd + ["-f", compose_file, "up", "-d"],
-        capture_output=True,
-        text=True,
         timeout=120,
         cwd=get_project_dir(),
     )
@@ -372,12 +400,7 @@ def start_container() -> bool:
 
 def restart_container() -> bool:
     """Restart the existing HA container."""
-    result = subprocess.run(
-        ["docker", "restart", CONTAINER_NAME],
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+    result = run_with_progress("Restarting container", ["docker", "restart", CONTAINER_NAME], timeout=60)
     return result.returncode == 0
 
 

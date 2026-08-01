@@ -59,6 +59,7 @@ class HnapAuthHandler(AuthHandler):
         hmac_algorithm: str,
         har_entries: list[dict[str, Any]],
     ) -> None:
+        super().__init__()
         self._hmac_algorithm = hmac_algorithm
         self._authenticated = False
 

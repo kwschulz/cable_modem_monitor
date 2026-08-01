@@ -44,9 +44,6 @@ class FormSjclAuthHandler(FormAuthHandler):
         decrypt_aad: AAD string for response decryption from modem.yaml.
         csrf_header: CSRF header name. Empty if no CSRF nonce exchange.
         cookie_name: Session cookie name (empty for IP-based).
-        logout_path: Logout endpoint path (empty if no logout).
-        restart_path: Restart endpoint path (empty if no restart).
-        restart_method: HTTP method for restart.
         session_validation_endpoint: POST endpoint for session finalization
             (empty if no validation step).
     """
@@ -67,17 +64,11 @@ class FormSjclAuthHandler(FormAuthHandler):
         decrypt_aad: str,
         csrf_header: str,
         cookie_name: str = "",
-        logout_path: str = "",
-        restart_path: str = "",
-        restart_method: str = "POST",
         session_validation_endpoint: str = "",
     ) -> None:
         super().__init__(
             login_path=login_endpoint,
             cookie_name=cookie_name,
-            logout_path=logout_path,
-            restart_path=restart_path,
-            restart_method=restart_method,
         )
         self._login_page_path = normalize_path(login_page_path)
         self._pbkdf2_iterations = pbkdf2_iterations
@@ -200,8 +191,5 @@ def create_handler(
         decrypt_aad=auth.decrypt_aad,
         csrf_header=auth.csrf_header,
         cookie_name=action_cfg.cookie_name,
-        logout_path=action_cfg.logout_path,
-        restart_path=action_cfg.restart_path,
-        restart_method=action_cfg.restart_method,
         session_validation_endpoint=auth.session_validation_endpoint,
     )

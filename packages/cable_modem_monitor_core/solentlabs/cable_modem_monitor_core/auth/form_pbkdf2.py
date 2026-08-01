@@ -12,7 +12,7 @@ from typing import Any
 import requests
 
 from ..models.modem_config.auth import FormPbkdf2Auth
-from .base import AuthResult, BaseAuthManager
+from .base import AuthFailureMode, AuthResult, BaseAuthManager
 from .response import parse_json_dict, post_form
 
 _logger = logging.getLogger(__name__)
@@ -31,6 +31,12 @@ class FormPbkdf2AuthManager(BaseAuthManager):
 
     def __init__(self, config: FormPbkdf2Auth) -> None:
         self._config = config
+
+    def auth_failure_mode(self) -> AuthFailureMode:
+        """Login is verified: a wrong password fails the login_success check."""
+        # Proven by test_auth_failure_modes — the mock server rejects a
+        # derived-key mismatch, so a later 401 is not the credential.
+        return AuthFailureMode.SESSION_REJECTED
 
     def headers(self) -> frozenset[str]:
         names = {"cookie"}

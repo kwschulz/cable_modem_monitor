@@ -106,7 +106,7 @@ class TestXmlFormatHardStop:
 # auth:none validation warnings — fixture-driven
 # ---------------------------------------------------------------------------
 
-WARNING_FIXTURES = sorted(WARNING_DIR.glob("*.json")) if WARNING_DIR.is_dir() else []
+WARNING_FIXTURES = collect_fixtures(WARNING_DIR) if WARNING_DIR.is_dir() else []
 
 
 @pytest.mark.parametrize(

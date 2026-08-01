@@ -8,14 +8,14 @@ files; this document explains the choices that shaped them.
 
 | Section | What it covers |
 |---------|----------------|
-| [Package Boundaries](#package-boundaries) | Runtime package split, dependency direction, where each piece lives |
-| [Core Schema Model](#core-schema-model) | What enters Core's schema vs what stays user-side; catalog stores source-faithful strings, display normalizes; derived and dynamic fields, health as its own structure |
-| [Transport and Constraint Model](#transport-and-constraint-model) | Transport as protocol identifier, implicit capabilities, shared protocol primitives, config as parameters |
+| [Package Boundaries](#package-boundaries) | Runtime package split, dependency direction, where each piece lives, specs citing the catalog rather than restating its coverage |
+| [Core Schema Model](#core-schema-model) | What enters Core's schema vs what stays user-side; catalog stores source-faithful strings and maps only observed values, display normalizes; derived and dynamic fields, health as its own structure |
+| [Transport and Constraint Model](#transport-and-constraint-model) | Transport as protocol identifier, generated constraint tables, implicit capabilities, shared protocol primitives, config as parameters |
 | [Auth Architecture](#auth-architecture) | Strategy discreteness, session lifecycle, failure logging, credential reconfiguration as reconstruction |
 | [Parsing Architecture](#parsing-architecture) | Three roles, per-section format selection, parser.py as escape hatch |
 | [Session and Action Model](#session-and-action-model) | Signal/policy separation, session reuse, restart-only actions |
 | [Recovery Architecture](#recovery-architecture) | Restart vs recovery, generic timing, reboot-signal vote, observer callback |
-| [Testing Strategy](#testing-strategy) | HAR replay, greenfield from specs, fresh-context capture |
+| [Testing Strategy](#testing-strategy) | HAR replay, conformance gates every modem, greenfield from specs, fresh-context capture |
 | [Onboarding](#onboarding) | MCP for deterministic steps, catalog_tools owns the spec, inference vs assembly, no fallback |
 | [Config Flow](#config-flow) | Cross-directory grouping, variant label design |
 | [Extension Model](#extension-model) | How to add modems, formats, parsers, auth strategies, transports |
@@ -81,8 +81,7 @@ exists for HA, the documented exception is the honest answer.
 imports in Core (restated from the package-split decision). The HA
 adapter must never call Core from the event loop — blocking calls
 belong in executor jobs, and any blocking I/O found on the loop is
-a bug (see the config-flow `read_text` fix), not a candidate for
-loosening this rule. Everything *around* the boundary is still held
+a bug, not a candidate for loosening this rule. Everything *around* the boundary is still held
 to full strictness: executor discipline, session teardown, graceful
 failure. HA-layer quality audits assess all other quality-scale
 rules at face value and cite this entry for the two declined ones.
@@ -90,16 +89,18 @@ rules at face value and cite this entry for the two declined ones.
 ### Test harness lives in Core, not Catalog
 
 **Decision:** Core owns the test harness (HAR replay framework, golden
-file comparison, schema validators). Catalog contains only data files
-(HAR captures, golden files).
+file comparison, schema validators). Catalog holds per-modem data
+files. Catalog's own suite is fleet-wide — it auto-discovers every
+modem rather than naming any — so no test code is per-modem.
 
 **Rationale:** Catalog contributors cannot accidentally modify test
-assertions or loader logic. Catalog's CI installs Core and runs Core's
-test suite pointed at catalog files. Adding a modem never requires
-writing test code.
+assertions or loader logic. Catalog's CI installs Core and runs both
+Core's harness against catalog files and its own fleet checks. Adding
+a modem never requires writing test code.
 
-**Constrains:** Test assertions cannot be customized per-modem.
-Strategy changes are validated across all modems automatically.
+**Constrains:** Test assertions cannot be customized per-modem, and a
+catalog test may not name a specific modem. Strategy changes are
+validated across all modems automatically.
 
 ### Test harness lives in Core, not catalog_tools
 
@@ -187,12 +188,14 @@ decision update.
 **Decision:** `pydantic>=2.0` is declared in Core's
 `[project] dependencies`, not gated behind an optional extra.
 
-**Rationale:** Core's `models/` package defines `ModemConfig`,
-`ParserConfig`, and `ModemData` as Pydantic `BaseModel` subclasses.
+**Rationale:** Core's `models/` package defines the config schemas —
+`ModemConfig` and `ParserConfig` — as Pydantic `BaseModel` subclasses.
 They are imported by runtime consumers —
 `core/validation/cross_file.py`, `core/orchestration/*`,
 `core/test_harness/runner.py`. A clean non-HA install of Core cannot
-function without pydantic.
+function without pydantic. `ModemData` is a `TypedDict`, not a model:
+it is parser output, validated by the conformance gate rather than at
+construction.
 
 Prior to the v3.14 carve-out, pydantic was mis-declared as
 `[project.optional-dependencies] mcp = ["pydantic>=2.0"]`. The bug
@@ -214,6 +217,33 @@ named `cable_modem_monitor_*`.
 
 **Rationale:** PyPI uniqueness, consistent branding, and a name that
 ties the libraries to the HA integration they power.
+
+---
+
+### Specs cite catalog artifacts; they never enumerate coverage
+
+**Decision:** A modem model named in a Core spec links to the catalog
+file that evidences the claim. Specs never carry a list of which
+modems a strategy, transport, or format covers.
+
+**Rationale:** The catalog is the single source of truth for coverage,
+and it is the only copy anything enforces — the index and audit are
+generated and CI fails when they drift, and `link-check` fails when a
+citation stops resolving. A bare model name in prose has neither gate,
+so it is wrong the moment the fleet moves and nothing says so.
+ARCHITECTURE.md claimed the CBN strategy covered `CH7465MT, CH7466CE,
+CH7465CE`: a list naming one model no source supports, omitting the
+SB8200 CBN variant the catalog does carry. MODEM_YAML_SPEC.md repeated
+the same model, with no source behind it, inside a paragraph headed
+"Evidence:".
+
+**Constrains:**
+
+- A model name earns its place by linking to that modem's
+  `modem.yaml`, `parser.yaml`, or a file under its `test_data/`.
+  CHANNEL_IDENTIFICATION_SPEC.md is the reference example.
+- Coverage questions are answered by the generated catalog index and
+  CATALOG_AUDIT.md, never by prose in a spec.
 
 ---
 
@@ -294,14 +324,59 @@ evidence the fleet actually exhibits.
 
 ---
 
-### `last_boot_time` is derived in Core
+### Catalog maps only values its own capture shows
 
-**Decision:** Core computes `last_boot_time` from uptime when the modem
-does not report a boot timestamp directly.
+**Decision:** A `map:` block in parser.yaml enumerates values observed
+in that modem's own HAR. Anticipatory entries for values the capture
+does not contain are not added, and existing ones are removed when
+found.
 
-**Rationale:** Transparent to consumers — the same field is present
-whether the firmware provides it or Core calculates it. Consumers never
-branch on which modem they are talking to.
+**Rationale:** An unobserved mapping is a guess about firmware nobody has
+seen, and it is indistinguishable from evidence once committed. The
+guess is also silently wrong-able: `TDMA` was mapped to `atdma` on
+three modems and to `ofdma` on four, and the first group had no
+capture supporting either target. With 40+ HARs on hand, "we have not
+seen it" is a conclusion, not a gap to paper over.
+
+**Constrains:**
+
+- The exception is documented platform knowledge shared across a
+  firmware family, where a sibling's capture supplies the evidence and
+  a spec or journal entry records the reasoning. The Technicolor
+  `.jst` three-way upstream map is the standing example.
+- Where a value genuinely has not been seen, leave it unmapped and let
+  it surface. A field-level `map:` passes unmapped values through, so
+  an unknown string reaches output rather than being silently
+  mislabeled, which is the signal that earns a real capture.
+
+---
+
+### Time-anchored derivations belong to the consumer, not Core
+
+**Decision:** Core reports `system_uptime` as the modem gives it and
+computes no boot timestamp. The HA adapter owns Last Boot Time,
+deriving it from `system_uptime` where the modem reports one and from
+orchestrator counter-reset evidence (`stats_last_reset`) where it does
+not. See ENTITY_MODEL_SPEC § Boot-time source normalization.
+
+**Rationale:** A timestamp needs a clock to anchor it and somewhere to
+persist it. Core has neither: it is stateless per poll, and the only
+clock available to it is the modem's, whose timezone and sync state
+are unknowable. The consumer has both, so the derivation lives there.
+
+Deriving per poll would be wrong in any case. `now - uptime` drifts a
+few seconds each poll, writing a new recorder row for a value that
+changes only on reboot. The adapter replaces the held value only on
+reboot evidence: an uptime decrease, unambiguous because uptime is
+monotonic within a boot, or a shift beyond a jitter tolerance.
+
+**Constrains:** This is the rule for any field needing a clock or
+history to compute, and it marks the limit of § Core's schema tracks
+fleet-observed metrics. That entry admits derived fields that
+re-present a fleet datum; re-presentation is stateless arithmetic on a
+single poll, anchoring is not. If a modem ever reports a native boot
+time, subtract it from that modem's own reported current time so its
+clock cancels.
 
 ---
 
@@ -362,6 +437,35 @@ modem inventory and stress test results.
 they receive. HTML formats expect `BeautifulSoup`, structured formats
 expect `dict`. Misconfigured modem.yaml is rejected at load time.
 
+### The published constraint tables are generated, not written
+
+**Decision:** The auth, format, and action models are the single
+authoritative source for the transport constraint. The tables in
+ARCHITECTURE.md and MODEM_YAML_SPEC.md are rendered from those models
+by `scripts/generate_constraint_tables.py` into marked regions;
+`tests/models/test_constraint_tables.py` fails when a doc is stale.
+Rules derived from the same source — login-page detection reads
+`stateless` and `transport` off the strategy — do not restate the
+table either.
+
+**Rationale:** The constraint lived in four hand-maintained places and
+three of them were wrong: both ARCHITECTURE tables omitted `bearer`
+(shipped and in use on `sagemcom/f3896lg-vmb`), ARCHITECTURE listed
+`xml` as an HTTP format when it is CBN-only, and both docs omitted
+`javascript_vars`. Nothing failed, because nothing compared them.
+Reading ARCHITECTURE alone therefore produced wrong conclusions about
+which strategies exist. A doc that restates a machine-checkable fact
+is a doc that will disagree with the code eventually; generation
+removes the opportunity rather than adding a review step.
+
+**Constrains:** Two columns carry no model behind them (the loader
+class and the session mechanism) and live in `_TRANSPORT_PROSE` in
+the generator, keyed by transport. A transport with no entry fails
+generation instead of rendering a blank cell. The three-axis Mermaid
+diagram in ARCHITECTURE.md still enumerates values by hand — a
+generated region inside a diagram node would be unreadable — so its
+contents are gated by test instead.
+
 ### Capabilities are implicit from parser output
 
 **Decision:** No `capabilities` field in modem.yaml. A mapping in
@@ -373,9 +477,21 @@ actual parser output. The parser output is the single source of truth.
 Absent capability = absent entity — no greyed-out buttons, no "not
 supported" placeholders.
 
-**Constrains:** The only way to declare a capability is to implement
-the extraction. The exception is `actions.restart` in modem.yaml, which
-declares restart capability (a modem command, not parsed data).
+**Constrains:** For parsed data, the only way to declare a capability
+is to implement the extraction. Two entity groups sit outside parser
+output and are gated differently:
+
+- `actions.restart` in modem.yaml declares restart capability — a
+  modem command, not parsed data.
+- The ICMP and HEAD latency sensors follow probe results held on the
+  config entry, not a catalog declaration. `health.supports_icmp`
+  seeds a default and `health.supports_head` sets a ceiling, but setup
+  probes the network and the probe decides. ICMP reachability is a
+  property of the network rather than the modem, so it cannot be
+  declared in the catalog at all.
+
+`actions.logout` is session lifecycle, not a capability; it creates no
+entity.
 
 ---
 
@@ -422,11 +538,11 @@ See MODEM_YAML_SPEC § Principles.
 ### Discrete strategies, not composable primitives
 
 **Decision:** Auth is a discriminated union of self-contained strategy
-types (`none`, `basic`, `form`, `form_nonce`, `url_token`, `hnap`,
-`form_pbkdf2`, `form_sjcl`, `form_cbn`). Each strategy has a
-per-strategy dataclass and a single audited implementation. The
-alternative — a toolkit of composable primitives (encoding, CSRF,
-nonce generation) that you mix and match per-modem — was rejected.
+types; `_AUTH_MODELS` in `models/modem_config/auth.py` is the
+authoritative list. Each strategy has a per-strategy model and a single
+audited implementation. The alternative — a toolkit of composable
+primitives (encoding, CSRF, nonce generation) that you mix and match
+per-modem — was rejected.
 
 **Rationale:** The boundary between "separate strategy" and "config
 flag" is structural behavior — how the auth protocol works. `form_nonce`
@@ -438,14 +554,15 @@ AJAX-style login are all config flags on `form` — same
 POST-evaluate-redirect flow.
 
 **Constrains:** Adding a new auth strategy requires a new dataclass
-(with `display_name` and `transport` ClassVars), a new
+(with `display_name`, `transport`, and `stateless` ClassVars), a new
 `BaseAuthManager` subclass with a `create_manager()` entry point,
 and a new entry in the `AuthConfig` union. The factory dynamically
 imports the manager module by strategy literal — no factory code
 changes, no isinstance chains, no manual registry updates. Display
-labels and transport validation sets derive from the ClassVars
-automatically. No per-modem auth hooks — all variation is modem.yaml
-config.
+labels, transport validation sets, login-page detection, and the
+constraint tables published in the specs all derive from the
+ClassVars automatically. No per-modem auth hooks — all variation is
+modem.yaml config.
 
 ### No per-modem auth hooks
 
@@ -504,7 +621,7 @@ regression.
 **Constrains:** No `logout_url` or `logout_required` convenience
 fields. `actions.logout` presence drives single-session semantics;
 `HttpAction.requires_session` controls whether the pre-retry logout
-call is guarded by cookie presence. Auth strategies that don't use
+call is guarded by session validity. Auth strategies that don't use
 cookies leave `cookie_name` empty (default).
 
 ### Session concurrency — SSOT via `actions.logout`
@@ -523,29 +640,117 @@ a logout block without `max_concurrent: 1`, silently disabling logout.
 
 **New field:** `HttpAction.requires_session: bool = False` distinguishes
 unauthenticated logout endpoints (`false` — can clear any active server-side
-session without a cookie; safe to call during pre-retry recovery) from
-session-scoped endpoints (`true` — skip the pre-retry call when Core has no
-valid cookie, since it would fail anyway and the retry proceeds regardless).
+session without credentials; safe to call during pre-retry recovery) from
+session-scoped endpoints (`true` — skip the pre-retry call when the session
+is not valid, since it would fail anyway and the retry proceeds regardless).
+
+**The guard tests session validity, not cookie presence.** It originally
+read the cookie jar, which is equivalent for every cookie-based strategy but
+wrong for header-authenticated ones: `bearer` holds a live session in
+`session.headers["Authorization"]` with an empty jar, so a cookie test would
+silently skip logout on exactly the modems that most need it. `session_is_valid`
+already answers this per strategy — HNAP checks uid plus private key, cookie
+strategies check `auth.cookie_name`, `url_token` checks the token — so the
+guard delegates to it rather than reimplementing a narrower check.
 CBN transport always embeds the session token by protocol; `requires_session`
 is absent from `CbnAction` by type-system design.
 
-**Fleet values (2026-06-10):** MB7621 GET `/logout.asp` and SB8200 basic GET
-`/logout.html` — no cookie in HAR request → `requires_session: false`.
-TG3442DE — logout present in YAML but no logout request captured in HAR →
-`requires_session: true` (conservative; contributor verification open).
+**How intake picks the value:** a logout request captured in the HAR without
+a session cookie is evidence for `false`. Absent that evidence — the YAML
+declares logout but the capture never shows the call — the value is `true`,
+which costs a skipped logout rather than a failed one. The catalog carries
+the current settings; `rg requires_session` over `modems/` is the list.
 
 **Constrains:** Any modem with `actions.logout` configured is treated as
 single-session. There is no mechanism to configure logout without triggering
 single-session semantics.
+
+### Post-login 401 is read per auth strategy
+
+**Decision:** `BaseAuthManager.auth_failure_mode()` returns how a 401/403
+arriving *after* a successful `authenticate()` should be read. The base
+returns `CREDENTIALS_SUSPECT`; a strategy overrides to `SESSION_REJECTED`
+only when it rejects a bad password at login time, or to `NOT_CONFIGURED`
+when it sends no credential at all and a 401 therefore means the catalog
+entry is wrong rather than the password. `AuthFailureMode` in
+`auth/base.py` is the authoritative set. Core's failure hint and the HA
+config-flow error key both derive from it.
+
+**Rationale:** `LOAD_AUTH` does not mean the login succeeded — it means the
+strategy *believed* it did. `basic` never validates a credential at all
+(`auth/basic.py` sets `session.auth` and returns success), and plain `form`
+accepts any response under HTTP 400. For those, a later 401 is usually the
+bad password surfacing late. Telling that user "this is not a username or
+password problem" is a dead end; telling a user with good credentials to
+check their password is merely unhelpful. The default is therefore
+pessimistic, and overriding is a claim.
+
+**Proven, not assumed.** A strategy may declare `SESSION_REJECTED` only
+with a bad-password test showing `success=False`. Today that is
+`form_pbkdf2` and `hnap` — the two the mock harness can reject. The others
+likely do verify, but the harness cannot yet simulate a rejected login for
+them, so the claim is unpaid and they keep the conservative default.
+Adding harness rejection plus its test is the price of flipping one.
+
+**Constrains:** The knowledge lives on the strategy, not in an `isinstance`
+chain in the orchestration layer — this replaced one that had drifted into
+asserting verification that never happened. `modem.yaml` gains no field;
+catalog contributors are unaffected. `test_auth_failure_modes.py` fails
+when a new strategy has no declared mode.
+
+**Regression:** beta.17 mapped every `LOAD_AUTH` to a "your login worked"
+message, so a wrong password on a `basic` or `form` modem reported that the
+credentials were fine.
+
+### Post-login endpoints are session lifecycle, not an auth hook
+
+**Decision:** `session.post_login_endpoints` lists paths Core GETs on
+every successful fresh login, from inside `authenticate()`. A non-2xx
+response or a transport error logs a WARNING and collection continues.
+
+Owned by `authenticate()` rather than by a step in `execute()`, because
+the calls establish the session rather than precede the data fetch. That
+placement is also what reaches the restart path, where `restart.py`
+authenticates and dispatches its action without entering `execute()` —
+firmware that needs the call to consider a session established needs it
+before a restart POST too.
+
+**Rationale:** This does not contradict "No per-modem auth hooks" above.
+Nothing here touches credentials: no secret is sent beyond the session
+cookie already on the wire, no token is read back, and the response is
+discarded. It is a lifecycle call the firmware expects between login and
+data, which is exactly what the session section owns.
+
+Log-and-continue rather than fail-fast, because login *did* succeed:
+`AUTH_FAILED` renders as "check username / password" and would send a
+user to re-verify working credentials. If the call really was required,
+the data fetch fails on its own and produces two log lines — this
+warning naming the missed call, plus the data-page 401 with its body
+(see § Auth-failure detail via single WARNING log). Making a discarded
+response fatal would also let a transient hiccup, or firmware moving the
+path, kill monitoring on a modem that was working.
+
+**Evidence:** #120 Technicolor CGA6444VF — `/api/v1/session/menu` is the
+first authenticated request in the contributor HAR and the only path in
+it that ever returns 401. The independent headless client
+totev/vodafone-station-cli (MIT) ends its Technicolor `login()` with the
+same GET, which a CLI has no UI reason to make.
+
+**Constrains:** Ordered, best-effort, fresh-login only. Carries
+`session.query_params` like every other fetch. No response parsing, no
+conditional or templated paths, no per-modem retry policy.
 
 ### Auth-failure detail via single WARNING log
 
 **Decision:** When the collector's auth phase fails, it emits one
 sanitized ``WARNING`` log carrying the modem's response — strategy
 name, request line, response status + Content-Type, and a short
-body snippet with the user's password scrubbed. There is no
-transport-layer adapter, no scoped capture, no separate entry
-point, no structured ``AuthExchange`` type, and no
+body snippet with the user's password scrubbed. A data page that
+returns 401 or 403 *after* a successful login emits the same detail
+as ``HttpStatusError``: it is the same diagnostic question one phase
+later, and answering it only for the login request is what stalled
+issue #120. There is no transport-layer adapter, no scoped capture,
+no separate entry point, no structured ``AuthExchange`` type, and no
 ``har-capture`` dependency.
 
 **Rationale:** The motivating issues (#86 Arris TG3442DE, #104
@@ -584,9 +789,8 @@ maintainer needs to confirm the strategy ran.
 ``LOAD_INTEGRITY`` signal (zero fulfilled anchors for an expected
 resource), the stub response body is captured in
 ``OrchestratorDiagnostics.last_stub_body`` — a ``dict[str, str]``
-keyed by resource path, value truncated to ≤500 characters. It
-persists across successful polls until the next ``LOAD_INTEGRITY``
-event.
+keyed by resource path, stored whole. It persists across successful
+polls until the next ``LOAD_INTEGRITY`` event.
 
 **Rationale:** ``LOAD_INTEGRITY`` means the session expired and the
 modem returned a JS redirect stub instead of channel data. This
@@ -641,10 +845,10 @@ loader's exception message means the contributor's first failure
 log paste IS the diff input.
 
 **Constrains:** Auth strategies own which header names carry
-session tokens — they declare them via ``BaseAuthManager.headers()``
-(default ``frozenset({"cookie"})``; ``Basic`` adds
-``authorization``; ``HNAP`` adds ``hnap_auth``; ``form_sjcl`` /
-``form_pbkdf2`` add the configured ``csrf_header``). Loaders treat
+session tokens — they declare them via ``BaseAuthManager.headers()``,
+which defaults to ``frozenset({"cookie"})`` and is overridden by every
+strategy that puts a credential somewhere else. That method is the
+authoritative set; this entry does not restate it. Loaders treat
 this set as opaque — a Core-layer ``headers`` parameter, no
 "sensitive" qualifier in the loader API. The wire request is never
 modified; redaction only applies when ``describe_request`` formats
@@ -727,12 +931,24 @@ using them to choose the strategy.
 ### `AuthResult.auth_context` is typed
 
 **Decision:** Auth strategies store downstream state in an
-`AuthContext` dataclass with named fields (`url_token`, `private_key`),
-which the runner reads by attribute based on `modem_config.transport`.
+`AuthContext` dataclass with named fields (`url_token`, `private_key`,
+`token`, `user_id`), which the runner reads by attribute based on
+`modem_config.transport`.
 
 **Rationale:** Adding a transport means adding a field, not inventing a
 magic string key. `cbn` needs no field at all — its session token lives
 in cookies managed by `requests.Session`.
+
+**Extended for action endpoints (F3896LG, #185).** `token` and `user_id`
+were added when a firmware turned out to end its session with
+`DELETE /rest/v1/user/{userId}/token/{token}` — both values live in the
+login response and neither is a cookie. They are surfaced to action
+endpoints as `{auth:token}` and `{auth:user_id}`, so the same named-field
+rule now governs two consumers: the resource loader and the action
+executor. The alternative, letting modem.yaml address the login response
+by JSON path, was rejected in MODEM_YAML_SPEC.md § Architecture Decision:
+a fixed key set, not a template language. A third value is a third field
+here, not a new syntax there.
 
 ---
 
@@ -741,18 +957,16 @@ in cookies managed by `requests.Session`.
 ### Three roles: BaseParser, ModemParserCoordinator, parser.py
 
 **Decision:** Parsing has three distinct roles instead of a single
-class hierarchy. `BaseParser` (ABC) is the extraction interface with
-seven format-specific implementations — including `StructuredParser`
-(ABC), an intermediate base for `JSONParser` and `XMLParser` that
-holds the shared dict-path extraction pipeline.
-`ModemParserCoordinator` is the factory and orchestrator. `parser.py`
-is an optional post-processor.
+class hierarchy. `BaseParser` (ABC) is the extraction interface, one
+implementation per format. `ModemParserCoordinator` is the factory and
+orchestrator. `parser.py` is an optional post-processor.
 
 **Rationale:** The original design conflated extraction, orchestration,
 and customization into one class — a god class risk. Separating them
-makes each independently testable. The coordinator is a thin ~50-line
-orchestrator. Extraction complexity lives in `BaseParser`
-implementations. parser.py is a hook, not an inheritance override.
+makes each independently testable. The coordinator sequences extraction
+and post-processing and owns nothing else; extraction complexity lives in
+`BaseParser` implementations, and parser.py is a hook, not an inheritance
+override.
 
 **Constrains:** parser.py cannot subclass `BaseParser` or the
 coordinator. It receives extraction output + raw resources and returns
@@ -866,12 +1080,17 @@ independent test data and independent confirmation status.
 ### Coordinator parser registry
 
 **Decision:** Section type maps to parser function through a dict, not
-an isinstance chain. Unimplemented formats are registered stubs that
-raise `NotImplementedError` naming the missing parser.
+an isinstance chain. The dict is derived from the format-model lists
+rather than hand-maintained, so a format registered without a wrapper
+fails at import. A section type with no entry raises
+`NotImplementedError` naming the model class, at the lookup site.
 
-**Rationale:** Adding a format is one registry entry plus the parser.
-The stubs make an unsupported format fail with a useful name instead of
-falling through to a generic error.
+**Rationale:** Adding a format is one wrapper entry plus the parser.
+Deriving the dict from the model lists means the two cannot drift: the
+comprehension indexes the wrapper table by `format_tag`, so a missing
+wrapper is an import-time failure rather than something discovered on
+the first modem that uses the format. Both failure paths name what is
+missing instead of falling through to a generic error.
 
 ---
 
@@ -887,12 +1106,13 @@ error reporting).
 to do about it, callers inherit hidden policy they can't override.
 Keeping signal and policy separate gives the orchestrator full
 visibility and full control. Auth strategies raise
-`LoginLockoutError` but don't track lockout state. The orchestrator
-sets backoff counters and suppresses login attempts.
+`LoginLockoutError` but don't track lockout state or decide the
+response; `SignalPolicy` trips the circuit breaker (see § Session
+reuse across polls for why lockout stops rather than backs off).
 
 **Constrains:** Protocol layers never retry, back off, or decide what
-to do about failures. All policy state (backoff counters, session
-reuse decisions) lives on the orchestrator.
+to do about failures. All policy state (failure streaks, connectivity
+backoff, session reuse decisions) lives on the orchestrator.
 
 ### Session reuse across polls
 
@@ -901,19 +1121,24 @@ valid sessions instead of re-authenticating every cycle.
 
 **Rationale:** HNAP modems have firmware anti-brute-force that can lock
 out or reboot the modem after repeated login attempts (HNAP modem
-firmware `LOCKUP` and `REBOOT` states). Session reuse
-is the primary defense. Backoff (3-poll suppression on lockout) is the
-safety net.
+firmware `LOCKUP` and `REBOOT` states). Session reuse is the primary
+defense. The safety net is the circuit breaker: a lockout signal stops
+polling outright rather than backing off, because a modem that is
+refusing logins to protect itself gains nothing from a slower retry.
 
 **Constrains:** Session state must be maintained across polls. Stale
 session detection requires a within-poll retry mechanism (zero channels
-on reused session → clear and retry once).
+on reused session → clear and retry once). Reuse also disables itself:
+after `stale_recovery_threshold` consecutive same-poll recoveries,
+`SignalPolicy` stops attempting it for the rest of the runtime, so
+firmware with a chronically short session TTL does not burn the first
+request of every poll on a session it has already expired.
 
 ### Two modem-side actions only
 
 **Decision:** Two actions: restart (user-triggered) and logout
-(system-triggered). Both share the same action schema with two type
-discriminators: `http` and `hnap`.
+(system-triggered). Both draw on the same `ActionConfig` union, which
+carries one type discriminator per transport.
 
 **Rationale:** The integration's purpose is read-only monitoring.
 Restart is the sole state-changing action — a security and
@@ -926,14 +1151,32 @@ expanding the action model. This is intentional.
 
 ---
 
-### Health probe order: ICMP, then HEAD, then data poll
+### Health probes are independent layers, not an escalation chain
 
-**Decision:** Use the lightest probe the modem supports, escalating
-only when the lighter one is unavailable.
+**Decision:** ICMP, HEAD, and TCP each measure a different layer. All
+run when the modem supports them; none is a fallback for another.
+Status comes from ICMP + TCP. HEAD measures latency only and never
+changes status. A recent successful collection skips HEAD and TCP,
+which would only re-prove what it already showed. For probe order and
+per-configuration outcomes, see ORCHESTRATION_SPEC § Probe
+Configurations.
 
-**Rationale:** Never hammer a modem's web server to answer a question a
-ping can answer. Consumer modem HTTP stacks are weak, and health runs
-far more often than parsing.
+**Rationale:** One HTTP-latency number was averaging two different
+things: the modem's cached response and its handler execution. The same
+modem read ~5ms or ~100ms depending on the network path, so the number
+meant something different from one poll to the next (wire-traced,
+2026-04-29). Separate probes keep them apart. They also make
+misconfiguration readable — a reachable IP with a listening socket but
+the wrong firmware now looks different from a dead modem. Escalation
+would not do this: a passing ICMP says nothing about whether the web
+server is listening.
+
+**Constrains:** Never hammer a modem's web server for something a
+cheaper probe answers. That rule lives in the skip gate and the
+`supports_head` guard, not in probe ordering. Two things look like bugs
+and are not: HEAD runs before TCP so a single-threaded modem gets an
+uncontested connection, and a failed ICMP forces TCP past the skip gate
+so stale evidence cannot outvote a live probe (UC-59a).
 
 ---
 
@@ -967,7 +1210,8 @@ the dashboard tells the user what's actually happening.
 
 **Constrains:** Restart never waits, never times out, never
 cancels. Its only failure mode is `command_failed` (auth or action
-executor raised). Recovery cannot be triggered by caller request
+executor raised, or the executor reported failure).
+Recovery cannot be triggered by caller request
 other than the three defined paths (command, observed failure,
 reboot-signal check). Consumers cannot observe recovery window
 progress — they see the snapshot stream and react to that.
@@ -1054,9 +1298,12 @@ module then. Not now.
 **Decision:** `Orchestrator.set_recovery_observer(callback)` lets
 the HA adapter register a callable that fires when
 `recovery_active` flips (False→True on window entry, True→False on
-window exit). HA wires this to `dispatcher_send` so the data
-coordinator switches between normal and recovery cadence, and the
-restart button's enabled state updates promptly.
+window exit). HA wires this to `dispatcher_send`, and its one
+subscriber swaps the data coordinator between normal and recovery
+cadence. Consumers that only need to read the flag do so directly;
+the restart button is deliberately not among them — overlapping
+presses are refused by the operation mutex, not by recovery state,
+so a user whose modem is still flakey may retry.
 
 **Rationale:** Core cannot import `homeassistant.*` (principle #3).
 Polling `recovery_active` from HA would lag by a coordinator cycle
@@ -1083,9 +1330,9 @@ per-reading boolean (RESPONSIVE and ICMP_BLOCKED are up; DEGRADED,
 UNRESPONSIVE, and UNKNOWN are down). Recovery is a down → up edge of
 that boolean. No consumer enumerates health states or state
 transitions for reachability decisions. Current consumers: Core's
-connectivity-backoff clear (ORCHESTRATION_SPEC § get_modem_data
-step 2) and the HA adapter's health sync listeners (HA_ADAPTER_SPEC
-§ Health Sync Listeners).
+connectivity-backoff clear (ORCHESTRATION_SPEC § Collection Flow) and
+the HA adapter's health sync listeners (HA_ADAPTER_SPEC § Health Sync
+Listeners).
 
 **Rationale:** State enumeration produced three field bugs from the
 same root: a startup UNKNOWN misread as recovery, DEGRADED missing
@@ -1117,7 +1364,7 @@ code or tests is not a durable record.
 
 ### HAR replay as integration tests
 
-**Decision:** Each modem's `tests/` directory contains HAR captures
+**Decision:** Each modem's `test_data/` directory contains HAR captures
 (pipeline input) and expected output golden files (assertions). The
 test harness replays each HAR through the `HARMockServer`, runs the full
 pipeline, and compares output against the golden file.
@@ -1129,7 +1376,34 @@ implementation changes, all modems using that format are automatically
 retested (regression firewall).
 
 **Constrains:** Adding a modem requires a HAR capture and a reviewed
-golden file. No test code in Catalog — only data files.
+golden file, and no per-modem test code.
+
+### Spec conformance gates every modem, not just confirmed ones
+
+**Decision:** `test_modem_golden_spec_conformance` validates every
+committed golden against PARSING_SPEC field contracts regardless of
+`status:`. The earlier exemption for `awaiting_verification` and
+`unsupported` entries is removed.
+
+**Rationale:** The exemption made the check a promotion gate rather than a
+regression gate: it fired once, at the moment a modem was declared
+ready. Drift accumulated invisibly in onboarding entries and then
+surfaced as a CI failure mid-confirmation, with a contributor waiting
+— twice, on the XB7 (#107) and the XB6 (#111). Six entries had
+accumulated non-canonical modulation output by the time the second one
+hit. Catching a violation on the commit that introduces it costs the
+author minutes; catching it at promotion costs a contributor days.
+
+**Constrains:**
+
+- A new catalog entry must be conformant on the commit that adds it.
+  Landing drift and cleaning it up at confirmation time is no longer
+  available, and downgrading `status:` no longer exempts an entry.
+- Contributor PRs can now fail on a conformance rule during intake.
+  The failure message names the field, the rule, and the value, and
+  directs to the parser rather than the golden.
+
+---
 
 ### Greenfield from specs, not migration from prior versions
 
@@ -1161,18 +1435,21 @@ cannot prove how login works — see MODEM_INTAKE_WORKFLOW § Step 2.
 
 ## Onboarding
 
-### MCP tools for deterministic steps, Claude for judgment
+### Deterministic steps are code, Claude supplies judgment
 
-**Decision:** An MCP server provides structured tools for modem
-onboarding. Deterministic steps (HAR parsing, transport detection,
-config generation, validation, test execution) are code. Claude handles
-judgment calls (ambiguous HTML formats, metadata web search, test
-failure diagnosis). The user handles approval.
+**Decision:** Deterministic steps (HAR parsing, transport detection,
+config generation, validation, test execution) are ordinary importable
+modules in `catalog_tools`. Claude handles judgment calls (ambiguous
+HTML formats, metadata web search, test failure diagnosis), driven by
+the `modem-intake` skill. The user handles approval.
 
-**Rationale:** Deterministic logic in MCP tools is repeatable and
-testable — not dependent on LLM reasoning for correctness. The
-config constraints (transport, auth, format) form the decision framework.
-Ambiguity is a hard stop, not a guess.
+**Rationale:** Deterministic logic in code is repeatable and testable —
+not dependent on LLM reasoning for correctness. The config constraints
+(transport, auth, format) form the decision framework. Ambiguity is a
+hard stop, not a guess. The split is what matters, not the delivery
+mechanism: an earlier iteration exposed the same steps through an MCP
+server, and carving `catalog_tools` out of Core replaced it with plain
+modules a contributor can also call directly.
 
 **Constrains:** HAR validation is a gate — post-auth-only HARs,
 missing auth flows, and ambiguous transports halt analysis. No guessing.
@@ -1244,7 +1521,10 @@ Add a directory under `modems/{manufacturer}/{model}/` with:
 - `modem.yaml` — identity, auth, session, hardware, metadata
 - `parser.yaml` — declarative extraction config
 - `parser.py` — optional post-processor (only if needed)
-- `tests/modem.har` + `tests/modem.expected.json` — HAR and golden file
+- `test_data/modem.har` + `test_data/modem.expected.json` — HAR and
+  golden file
+- `test_data/modem.verified.json` — required to reach `confirmed`
+  status; see MODEM_DIRECTORY_SPEC § Verification Status
 
 No registration. No changes to Core or Catalog package code. Drop-in.
 
@@ -1273,15 +1553,21 @@ editing format-list frozensets in multiple files.
 3. **`parsers/formats/{format}.py`** — implement the `BaseParser`
    subclass.
 4. **`parsers/registries.py`** — define the wrapper that adapts the
-   parser to `(section, resources) -> list[dict]` (or `dict` for
-   sysinfo) and add a `format_tag → wrapper` entry to
-   `_CHANNEL_WRAPPERS_BY_TAG` (or `_SYSINFO_WRAPPERS_BY_TAG`). The
-   model→callable dict is built by zipping the registry list with
-   this table — a missing entry raises at import time.
+   parser to `tuple[list[dict], AnchorCount]` (channels) or
+   `tuple[dict, AnchorCount, dict[str, str]]` (sysinfo), and add a
+   `format_tag → wrapper` entry to `_CHANNEL_WRAPPERS_BY_TAG` (or
+   `_SYSINFO_WRAPPERS_BY_TAG`). The model→callable dict is built by
+   looking each model's `format_tag` up in that table, so ordering
+   does not matter — a missing entry raises at import time.
+5. **Regenerate the published tables** —
+   `python scripts/generate_constraint_tables.py`. The valid-formats
+   column of the constraint tables in ARCHITECTURE.md and
+   MODEM_YAML_SPEC.md derives from `transports`;
+   `tests/models/test_constraint_tables.py` fails if it is stale.
 
 **Why ClassVars on the model.** Auth strategies already use this
-pattern (`AuthStrategyBase` with `display_name`/`transport` ClassVars +
-`_AUTH_MODELS` list). Format metadata is the same shape: a few
+pattern (`AuthStrategyBase` with `display_name`/`transport`/`stateless`
+ClassVars + `_AUTH_MODELS` list). Format metadata is the same shape: a few
 attributes that cross-cutting machinery needs to know about. Putting
 them on the model keeps everything about a format colocated and lets
 the loader, validator, and registry derive their views.
@@ -1321,7 +1607,13 @@ access do not belong here.
 
 1. **`models/modem_config/auth.py`** — three co-located additions:
    - Define the model class inheriting from `AuthStrategyBase` with
-     `display_name` and `transport` ClassVars.
+     `display_name`, `transport`, and `stateless` ClassVars.
+     `stateless` is true only when the strategy establishes no
+     server-side session: `none` sends no credential and `basic`
+     re-sends it on every request, so neither holds anything that can
+     expire mid-poll. Everything else obtains a session artefact at
+     login and is stateful, which is what turns on login-page
+     detection.
    - Add an `Annotated[NewAuth, Tag("strategy_name")]` member to the
      `AuthConfig` union.
    - Add the class to the `_AUTH_MODELS` registry list (immediately
@@ -1330,15 +1622,19 @@ access do not belong here.
    `create_manager(config)` entry point.
 3. **`test_harness/auth/{strategy}.py`** — new handler module with a
    `create_handler(modem_config, har_entries)` entry point.
+4. **Regenerate the published tables** —
+   `python scripts/generate_constraint_tables.py`.
 
-Three files, all additive. No factory code changes — the factory
-dynamically imports the manager module by strategy literal. Display
-labels and transport validation sets derive from the model ClassVars.
-No existing strategy code is touched.
+Three files plus a regeneration, all additive. No factory code changes
+— the factory dynamically imports the manager module by strategy
+literal. Display labels, transport validation sets, and login-page
+detection derive from the model ClassVars. No existing strategy code
+is touched.
 
 **If you forget a step:** missing union member → modem.yaml fails to
 parse at config load time. Missing `_AUTH_MODELS` entry → display
-label and transport validation missing, caught by fleet test. Neither
+label and transport validation missing, caught by fleet test. Skipped
+regeneration → `tests/models/test_constraint_tables.py` fails. No
 failure is silent.
 
 **Strategy selection is config-driven** — declared in modem.yaml,
@@ -1346,19 +1642,21 @@ never guessed at runtime. The dynamic import resolves a declared
 strategy to its implementation; it does not discover which strategy
 to use.
 
-**If the strategy pre-fetches a login page, use the response.** Four
-of nine strategies pre-fetch a page as part of the auth handshake
-(`form`, `form_sjcl`, `form_cbn`, `url_token`). Each extracts
-session-specific state from the response — hidden fields, crypto
-parameters, cookies, or tokens. The pre-fetch establishes session
-cookies as a side effect, but its primary purpose is reading the
-data the handshake needs. Discarding the response body is a bug.
+**If the strategy pre-fetches a login page, use the response.** Several
+strategies GET a page as part of the auth handshake and extract
+session-specific state from it — hidden fields, crypto parameters,
+cookies, or tokens. The pre-fetch establishes session cookies as a side
+effect, but its primary purpose is reading the data the handshake
+needs. Discarding the response body is a bug.
 
 ### How to add a transport
 
 Add a new loader (new value type), new `BaseParser` implementation(s)
-that consume that type, a new row in the constraint table, and
-validator updates. No existing code changes.
+that consume that type, a new action model, the transport literal on
+`ModemConfig.transport`, and a `_TRANSPORT_PROSE` entry in
+`scripts/generate_constraint_tables.py` for the two columns no model
+carries (loader and session). Then regenerate. No existing code
+changes.
 
 ---
 
@@ -1386,21 +1684,31 @@ stored as `_selected_modem_dir` on the config flow and used for all
 downstream steps (auth strategy resolution, connection validation, config
 entry storage).
 
-### Hardware version as the user-facing variant discriminator
+### The variant name is the user-facing discriminator
 
-**Decision:** `hardware.hw_version` is the field shown in the variant
-dropdown when multiple entries share the same auth strategy. `hardware.firmware`
-is recorded as catalog metadata but not shown in the UI.
+**Decision:** The variant picker labels each entry with its auth
+strategy and the variant's own name, taken from the filename stem.
+`hardware.hw_version` is added only when two variants would otherwise
+read identically. `hardware.firmware` is catalog metadata and is never
+shown.
 
-**Rationale:** Hardware version is printed on the modem sticker — users can
-physically verify it without navigating the modem's web UI. Firmware codes
-(AB01, TB01) are meaningful to contributors and maintainers but opaque to
-users during setup.
+**Rationale:** Variants exist to express different auth contracts, not
+different hardware, so labelling by hardware version asked users to
+choose on an axis that decides nothing. The SB8200 config built from a
+v6 capture ran clean end to end on v7 hardware: one config serves both
+board revisions, and the version in the label was noise that led
+contributors to pick the wrong variant (#124). Hardware version is
+also weak as data. Of the three Arris S33 units captured, two report
+no hardware version at all and the third reports a value the catalog
+does not use.
 
-**Constrains:** `hw_version` must be omitted when the variant name (from the
-filename stem) already communicates the version to the user — duplication
-degrades the label. `firmware` should always be recorded when known as it is
-useful for future tooling and contributor reference.
+**Constrains:** A variant's filename stem is user-facing text, so it
+must name what really sets the variant apart. A misleading stem is
+renamed rather than relabelled; there is deliberately no
+label-override field, since
+that would only dress up a bad name. `hw_version` stays recorded, and
+earns a place in the label only where variants genuinely differ by
+hardware alone (the S33 generations).
 
 ### Brand names as manufacturer-step choices
 

@@ -208,6 +208,44 @@ async def test_validation_progress_permission_error():
     assert isinstance(progress.error, PermissionError)
 
 
+# ┌──────────────────┬───────────┬────────────────┬─────────────────────────┐
+# │ exception type   │ message   │ expected key   │ description             │
+# ├──────────────────┼───────────┼────────────────┼─────────────────────────┤
+# │ PermissionError  │ "denied"  │ invalid_auth   │ auth-shaped fallback    │
+# │ RuntimeError     │ "boom"    │ unknown        │ generic fallback        │
+# └──────────────────┴───────────┴────────────────┴─────────────────────────┘
+#
+# fmt: off
+UNCLASSIFIED_ERROR_CASES = [
+    # (exc_type,       message,  expected_key,   desc)
+    (PermissionError, "denied", "invalid_auth", "bare_permission_error"),
+    (RuntimeError,    "boom",   "unknown",      "bare_runtime_error"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    "exc_type,message,expected_key,desc",
+    UNCLASSIFIED_ERROR_CASES,
+    ids=[c[3] for c in UNCLASSIFIED_ERROR_CASES],
+)
+async def test_validation_progress_unclassified_error(exc_type, message, expected_key, desc):
+    """An exception carrying no encoded key falls back by exception type."""
+    # These reach the handler without the "{kind}:{key}:{msg}" encoding,
+    # e.g. protocol detection failing ahead of the collector run.
+    progress = _ValidationProgress()
+
+    async def _raise():
+        raise exc_type(message)
+
+    loop = asyncio.get_event_loop()
+    progress.task = loop.create_task(_raise())
+    await asyncio.sleep(0)
+
+    assert await progress.collect() is False
+    assert progress.error_key == expected_key
+
+
 # -----------------------------------------------------------------------
 # Config flow — Step 1a: Manufacturer selection
 # -----------------------------------------------------------------------
@@ -1232,6 +1270,95 @@ async def test_reauth_failure_shows_error(hass: HomeAssistant):
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reauth_confirm"
     assert result["errors"]["base"] == "invalid_auth"
+
+
+async def test_reauth_surfaces_session_rejection_not_bad_credentials(hass: HomeAssistant):
+    """A post-login refusal keeps its own key instead of reading as a bad password (#120).
+
+    A LOAD_AUTH streak opens the breaker and prompts for reauth, so a user
+    whose credentials are correct lands on this form; telling them to check
+    their password sends them after one the modem already accepted.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        data=MOCK_ENTRY_DATA,
+        unique_id="192.168.100.1",
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch("custom_components.cable_modem_monitor.async_setup_entry", return_value=True),
+        patch(
+            "custom_components.cable_modem_monitor.config_flow.load_modem_catalog",
+            return_value=MOCK_SUMMARIES,
+        ),
+        patch(
+            "custom_components.cable_modem_monitor.config_flow.validate_connection",
+            side_effect=PermissionError("auth_error:session_rejected:401 on /api/v1/sta_docsis_status"),
+        ),
+    ):
+        await hass.config_entries.async_setup(entry.entry_id)
+
+        result: Any = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_REAUTH, "entry_id": entry.entry_id},
+            data=entry.data,
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                "host": "192.168.100.1",
+                "username": "admin",
+                "password": "correcthorse",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"]["base"] == "session_rejected"
+
+
+async def test_reauth_connection_error_shows_network_unreachable(hass: HomeAssistant):
+    """A pre-classification ConnectionError keeps its own key, not the auth fallback."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=2,
+        data=MOCK_ENTRY_DATA,
+        unique_id="192.168.100.1",
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch("custom_components.cable_modem_monitor.async_setup_entry", return_value=True),
+        patch(
+            "custom_components.cable_modem_monitor.config_flow.load_modem_catalog",
+            return_value=MOCK_SUMMARIES,
+        ),
+        patch(
+            "custom_components.cable_modem_monitor.config_flow.validate_connection",
+            side_effect=ConnectionError("Cannot connect to 192.168.100.1"),
+        ),
+    ):
+        await hass.config_entries.async_setup(entry.entry_id)
+
+        result: Any = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": config_entries.SOURCE_REAUTH, "entry_id": entry.entry_id},
+            data=entry.data,
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={
+                "host": "192.168.100.1",
+                "username": "admin",
+                "password": "correcthorse",
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+    assert result["errors"]["base"] == "network_unreachable"
 
 
 async def test_reauth_full_loop_recovers_to_online(hass: HomeAssistant):

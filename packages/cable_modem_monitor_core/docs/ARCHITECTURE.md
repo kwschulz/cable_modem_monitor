@@ -104,7 +104,7 @@ but modem-specific behavior comes from config, not from Core code.
 | Protocol primitives | `protocol/hnap` — shared HNAP constants and HMAC signing. `protocol/cbn` — shared CBN_Encrypt (AES-256-CBC) used by `form_cbn` auth. |
 | Auth shared helpers | `auth/response` — JSON response parsing (double-decode, type check, diagnostics) shared by `form_sjcl`, `form_pbkdf2`, `hnap`. |
 | Parser coordinator | `ModemParserCoordinator` — factory + orchestration: parser.yaml → `BaseParser` instances → parser.py chaining → `ModemData` |
-| Auth strategies | `none`, `basic`, `form`, `form_nonce`, `form_pbkdf2`, `form_sjcl`, `hnap`, `url_token`, `form_cbn` |
+| Auth strategies | One audited implementation per strategy in `auth/`. See the [Auth Manager](#auth-manager) table for the full set. |
 | Resource loaders | HTTP → `BeautifulSoup` or `dict` (format-dependent), HNAP → JSON, CBN → `Element` |
 | Orchestrator | Policy engine: signal→policy dispatch, circuit breaker, status derivation |
 | ModemDataCollector | Single collection cycle: auth → load → parse → `ModemData` or signal |
@@ -226,9 +226,9 @@ graph TD
     HA --> HS["<b>SESSION</b><hr/>• uid + PrivateKey cookies<br/>• HNAP_AUTH header"]
     HS --> HF["<b>FORMAT</b><hr/>• hnap (JSON + delimiters)"]
 
-    HTTP --> HTA["<b>AUTH</b><hr/>• none<br/>• basic<br/>• form / form_nonce<br/>• form_pbkdf2 🔗<br/>• form_sjcl 🔗<br/>• url_token 🔗"]
+    HTTP --> HTA["<b>AUTH</b><hr/>• none<br/>• basic<br/>• bearer<br/>• form / form_nonce<br/>• form_pbkdf2 🔗<br/>• form_sjcl 🔗<br/>• url_token 🔗"]
     HTA --> HTS["<b>SESSION</b><hr/>• stateless<br/>• cookie<br/>• CSRF 🔗<br/>• url_token 🔗"]
-    HTS --> HTF["<b>FORMAT</b><hr/>• table<br/>• table_transposed<br/>• javascript<br/>• javascript_json<br/>• html_fields<br/>• json<br/>• xml"]
+    HTS --> HTF["<b>FORMAT</b><hr/>• table<br/>• table_transposed<br/>• javascript<br/>• javascript_json<br/>• javascript_vars<br/>• html_fields<br/>• json<br/>• json_transposed"]
 
     CBN --> CA["<b>AUTH</b><hr/>• form_cbn (AES-256-CBC)"]
     CA --> CS["<b>SESSION</b><hr/>• rotating sessionToken cookie<br/>• stable SID cookie"]
@@ -257,7 +257,7 @@ choosing `json` format doesn't require `form_pbkdf2` auth.
 - Single endpoint (`getter.xml`/`setter.xml`) with `fun=N` parameters
 - AES-256-CBC encrypted auth (`CBN_Encrypt` from `encrypt_cryptoJS.js`)
 - Rotating session token on every response
-- One strategy handles all CBN modems (CH7465MT, CH7466CE, CH7465CE)
+- One strategy handles all CBN modems
 
 ### HTTP — Independent Axes
 
@@ -269,21 +269,22 @@ choosing `json` format doesn't require `form_pbkdf2` auth.
 
 ### Constraint Summary
 
-| Transport | Loader | Valid Auth | Valid Formats | Valid Action Types |
-|-----------|--------|-----------|--------------|-------------------|
-| `hnap` | HNAPLoader → `dict` | `hnap` only | `hnap` only | `hnap` |
-| `http` | HTTPLoader → BeautifulSoup or dict | `none`, `basic`, `form`, `form_nonce`, `url_token`, `form_pbkdf2`, `form_sjcl` | `table`, `table_transposed`, `javascript`, `javascript_json`, `html_fields`, `json`, `xml` | `http` |
-| `cbn` | CBNLoader → `Element` | `form_cbn` | `xml` | `cbn` |
+<!-- BEGIN GENERATED: constraint-summary (from the auth, format, and action models; run packages/cable_modem_monitor_core/scripts/generate_constraint_tables.py) -->
+| Transport | Loader | Valid auth | Valid formats | Valid action types |
+|-----------|--------|------------|---------------|--------------------|
+| `cbn` | `CBNLoader` → `Element` | `form_cbn` | `xml` | `cbn` |
+| `hnap` | `HNAPLoader` → `dict` | `hnap` | `hnap` | `hnap` |
+| `http` | `HTTPResourceLoader` → `BeautifulSoup` or `dict` | `basic`, `bearer`, `form`, `form_nonce`, `form_pbkdf2`, `form_sjcl`, `none`, `url_token` | `html_fields`, `javascript`, `javascript_json`, `javascript_vars`, `json`, `json_transposed`, `table`, `table_transposed` | `http` (optional `action_auth`) |
+<!-- END GENERATED: constraint-summary -->
 
 At runtime, the format declared in parser.yaml determines how the response
-is decoded. HTML formats (`table`, `table_transposed`, `javascript`,
-`javascript_json`, `html_fields`) are parsed into `BeautifulSoup`.
-Structured formats (`json`, `xml`) are decoded into `dict`. Any format supports an optional
-`encoding` property (e.g., `encoding: base64` for modems that wrap
-JSON in base64). The encoding is a pre-step — the loader
-unwraps the encoding before the format-specific decoder runs. The
-format-to-value-type mapping is deterministic and validated at config
-load time.
+is decoded. Each format model declares its own `decode_kind`: `html`
+yields `BeautifulSoup`, `json` and `hnap` yield `dict`, `xml` yields
+`Element`. Any format supports an optional `encoding` property (e.g.,
+`encoding: base64` for modems that wrap JSON in base64). The encoding is
+a pre-step — the loader unwraps the encoding before the format-specific
+decoder runs. The format-to-value-type mapping is deterministic and
+validated at config load time.
 
 These constraints are validated at both **build time** (Pydantic validation
 in Catalog's dev-gate) and **load time** (`load_modem_config()` in Core).
@@ -295,21 +296,28 @@ with mysterious parsing failures.
 Adding a new format, auth strategy, or transport is **additive only** — no
 existing entries change.
 
-- **New format for `http`:** Add the `BaseParser` implementation, add the
-  format string to the valid formats list, update validators. Existing
-  modem configs and tests are untouched.
-- **New auth strategy for `http`:** Add the model (with `display_name`
-  and `transport` ClassVars), the manager module (with `create_manager()`
-  entry point), and a test handler module. Add to the `AuthConfig` union
-  and `_AUTH_MODELS` list. The factory dynamically loads the manager by
-  strategy literal — no factory code changes. Display labels and
-  transport validation derive from ClassVars automatically.
-- **New transport:** Add a new loader, new `BaseParser` implementation(s),
-  a new row in the constraint table, and validator updates. No existing
-  code changes. `cbn` demonstrates this: new loader, new `xml`
-  parser, new `form_cbn` auth — no changes to HTTP or HNAP code.
+- **New format for `http`:** Add the `BaseParser` implementation and the
+  format model (with its `format_tag`, `decode_kind`, and `transports`
+  ClassVars), then append it to `CHANNEL_SECTION_MODELS` or
+  `SYSTEM_INFO_SOURCE_MODELS`. Existing modem configs and tests are
+  untouched.
+- **New auth strategy for `http`:** Add the model (with `display_name`,
+  `transport`, and `stateless` ClassVars), the manager module (with
+  `create_manager()` entry point), and a test handler module. Add to the
+  `AuthConfig` union and `_AUTH_MODELS` list. The factory dynamically
+  loads the manager by strategy literal — no factory code changes.
+  Display labels, transport validation, and login-page detection derive
+  from ClassVars automatically.
+- **New transport:** Add a new loader, new `BaseParser`
+  implementation(s), a new action model, the transport literal on
+  `ModemConfig.transport`, and a `_TRANSPORT_PROSE` entry in the table
+  generator. No existing code changes. `cbn` demonstrates this: new
+  loader, new `xml` parser, new `form_cbn` auth — no changes to HTTP or
+  HNAP code.
 
-The constraint table is an allowlist, not a lock. It prevents
+The tables above are generated from those models, so a new entry
+appears in the specs by regenerating rather than by hand-editing. The
+constraint table is an allowlist, not a lock: it prevents
 misconfigurations without preventing growth.
 
 ---
@@ -325,17 +333,20 @@ Handles authentication for all transports through configuration, not code.
 Each auth strategy is a single audited implementation that reads its parameters
 from modem.yaml:
 
+<!-- BEGIN GENERATED: auth-strategies (from the auth models; run packages/cable_modem_monitor_core/scripts/generate_constraint_tables.py) -->
 | Strategy | Transport | Stateless? |
 |----------|-----------|:----------:|
-| `none` | HTTP | Yes |
-| `basic` | HTTP | Yes |
-| `form` | HTTP | No |
-| `form_nonce` | HTTP | No |
-| `hnap` | HNAP | No |
-| `form_pbkdf2` | HTTP | No |
-| `form_sjcl` | HTTP | No |
-| `url_token` | HTTP | No |
-| `form_cbn` | CBN | No |
+| `basic` | `http` | Yes |
+| `bearer` | `http` | No |
+| `form` | `http` | No |
+| `form_cbn` | `cbn` | No |
+| `form_nonce` | `http` | No |
+| `form_pbkdf2` | `http` | No |
+| `form_sjcl` | `http` | No |
+| `hnap` | `hnap` | No |
+| `none` | `http` | Yes |
+| `url_token` | `http` | No |
+<!-- END GENERATED: auth-strategies -->
 
 See [MODEM_YAML_SPEC.md](MODEM_YAML_SPEC.md#auth) for per-strategy
 config fields.
@@ -542,15 +553,11 @@ batching details.
 
 Parsing has three distinct roles:
 
-**`BaseParser` (ABC)** — the extraction interface. Eight format-specific
-implementations: `HTMLTableParser`, `HTMLTableTransposedParser`,
-`HTMLFieldsParser`, `JSEmbeddedParser`, `JSJsonParser`, `HNAPParser`, and
-`StructuredParser` (ABC) with two subclasses — `JSONParser` and
-`XMLParser`. Both structured formats receive `dict` from the loader
-(via `json.loads()` or `xmltodict.parse()`); `StructuredParser` holds
-the shared dict-path extraction pipeline, while `XMLParser` adds
-normalization for xmltodict quirks (`@attribute` keys, `#text`
-unwrapping, single-element list coercion). `JSJsonParser` extracts
+**`BaseParser` (ABC)** — the extraction interface, one implementation
+per format in `parsers/formats/`. The authoritative format list is
+`ALL_FORMAT_MODELS` in `models/parser_config/config.py`. XML is the
+exception: `XMLChannelParser` and `XMLSystemInfoParser` are standalone
+classes rather than `BaseParser` subclasses. `JSJsonParser` extracts
 JSON arrays from JavaScript variable assignments
 (`varName = [{...}];`) inside `<script>` tags — distinct from
 `JSEmbeddedParser` which handles pipe-delimited `tagValueList` strings.
@@ -640,13 +647,13 @@ per-resource fetch details (`ResourceFetch`).
 
 **`SystemInfo`** — mix of structured and dynamic fields:
 
-- Structured: `system_uptime`, `last_boot_time`, `software_version`,
-    `hardware_version`, `model_name`
+- Structured: the canonical set is `SYSTEM_INFO_FIELDS` in
+    `models/field_registry.py`
 - Dynamic: modem-specific fields (e.g., `connectivity_state`,
     `boot_status`) pass through without core needing to understand them
-- Core derives `last_boot_time` from `system_uptime` when the modem
-    doesn't provide it natively — consumers see the same field regardless
-    of source
+- Core reports uptime as the modem gives it and derives no boot
+    timestamp; see ARCHITECTURE_DECISIONS § Time-anchored derivations
+    belong to the consumer, not Core
 
 **`ModemIdentity`** — static modem metadata from modem.yaml, populated
 once at config load time. Built by `load_modem_config()`. Consumers
@@ -792,7 +799,8 @@ Three transport paths, selected by `modem.yaml.transport`:
 
 **HTTP transport** (`HTTPResourceLoader`):
 
-- Derives fetch targets from parser.yaml via `collect_fetch_targets()`
+- Fetches the targets the collector derives via `collect_fetch_targets()`
+  from parser.yaml and parser.py
 - Fetches each resource URL independently over HTTP
 - HTML responses → `BeautifulSoup` objects
 - JSON responses → parsed dicts
@@ -860,6 +868,56 @@ coordinator, same parsers. The `HARMockServer`:
 3. Serves responses on localhost (ephemeral port for tests, fixed port
    for manual use)
 4. The pipeline runs against this server as if it were a real modem
+
+Replay is wire-faithful. A HAR stores the decoded body alongside the
+original headers, so the server re-applies the framing the headers
+declare (chunked transfer, gzip) before sending, recomputes
+`Content-Length`, and rewrites absolute `Location` targets to the
+harness origin so redirects stay inside the replay. A framing header
+it cannot reconstruct fails the request with a 500 rather than serving
+bytes that contradict the headers. An entry that records no response
+at all (har-capture writes status `-1` when the modem tore the
+connection down mid-request) becomes no route, because there is
+nothing to replay.
+
+**Login, logout and restart are dispatched, not routed.** These three
+carry server-side session state, so the auth handler sees them before
+the route table does. Three rules keep that from drifting away from
+the capture:
+
+- **The capture answers when it has the exchange.** The handler is
+  consulted for the session side effect either way — clearing state,
+  invalidating a token — but a captured response wins over a
+  synthesized one. Most captures record data collection only, so a
+  synthesized response remains the common case for restart.
+- **Action matching is uniform.** Logout and restart are matched from
+  the declared `actions:` block for every strategy, not re-implemented
+  per handler. When each handler matched for itself, `basic` and
+  `none` never matched at all, so a declared restart fell through to
+  the route table and 404'd while its test still passed.
+- **A request the harness cannot honestly answer fails.** An
+  unresolved `{auth:…}` or `{cookie:…}` placeholder that survives to
+  the wire means Core could not fill it in, so the path was never one
+  the modem had; the harness answers 500 instead of routing it.
+- **A JSON key the capture never carried is refused.** The same rule
+  one layer in. Routes and action matching key on method and path, so
+  nothing compared what Core *sent* against what the capture recorded,
+  and a synthesized fixture written to match Core's own request
+  certified Core against itself: the F3896LG-VMB login carried a
+  `username` key for as long as `BearerAuthManager` sent one, and every
+  replay passed (#82). The check runs one direction only — Core may
+  send fewer keys than the capture, never a key it lacks — and only
+  where the capture pins one body shape to one path. `/HNAP1/` carries
+  every action, and har-capture empties credential bodies to `{}`;
+  neither says anything about shape, so neither is indexed.
+
+The pass criterion follows. `ActionResult.success` now carries the
+response status for HTTP actions, and the runner asserts it, plus the
+status code the result records for transports that report none through
+`success` alone. A declared logout must also have been dispatched and
+answered successfully during the poll — logout is best-effort at both
+call sites by design (ORCHESTRATION_SPEC), which is precisely why the
+harness is the only place a logout that never worked can be noticed.
 
 **Two usage modes:**
 
@@ -1306,7 +1364,7 @@ The test harness in Core consumes these fixtures. This means:
 ## Key Decisions
 
 Architecture decisions and their rationale live in
-[ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md), organised by
+[ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md), organized by
 theme with the reasoning and constraints for each. This document
 describes how the system is built; that one records why.
 

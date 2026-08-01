@@ -14,9 +14,9 @@ Use case coverage (orchestrator level):
 - UC-07: DOCSIS status derivation (table-driven)
 - UC-10: Wrong credentials — single failure
 - UC-11: Transient auth failure — streak resets on success
-- UC-12: Firmware lockout — AUTH_LOCKOUT with backoff
-- UC-13: Backoff expiry — polling resumes
-- UC-14: Circuit breaker trip — 6 consecutive failures
+- UC-12: Firmware lockout — AUTH_LOCKOUT trips circuit immediately
+- UC-13: LOAD_AUTH — threshold circuit breaker, session issues self-correct
+- UC-14: Circuit breaker trip — credential rejection
 - UC-15: Circuit breaker blocks polling
 - UC-17: LOAD_AUTH — 401 on data page
 - UC-18: LOAD_AUTH — self-correcting stale session

@@ -11,7 +11,9 @@ Pre-fetch encoding detection — connectivity vs non-connectivity error handling
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -26,7 +28,10 @@ from solentlabs.cable_modem_monitor_core.orchestration.signals import (
 )
 
 from custom_components.cable_modem_monitor.config_flow_helpers import (
+    _SIGNAL_ERROR_MAP,
+    _attempt_validation,
     _detect_and_inject_form_nonce_encoding,
+    _raise_validation_failure,
     _run_validation,
     build_model_display_name,
     build_model_options,
@@ -426,29 +431,31 @@ def test_build_model_options_bucket_single_row():
 # Pure-function helpers — classify_error
 # =====================================================================
 
-# ┌────────────────┬──────────────────┬──────────────┐
-# │ signal         │ expected key     │ description  │
-# ├────────────────┼──────────────────┼──────────────┤
-# │ CONNECTIVITY   │ "cannot_connect" │ connectivity │
-# │ AUTH_FAILED    │ "invalid_auth"   │ auth_failed  │
-# │ AUTH_LOCKOUT   │ "invalid_auth"   │ auth_lockout │
-# │ LOAD_ERROR     │ "cannot_connect" │ load_error   │
-# │ LOAD_AUTH      │ "invalid_auth"   │ load_auth    │
-# │ PARSE_ERROR    │ "parse_failed"   │ parse_error  │
-# │ OK             │ "unknown"        │ unmapped     │
-# │ None           │ "unknown"        │ no_signal    │
-# └────────────────┴──────────────────┴──────────────┘
+# ┌────────────────┬────────────────────┬────────────────┐
+# │ signal         │ expected key       │ description    │
+# ├────────────────┼────────────────────┼────────────────┤
+# │ CONNECTIVITY   │ "cannot_connect"   │ connectivity   │
+# │ AUTH_FAILED    │ "invalid_auth"     │ auth_failed    │
+# │ AUTH_LOCKOUT   │ "invalid_auth"     │ auth_lockout   │
+# │ LOAD_ERROR     │ "cannot_connect"   │ load_error     │
+# │ LOAD_AUTH      │ "invalid_auth"     │ load_auth      │
+# │ LOAD_INTEGRITY │ "invalid_auth"     │ load_integrity │
+# │ PARSE_ERROR    │ "parse_failed"     │ parse_error    │
+# │ OK             │ "unknown"          │ unmapped       │
+# │ None           │ "unknown"          │ no_signal      │
+# └────────────────┴────────────────────┴────────────────┘
 #
 # fmt: off
 CLASSIFY_ERROR_CASES = [
-    (CollectorSignal.CONNECTIVITY, "cannot_connect", "connectivity"),
-    (CollectorSignal.AUTH_FAILED,  "invalid_auth",   "auth_failed"),
-    (CollectorSignal.AUTH_LOCKOUT, "invalid_auth",   "auth_lockout"),
-    (CollectorSignal.LOAD_ERROR,   "cannot_connect", "load_error"),
-    (CollectorSignal.LOAD_AUTH,    "invalid_auth",   "load_auth"),
-    (CollectorSignal.PARSE_ERROR,  "parse_failed",   "parse_error"),
-    (CollectorSignal.OK,           "unknown",         "unmapped"),
-    (None,                         "unknown",         "no_signal"),
+    (CollectorSignal.CONNECTIVITY,   "cannot_connect",   "connectivity"),
+    (CollectorSignal.AUTH_FAILED,    "invalid_auth",     "auth_failed"),
+    (CollectorSignal.AUTH_LOCKOUT,   "invalid_auth",     "auth_lockout"),
+    (CollectorSignal.LOAD_ERROR,     "cannot_connect",   "load_error"),
+    (CollectorSignal.LOAD_AUTH,      "invalid_auth",     "load_auth"),
+    (CollectorSignal.LOAD_INTEGRITY, "invalid_auth",     "load_integrity"),
+    (CollectorSignal.PARSE_ERROR,    "parse_failed",     "parse_error"),
+    (CollectorSignal.OK,             "unknown",          "unmapped"),
+    (None,                           "unknown",          "no_signal"),
 ]
 # fmt: on
 
@@ -1129,3 +1136,173 @@ class TestRestartRequiresCredentials:
         restart_requires_credentials(tmp_path, "v2")
 
         mock_load.assert_called_once_with(tmp_path / "modem-v2.yaml")
+
+
+# ---------------------------------------------------------------------------
+# Session release after validation (#120)
+# ---------------------------------------------------------------------------
+
+# Single-session firmware holds one slot. Validation that walks away without
+# releasing it strands that slot; the user's browser and our next attempt
+# then collide with a session we abandoned.
+
+
+class TestValidationReleasesSession:
+    """_attempt_validation must close the collector on every outcome."""
+
+    # fmt: off
+    _CASES = [
+        # (signal,                       success, description)
+        (CollectorSignal.OK,             True,    "successful validation"),
+        (CollectorSignal.LOAD_AUTH,      False,   "401 after successful auth"),
+        (CollectorSignal.LOAD_INTEGRITY, False,   "stub page in place of data"),
+        (CollectorSignal.AUTH_FAILED,    False,   "credentials rejected"),
+        (CollectorSignal.PARSE_ERROR,    False,   "parse failure"),
+    ]
+    # fmt: on
+
+    @pytest.mark.parametrize(("signal", "success", "description"), _CASES)
+    @patch(f"{_MODULE}.create_collector")
+    def test_collector_closed(
+        self,
+        mock_create: MagicMock,
+        signal: CollectorSignal,
+        success: bool,
+        description: str,
+    ) -> None:
+        """Every validation outcome releases the server-side session."""
+        collector = MagicMock()
+        collector.execute.return_value = ModemResult(success=success, signal=signal, modem_data={})
+        mock_create.return_value = collector
+
+        _attempt_validation(
+            modem_config=MagicMock(),
+            parser_config=MagicMock(),
+            post_processor=None,
+            base_url="http://192.168.100.1",
+            username="admin",
+            password="secret",
+            legacy_ssl=False,
+        )
+
+        collector.close.assert_called_once()
+
+    @patch(f"{_MODULE}.create_collector")
+    def test_collector_closed_when_execute_raises(self, mock_create: MagicMock) -> None:
+        """An exception mid-collection must not strand the session either."""
+        collector = MagicMock()
+        collector.execute.side_effect = RuntimeError("connection reset")
+        mock_create.return_value = collector
+
+        with pytest.raises(RuntimeError):
+            _attempt_validation(
+                modem_config=MagicMock(),
+                parser_config=MagicMock(),
+                post_processor=None,
+                base_url="http://192.168.100.1",
+                username="admin",
+                password="secret",
+                legacy_ssl=False,
+            )
+
+        collector.close.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# LOAD_AUTH error text (#120)
+# ---------------------------------------------------------------------------
+
+# A 401 on a data page follows a successful login, so it is not a credential
+# problem. LOAD_AUTH stays in auth_signals, which keeps the raised exception
+# type stable for callers; only the message the user reads changes.
+
+
+class TestPostLoginKeyIsStrategyDependent:
+    """A post-login 401 only means "session refused" if the login was verified.
+
+    basic auth never validates a password, and plain form auth accepts
+    any response under HTTP 400, so for those a 401 on the data page is
+    most often the bad password surfacing late. Reporting it as "your
+    password is fine" is what beta.17 got wrong.
+    """
+
+    # fmt: off
+    _CASES = [
+        # (strategy,     auth kwargs,                        expected key,       description)
+        ("basic",        {},                                 "invalid_auth",     "never validates"),
+        ("form",         {"action": "/login.htm"},           "invalid_auth",     "accepts any 2xx/3xx"),
+        ("form_pbkdf2",  {"login_endpoint": "/l",
+                          "pbkdf2_iterations": 1000,
+                          "pbkdf2_key_length": 128},         "session_rejected", "verifies via login_success"),
+        ("hnap",         {"hmac_algorithm": "md5"},          "session_rejected", "verifies via LoginResult"),
+    ]
+    # fmt: on
+
+    @staticmethod
+    def _config(strategy: str, **auth: Any) -> Any:
+        from pydantic import TypeAdapter
+        from solentlabs.cable_modem_monitor_core.models.modem_config.auth import AuthConfig
+
+        config = MagicMock()
+        config.auth = TypeAdapter(AuthConfig).validate_python({"strategy": strategy, **auth})
+        return config
+
+    @pytest.mark.parametrize(("strategy", "auth", "expected", "description"), _CASES, ids=[c[0] for c in _CASES])
+    @pytest.mark.parametrize("signal", [CollectorSignal.LOAD_AUTH, CollectorSignal.LOAD_INTEGRITY])
+    def test_key_follows_auth_strategy(
+        self,
+        signal: CollectorSignal,
+        strategy: str,
+        auth: dict[str, Any],
+        expected: str,
+        description: str,
+    ) -> None:
+        """The displayed key is chosen by whether the strategy verifies its login."""
+        assert classify_error(None, signal, self._config(strategy, **auth)) == expected
+
+    def test_defaults_to_invalid_auth_without_config(self) -> None:
+        """With no modem_config to ask, fall back to the conservative key."""
+        assert classify_error(None, CollectorSignal.LOAD_AUTH) == "invalid_auth"
+
+    def test_load_auth_still_raises_permission_error(self) -> None:
+        """The error key rides on PermissionError, the auth-signal exception type."""
+        auth_signals = (
+            CollectorSignal.AUTH_FAILED,
+            CollectorSignal.AUTH_LOCKOUT,
+            CollectorSignal.LOAD_AUTH,
+        )
+        result = ModemResult(success=False, signal=CollectorSignal.LOAD_AUTH, error="401 on /data")
+
+        with pytest.raises(PermissionError, match="invalid_auth"):
+            _raise_validation_failure(result, auth_signals)
+
+
+# ---------------------------------------------------------------------------
+# Signal-to-message coverage
+# ---------------------------------------------------------------------------
+
+# An unmapped signal falls through to "unknown" ("Unexpected error, check the
+# logs"), which is what LOAD_INTEGRITY did until it was mapped. These two
+# assertions close both ends: every signal reaches a key, every key renders.
+
+
+class TestSignalErrorMapCoverage:
+    """No signal may reach the user as "unknown", and no key may be missing."""
+
+    def test_every_signal_is_mapped(self) -> None:
+        """Only OK is exempt — it never reaches the error path."""
+        unmapped = {sig for sig in CollectorSignal if sig is not CollectorSignal.OK} - set(_SIGNAL_ERROR_MAP)
+
+        assert not unmapped, f"CollectorSignal members with no strings.json key: {unmapped}"
+
+    def test_every_mapped_key_exists_in_strings_json(self) -> None:
+        """Every key classify_error can return must render in the HA form."""
+        strings = json.loads(
+            (
+                Path(__file__).resolve().parents[2] / "custom_components" / "cable_modem_monitor" / "strings.json"
+            ).read_text()
+        )
+        declared = set(strings["config"]["error"])
+        produced = set(_SIGNAL_ERROR_MAP.values()) | {"unknown"}
+
+        assert produced <= declared, f"missing from strings.json: {produced - declared}"

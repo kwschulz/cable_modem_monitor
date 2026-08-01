@@ -12,7 +12,6 @@ If someone changes ``bytes.fromhex(salt)`` back to
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -20,9 +19,11 @@ import pytest
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM
 from solentlabs.cable_modem_monitor_core.auth.form_sjcl import _derive_key
 
+from tests._helpers import load_fixture
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
-_KAT = json.loads((FIXTURES_DIR / "sjcl_known_answers.json").read_text())
+_KAT = load_fixture(FIXTURES_DIR / "sjcl_known_answers.json")
 _VECTORS: list[dict[str, Any]] = _KAT["vectors"]
 _REGRESSION_GUARD: dict[str, str] = _KAT["regression_guard"]
 

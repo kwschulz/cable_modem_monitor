@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import base64 as b64mod
+from pathlib import Path
 from typing import Any
 
 import pytest
 import requests
 from bs4 import BeautifulSoup
 from solentlabs.cable_modem_monitor_core.auth.base import AuthResult
-from solentlabs.cable_modem_monitor_core.loaders.fetch_list import ResourceTarget
+from solentlabs.cable_modem_monitor_core.fetch_list import ResourceTarget
 from solentlabs.cable_modem_monitor_core.loaders.http import (
     HTTPResourceLoader,
     LoginPageDetectedError,
@@ -17,6 +18,8 @@ from solentlabs.cable_modem_monitor_core.loaders.http import (
     _decode_response,
 )
 from solentlabs.cable_modem_monitor_core.test_harness import HARMockServer
+
+from tests._helpers import load_fixture
 
 
 def _build_entries(
@@ -47,6 +50,9 @@ def _build_entries(
     return entries
 
 
+_FIXTURES = Path(__file__).parent / "fixtures"
+
+
 # ---------------------------------------------------------------------------
 # _decode_response — table-driven
 # ---------------------------------------------------------------------------
@@ -65,8 +71,8 @@ def _build_entries(
 # │ b64("<html>...")         │ table             │ base64   │ soup      │ base64-encoded body              │
 # │ "!!!invalid"             │ table             │ base64   │ None      │ base64 decode failure            │
 # │ ""                       │ table             │ ""       │ None      │ empty body                       │
-# │ "<root/>"                │ xml               │ ""       │ None      │ XML not yet supported by loader  │
-# │ "<html>..."              │ unknown           │ ""       │ soup      │ unknown format fallback          │
+# │ "<root/>"                │ xml               │ ""       │ None      │ xml is CBN-only, not decoded here│
+# │ "<html>..."              │ unknown           │ ""       │ None      │ unregistered format rejected     │
 # └──────────────────────────┴───────────────────┴──────────┴───────────┴──────────────────────────────────┘
 
 _B64_HTML = b64mod.b64encode(b"<html><table></table></html>").decode()
@@ -85,8 +91,8 @@ _DECODE_CASES: list[tuple[str, str, str, str | None, str]] = [
     (_B64_HTML,                       "table",            "base64", "soup",   "base64-encoded body"),
     ("x",                             "table",            "base64", None,     "base64 decode failure"),
     ("",                              "table",            "",       None,     "empty body"),
-    ("<root/>",                       "xml",              "",       None,     "XML not yet supported"),
-    ("<html></html>",                 "unknown",          "",       "soup",   "unknown format fallback"),
+    ("<root/>",                       "xml",              "",       None,     "xml is CBN-only"),
+    ("<html></html>",                 "unknown",          "",       None,     "unregistered format rejected"),
 ]
 # fmt: on
 
@@ -133,9 +139,15 @@ class TestDecodeResponseBehaviors:
         assert reason == "base64 decode failed"
 
     def test_xml_returns_reason(self) -> None:
-        """XML format returns (None, reason) — not yet supported."""
+        """XML is CBN-only; the HTTP loader rejects it rather than decoding."""
         _, reason = _decode_response("<root/>", "xml", "")
-        assert reason == "XML format not yet supported"
+        assert reason == "unsupported decode kind 'xml' for format 'xml'"
+
+    def test_unregistered_format_returns_reason(self) -> None:
+        """An unregistered format is rejected, never coerced to BeautifulSoup."""
+        value, reason = _decode_response("<html></html>", "unknown", "")
+        assert value is None
+        assert reason == "unsupported decode kind '' for format 'unknown'"
 
 
 class TestHTTPResourceLoader:
@@ -494,24 +506,33 @@ class TestHTTPResourceLoader:
 
     def test_401_raises_resource_load_error(self) -> None:
         """401 response raises ResourceLoadError with status code."""
-        # Build a HAR entry that returns 401
-        entries = [
-            {
-                "request": {"method": "GET", "url": "http://192.168.100.1/status.html"},
-                "response": {
-                    "status": 401,
-                    "headers": [],
-                    "content": {"text": "Unauthorized"},
-                },
-            }
-        ]
+        fixture = load_fixture(_FIXTURES / "http_401_plain.json")
 
-        with HARMockServer(entries) as server:
+        with HARMockServer(fixture["_entries"]) as server:
             session = requests.Session()
             loader = HTTPResourceLoader(session, server.base_url, timeout=10)
             targets = [ResourceTarget(path="/status.html", format="table")]
             with pytest.raises(ResourceLoadError, match="401"):
                 loader.fetch(targets)
+
+    def test_401_carries_response_body_and_request_line(self) -> None:
+        """401 attaches the wire detail the collector needs to diagnose it (#120)."""
+        fixture = load_fixture(_FIXTURES / "http_401_json_body.json")
+        expected = fixture["_expected"]
+
+        with HARMockServer(fixture["_entries"]) as server:
+            session = requests.Session()
+            session.headers.update({"X-Requested-With": "XMLHttpRequest"})
+            loader = HTTPResourceLoader(session, server.base_url, timeout=10)
+            targets = [ResourceTarget(path="/status.html", format="table")]
+            with pytest.raises(ResourceLoadError) as exc_info:
+                loader.fetch(targets)
+
+        exc = exc_info.value
+        assert exc.response_body == expected["response_body"]
+        assert exc.content_type == expected["content_type"]
+        assert "X-Requested-With=XMLHttpRequest" in exc.request_line
+        assert "GET" in exc.request_line
 
     def test_query_params_appended(self) -> None:
         """Session query_params are appended to fetch URLs."""

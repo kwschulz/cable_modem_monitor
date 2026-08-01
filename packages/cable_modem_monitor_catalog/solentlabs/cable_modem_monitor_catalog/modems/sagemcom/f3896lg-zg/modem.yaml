@@ -1,0 +1,79 @@
+manufacturer: Sagemcom
+model: F3896LG-ZG
+brands:
+  - "Ziggo"
+transport: http
+default_host: "192.168.100.1"
+
+auth:
+  strategy: bearer
+  login_endpoint: "/rest/v1/user/login"
+  token_path: "created.token"
+  username_field: ""
+  user_id_path: "created.userId"
+
+actions:
+  restart:
+    type: http
+    method: POST
+    endpoint: "/rest/v1/system/reboot"
+    json_body:
+      reboot:
+        enable: true
+  logout:
+    type: http
+    method: DELETE
+    endpoint: "/rest/v1/user/{auth:user_id}/token/{auth:token}"
+    requires_session: true
+
+hardware:
+  docsis_version: "3.1"
+  chipset: "Broadcom BCM3390"
+  release_date: "2022-10"
+
+status: awaiting_verification
+
+sources:
+  auth_config: "[Issue #185 HAR](https://github.com/solentlabs/cable_modem_monitor/issues/185) — POST /rest/v1/user/login with a password-only body answers 201 and returns created.token"
+  action_config: "[Issue #185](https://github.com/solentlabs/cable_modem_monitor/issues/185) — reboot endpoint and body read from the UI reboot handler in the captured index.js, which posts {reboot:{enable:true}}; the other call site in that bundle adds a 'DHCP Change From UI' reason and is not the one modelled here. Reboot is not exercised in the capture. Logout is: HAR entry 39 sends DELETE /rest/v1/user/3/token/<token> with the Authorization header and gets 204"
+  manufacturer: "[Issue #185 HAR](https://github.com/solentlabs/cable_modem_monitor/issues/185) — /rest/v1/system/info reports modelName F3896LG, softwareVersion LG-RDK_12.13.16-2504.5, hardwareVersion 1.2"
+  brands: "[Issue #185](https://github.com/solentlabs/cable_modem_monitor/issues/185) — reported by the filer as a Ziggo-issued unit; the -ZG suffix appears on the device sticker, not in firmware"
+  chipset: "[ISPreview — Hub 5 launch](https://www.ispreview.co.uk/index.php/2021/10/virgin-media-o2-officially-launches-hub-5-broadband-router.html) identifies the F3896LG platform as Broadcom BCM3390"
+  hardware: "[Issue #185 HAR](https://github.com/solentlabs/cable_modem_monitor/issues/185) — /rest/v1/cablemodem/state_ reports docsisVersion 3.1"
+  release_date: "[Telecompaper, 2022-10-06](https://www.telecompaper.com/nieuws/ziggo-levert-nieuw-model-docsis-31-modem--1439683) — Ziggo began supplying the 'SmartWifi modem (zwart)' that month; [Ziggo's product page](https://www.ziggo.nl/klantenservice/apparaten/wifi-modems/smartwifi-modem-zwart) identifies that modem as the Sagemcom F3896LG. ISP rollout date, not a manufacturer launch date"
+
+attribution:
+  contributors:
+    - github: https://github.com/wlauvenberg
+      contribution: "Full-session HAR capture of the Ziggo F3896LG-ZG"
+
+isps:
+  - Ziggo
+notes: |
+  DOCSIS 3.1 gateway made by Sagemcom, issued by Ziggo and running the
+  Liberty Global RDK firmware line (LG-RDK_12.13.16-2504.5). Same
+  hardware and same REST API as the Virgin Media F3896LG-VMB; the
+  entries are separate because they are separately purchasable,
+  separately branded, and carry independent hardware confirmation.
+  Captured in bridge mode. 32 SC-QAM downstream + 2 OFDM, 4 ATDMA
+  upstream + 2 OFDMA.
+
+  Auth is declared for /rest/v1/system/info, which supplies
+  hardware_version and software_version and is the one parser resource
+  the capture shows requiring a Bearer token. The three
+  /rest/v1/cablemodem/ resources (state_, downstream, upstream) were
+  served unauthenticated in the capture, as on the sibling VMB entry.
+
+  The firmware ends a session with
+  DELETE /rest/v1/user/{userId}/token/{token}, both values coming from
+  the login response. The logout action addresses them with the
+  {auth:user_id} and {auth:token} placeholders. It matters here: the
+  filer reports the modem allows only one concurrent session, so a held
+  session blocks the user's own browser access.
+
+  The capture arrived sanitized by har-capture. The session token in
+  the logout URL path was redacted here afterwards: the sanitizer
+  covers header and body values, not URL paths.
+references:
+  issues:
+    - "[#185 — [Modem Request] ZIGGO SAGEMCOM F3896LG-ZG](https://github.com/solentlabs/cable_modem_monitor/issues/185)"

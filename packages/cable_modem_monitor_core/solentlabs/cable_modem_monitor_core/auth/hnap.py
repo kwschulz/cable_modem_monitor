@@ -24,7 +24,7 @@ from ..protocol.hnap import (
     compute_auth_header,
     hmac_hex,
 )
-from .base import AuthContext, AuthResult, BaseAuthManager
+from .base import AuthContext, AuthFailureMode, AuthResult, BaseAuthManager, LoginLockoutError
 from .response import parse_json_dict
 
 if TYPE_CHECKING:
@@ -57,6 +57,12 @@ class HnapAuthManager(BaseAuthManager):
 
     def __init__(self, config: HnapAuth) -> None:
         self._hmac_algorithm = config.hmac_algorithm
+
+    def auth_failure_mode(self) -> AuthFailureMode:
+        """Login is verified: a wrong password fails the LoginResult check."""
+        # Proven by test_auth_failure_modes — the mock server rejects a
+        # bad HMAC, so a later 401 is not the credential.
+        return AuthFailureMode.SESSION_REJECTED
 
     def headers(self) -> frozenset[str]:
         # HNAP_AUTH carries an HMAC signed with the per-session PrivateKey.
@@ -264,11 +270,11 @@ class HnapAuthManager(BaseAuthManager):
         login_result = login_response.get("LoginResult", "")
 
         if login_result in ("LOCKUP", "REBOOT"):
-            return AuthResult(
-                success=False,
-                error=(f"HNAP firmware anti-brute-force triggered: LoginResult={login_result}"),
-                response=response,
-            )
+            # Distinct from a rejected credential (#117): the modem is
+            # refusing logins to protect itself, and retrying is what
+            # reboots it. The orchestrator needs to tell the two apart
+            # to report the right remedy.
+            raise LoginLockoutError(f"HNAP firmware anti-brute-force triggered: LoginResult={login_result}")
 
         if login_result == "FAILED":
             return AuthResult(

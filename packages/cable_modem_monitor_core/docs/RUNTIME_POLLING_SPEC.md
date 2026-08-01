@@ -54,7 +54,8 @@ decides whether to retry, backoff, or report.
   also set as a `PrivateKey` cookie); cookie-based strategies verify
   `auth.cookie_name` is present in the cookie jar;
   basic and none are stateless (always valid)
-- Backs off on failure (suppresses login for N polls after lockout)
+- Raises `LoginLockoutError` on firmware lockout; tracks no lockout
+  state of its own
 - Executes `actions.logout` for single-session modems after each poll
 
 **Resource Loader** uses the authenticated session to fetch data:
@@ -77,7 +78,8 @@ loader behavior per transport, and URL construction details.
 **Orchestrator** owns scheduling, policy, and error recovery:
 
 - Invokes `ModemDataCollector` for each poll cycle
-- Applies backoff on lockout, circuit breaker on persistent auth failure
+- Trips the circuit breaker on lockout and on rejected credentials;
+  applies exponential backoff on connectivity failure
 - Coordinates `HealthMonitor` alongside collection
 - Hands each snapshot to `Recovery` for heuristic evaluation and
   window management (see ORCHESTRATION_SPEC § Recovery)
@@ -217,15 +219,19 @@ for the full schema.
    minimum 30-second cadence, the modem gets breathing room between
    attempts.
 
-4. **Constant backoff on lockout, circuit breaker on persistence.**
-   `LoginLockoutError` triggers 3-poll suppression (constant, no
-   escalation). If auth failures persist across multiple lockout
-   cycles, the circuit breaker opens and polling stops entirely —
-   the user must reconfigure credentials to resume. Session reuse is
-   the primary defense; backoff is the safety net; circuit breaker is
-   the last resort. (Evidence: HNAP modem firmware has confirmed
-   `LOCKUP`/`REBOOT` states — see `ORCHESTRATION_SPEC.md` § Auth
-   Circuit Breaker for full use-case walkthrough.)
+4. **Lockout stops polling outright.** `LoginLockoutError` trips the
+   circuit breaker on the first occurrence — polling stops entirely
+   and the user must reconfigure credentials to resume. There is no
+   lockout backoff window: a modem refusing logins to protect itself
+   gains nothing from a slower retry, and each further attempt is what
+   the firmware counts. Session reuse is the primary defense; the
+   circuit breaker is the safety net. (Evidence: the `Login.js` in the
+   S33/S33v2/S33v3 and SB8200-HNAP captures branches on
+   `LoginResult == "LOCKUP"` with "Max number of login attempts
+   reached"; #117 reported an S33v2 rebooting under polling that
+   re-logged in every cycle. No `LOCKUP` response has itself been
+   captured — see `AUTH_HNAP_SPEC.md` § Known Gaps. Full walkthrough:
+   `ORCHESTRATION_SPEC.md` § Auth Circuit Breaker.)
 
 5. **Auth strategies must validate success.** A 200 OK response does not
    mean authentication succeeded. Each strategy validates that the
@@ -293,10 +299,11 @@ what happened and full control over what to do next.
 
 **Example — firmware lockout:** The auth manager's HNAP strategy receives
 `LoginResult: "LOCKUP"` and raises `LoginLockoutError`. It does not track
-lockout state or suppress future attempts — that's policy. The orchestrator
-catches the exception, sets a backoff counter, and suppresses login attempts
-for N polls. The auth manager stays stateless with respect to lockout; the
-orchestrator owns the recovery strategy.
+lockout state or decide what happens next — that's policy. The collector
+catches the exception and returns `AUTH_LOCKOUT`; `SignalPolicy` trips the
+circuit breaker. The auth manager stays stateless with respect to lockout;
+the orchestrator owns the recovery strategy, and could switch it to a
+backoff without the strategy changing.
 
 ---
 
@@ -331,20 +338,13 @@ are benign — forced fresh login is harmless. Note that this is
 orthogonal to `actions.logout`, which controls *session lifecycle*
 (logout-after-poll for single-session modems), not *reuse strategy*.
 
-**Login backoff** — after a `LoginLockoutError` (firmware anti-brute-force
-triggered), the orchestrator suppresses login for 3 polls. This gives the
-modem time to clear its lockout state. The counter decrements each poll
-regardless of success. Session reuse is the primary defense against
-lockout, backoff is the safety net.
-
-**Auth circuit breaker** — persistent auth failures (wrong credentials,
-changed password, firmware changed auth mechanism, persistent stub
-responses) trigger an escalating response. The orchestrator tracks
-consecutive auth-related failures (AUTH_FAILED, AUTH_LOCKOUT, LOAD_AUTH,
-LOAD_INTEGRITY). After 6 consecutive failures
-(~2 lockout cycles on HNAP modems), the circuit breaker opens and
-polling stops entirely. The client (HA) triggers a reauth flow — the
-user must reconfigure credentials to resume. Manual refresh
+**Auth circuit breaker** — auth failures stop polling, on one of two
+trip modes. Rejected credentials (`AUTH_FAILED`) and firmware lockout
+(`AUTH_LOCKOUT`) trip on the first occurrence: the modem answered, and
+it said no. Session-shaped failures (`LOAD_AUTH`, `LOAD_INTEGRITY`) may
+self-correct, so they accumulate and trip at 6 consecutive failures.
+Either way polling stops entirely. The client (HA) triggers a reauth
+flow — the user must reconfigure credentials to resume. Manual refresh
 deliberately does not bypass the breaker (see `ORCHESTRATION_SPEC.md`
 § Auth Circuit Breaker, "No manual bypass").
 
@@ -376,7 +376,6 @@ returns `AuthResult.FAILURE`.
 | `session` (cookies) | Auth Manager | Avoid re-login every poll | Until expired or cleared |
 | HNAP private key | Auth Manager | SOAP request signing + `PrivateKey` cookie | Until session expires |
 | Session token | Auth Manager | URL token injection | Until session expires |
-| Login backoff counter | Orchestrator | Anti-brute-force suppression | Decremented each poll |
 | Auth failure streak | Orchestrator | Circuit breaker threshold tracking | Reset on successful collection |
 | Circuit open flag | Orchestrator | Stops polling on persistent auth failure | Cleared by orchestrator reconstruction (reauth → entry reload) |
 | Stale-session recovery streak | Orchestrator | Tracks consecutive recovered `LOAD_AUTH` same-poll retries | Reset by an intervening normal success or orchestrator reconstruction |
@@ -474,15 +473,16 @@ Normal poll
 Next poll
  ├─ Auth manager: session valid? → yes (stale cookies still in memory)
  ├─ Resource loader: fetch pages with stale session
- │   ├─ Case A: modem rejects → LOAD_AUTH → clear session → auth_failed
+ │   ├─ Case A: modem rejects → LOAD_AUTH → clear session → same-poll retry
  │   └─ Case B: modem accepts (IP-based, or ignores stale cookies) → success
  ├─ Parser: channels found (Case B)
  └─ Orchestrator: log transition with session state for diagnostics
 ```
 
 If the stale session is rejected (Case A), `LOAD_AUTH` signal handling
-clears the session — the next poll starts with a fresh login. No
-proactive cache clear is needed.
+clears the session and retries once in the same poll with a fresh
+login, so a modem that is back up recovers without waiting for the
+next cycle. No proactive cache clear is needed.
 
 The orchestrator logs the `unreachable → online` transition. Session
 state is already reported in the poll log (`session: new` vs

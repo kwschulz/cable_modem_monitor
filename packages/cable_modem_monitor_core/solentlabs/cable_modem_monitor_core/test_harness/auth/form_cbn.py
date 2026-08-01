@@ -86,8 +86,6 @@ class FormCbnAuthHandler(FormAuthHandler):
         super().__init__(
             login_path=setter_endpoint,
             cookie_name="",  # Session tracked by server flag, not cookie
-            logout_path="",  # Handled via body inspection in handle_login
-            restart_path="",
         )
         self._login_page_path = normalize_path(login_page_path)
         self._setter_endpoint = normalize_path(setter_endpoint)
@@ -194,12 +192,17 @@ class FormCbnAuthHandler(FormAuthHandler):
         """Handle logout — clear session."""
         self._authenticated = False
         _logger.debug("Mock server: CBN logout — session cleared")
+        # Recorded here rather than by the server: CBN addresses every
+        # action at one setter endpoint and discriminates by ``fun``, so
+        # the server's path matching never sees a logout.
+        self.record_action("logout", 200)
         return RouteEntry(status=200, headers=[], body="OK")
 
     def _handle_restart_post(self) -> RouteEntry:
         """Handle restart — clear session."""
         self._authenticated = False
         _logger.debug("Mock server: CBN restart accepted — session cleared")
+        self.record_action("restart", 200)
         return RouteEntry(status=200, headers=[], body="OK")
 
     def get_route_override(

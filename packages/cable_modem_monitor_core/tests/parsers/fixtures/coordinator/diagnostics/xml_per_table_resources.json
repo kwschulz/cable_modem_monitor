@@ -1,0 +1,31 @@
+{
+  "_description": "XML section declaring one resource per table — no section-level resource for a format parser to attribute a count to.",
+  "_config": {
+    "downstream": {
+      "format": "xml",
+      "tables": [
+        {
+          "resource": "10",
+          "root_element": "downstream_table",
+          "child_element": "downstream",
+          "columns": [
+            { "source": "chid", "field": "channel_number", "type": "integer" }
+          ]
+        },
+        {
+          "resource": "11",
+          "root_element": "ofdm_table",
+          "child_element": "ofdm",
+          "columns": [
+            { "source": "chid", "field": "channel_number", "type": "integer" }
+          ]
+        }
+      ]
+    }
+  },
+  "_resources": {
+    "10": "<downstream_table><downstream><chid>1</chid></downstream></downstream_table>",
+    "11": "<ofdm_table><ofdm><chid>2</chid></ofdm></ofdm_table>"
+  },
+  "_absent_resource": "11"
+}

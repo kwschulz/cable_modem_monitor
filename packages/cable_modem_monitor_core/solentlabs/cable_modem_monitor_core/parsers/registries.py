@@ -78,6 +78,9 @@ from .table_selector import find_table
 # Opted in: javascript (#151), javascript_json, table (issue #104).
 # Remaining: table_transposed, xml, hnap (HNAP failures are caught as
 # LOAD_AUTH before reaching the parser, so LOAD_INTEGRITY is redundant).
+# Formats without per-anchor counting still get presence accounting for
+# every path they declare — the coordinator covers the ones whose paths
+# hang off tables/arrays rather than the section.
 _ANCHOR_TRIVIAL = AnchorCount(expected=1, fulfilled=1)
 
 
@@ -106,10 +109,11 @@ def _count_js_variable_anchors(soup: Any, variable_names: list[str]) -> AnchorCo
     return AnchorCount(expected=len(variable_names), fulfilled=fulfilled)
 
 
-def _resource_present(resources: dict[str, Any], resource: str) -> AnchorCount:
+def resource_present(resources: dict[str, Any], resource: str) -> AnchorCount:
     """Trivially-fulfilled count gated on resource presence.
 
-    Used by formats that don't do per-anchor counting yet. Returns
+    Used by formats that don't do per-anchor counting yet, and by the
+    coordinator for declared paths no format parser counted. Returns
     fulfilled=0 if the resource itself is missing — that's a clear
     signal even without per-anchor introspection.
     """
@@ -223,7 +227,7 @@ def _parse_transposed_channels(
         if "channel_number" not in channel:
             channel["channel_number"] = idx
 
-    return primary_channels, _resource_present(resources, section.resource)
+    return primary_channels, resource_present(resources, section.resource)
 
 
 def _parse_js_embedded_channels(
@@ -303,7 +307,7 @@ def _parse_json_channels(
         expected = len(section.arrays)
         fulfilled = sum(1 for arr in section.arrays if resources.get(arr.resource or section.resource) is not None)
         return channels, AnchorCount(expected=expected, fulfilled=fulfilled)
-    return channels, _resource_present(resources, section.resource)
+    return channels, resource_present(resources, section.resource)
 
 
 def _parse_js_json_channels(
@@ -374,7 +378,7 @@ def _parse_json_transposed_channels(
         if "channel_number" not in channel:
             channel["channel_number"] = idx
 
-    return channels, _resource_present(resources, section.resource)
+    return channels, resource_present(resources, section.resource)
 
 
 # Wrappers keyed by format_tag. Combined with CHANNEL_SECTION_MODELS
@@ -415,7 +419,7 @@ def _parse_html_fields_sysinfo(
     result = html_si.parse(resources)
     if not isinstance(result, dict):
         result = {}
-    return result, _resource_present(resources, source.resource), html_si.failed_fields
+    return result, resource_present(resources, source.resource), html_si.failed_fields
 
 
 def _parse_hnap_sysinfo(
@@ -456,7 +460,7 @@ def _parse_js_sysinfo(
     if named_funcs:
         anchors = _count_js_function_anchors(soup, named_funcs)
     else:
-        anchors = _resource_present(resources, source.resource)
+        anchors = resource_present(resources, source.resource)
     return result, anchors, js_si.failed_fields
 
 
@@ -480,7 +484,7 @@ def _parse_js_vars_sysinfo(
     if var_names:
         anchors = _count_js_variable_anchors(soup, var_names)
     else:
-        anchors = _resource_present(resources, source.resource)
+        anchors = resource_present(resources, source.resource)
     return result, anchors, js_vars_si.failed_fields
 
 
@@ -493,7 +497,7 @@ def _parse_json_sysinfo(
     result = json_si.parse(resources)
     if not isinstance(result, dict):
         result = {}
-    return result, _resource_present(resources, source.resource), json_si.failed_fields
+    return result, resource_present(resources, source.resource), json_si.failed_fields
 
 
 def _parse_xml_sysinfo(
@@ -505,7 +509,7 @@ def _parse_xml_sysinfo(
     result = xml_si.parse(resources)
     if not isinstance(result, dict):
         result = {}
-    return result, _resource_present(resources, source.resource), xml_si.failed_fields
+    return result, resource_present(resources, source.resource), xml_si.failed_fields
 
 
 # Wrappers keyed by format_tag. Combined with SYSTEM_INFO_SOURCE_MODELS

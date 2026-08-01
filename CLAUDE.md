@@ -148,6 +148,16 @@ propose fixes first.
   this be coming from outside the code?"
 - **Don't propose fixes until you can name what specifically broke
   and why.** "Probably X" is not a fix-ready diagnosis.
+- **When the task cannot validate a hypothesis, the deliverable is an
+  evidence ledger, not a recommendation.** Some problems have no
+  reproduction, no hardware, and no way to test a theory locally
+  (#120: five months, seven contributor retests, a dozen dead
+  theories). In that state every session invents a fix and every fix
+  collapses under the next question. Report what is closed and what is
+  open, and stop. A theory closed with evidence is worth as much as a
+  change and is the only progress such an issue accepts — the durable
+  output of the 2026-07-27 session was its negative results, not one
+  of its recommendations.
 
 ## Decision Discipline
 
@@ -187,13 +197,53 @@ propose fixes first.
   something later, we do not, and that adds to hidden tech debt."*
   Never write "separate pass if desired" — that's deferral dressed
   as a suggestion.
+- **Name the governing spec before recommending anything in its
+  subsystem, and say in the reply which one you read.** Code plus
+  tests is not a substitute. The `AUTH_LOCKOUT` mapping was assessed
+  from the signal enum, the HA error map and 12 locale files, and the
+  recommendation was wrong: the real finding was in `AUTH_HNAP_SPEC.md`,
+  which was never opened. Stating the spec out loud makes the omission
+  visible at a glance instead of costing a round trip to discover.
+- **Don't manufacture urgency, and don't dismiss by authorship.**
+  Inflating a remote edge case into a release gate and waving a real
+  gap away as "pre-existing" are the same move: closing a question
+  instead of weighing it. Rank a gap by what it is and what it costs,
+  then say plainly whether it blocks the current cut.
 
 ## Verification Discipline
+
+The first two rules govern the rest of this section. Every other rule
+here asks for a check done privately; these two put the check in the
+reply, where a skipped one is visible without re-running the work.
+
+- **Cite what you opened.** When stating a fact or a cause about the
+  system, name the files or commands the claim rests on. A claim about
+  CI cites a workflow file; a claim about history cites `git log`. When
+  the named sources don't cover the claim's domain, the hole shows on
+  the page: *"CI isn't recording the trend (checked: Makefile, the
+  regression script)"* is visibly unsupported, because neither source
+  is CI. This is the forcing function from *name the governing spec*,
+  generalised past specs.
+- **An unexplained number stays unexplained.** Report the measurement;
+  do not supply a cause you have not verified. "I can't account for
+  this yet" is a complete answer. On 2026-07-29 every measurement was
+  correct — fleet accuracy, the per-modem deltas, the four-day zero
+  window — and every wrong conclusion was an invented cause laid over
+  one of them, each disproved by a single `git log` or `grep` that ran
+  only after the user pushed back.
 
 - **Verify against ground truth, not against doc claims.** When
   asked to review a planning doc / status doc / roadmap, summarize
   what's *actually true* (check code, git, issues), not what the
   doc *says*.
+- **Empty output is not an empty set.** Never assert from a command
+  whose output you haven't confirmed is well-formed. A `--jq`
+  expression that silently emits nothing is indistinguishable from a
+  real zero: totev#313 was reported as "closed same day, no comments,
+  no fix" and made a session's headline conclusion, when it in fact
+  had two comments that reversed the reading entirely. Before any
+  claim rests on absence, re-run in a different shape — `--json` and
+  parse, or count the records.
 - **Verify the premise before creating a worktree.** For any task
   that says "remove X" or "clean up Y," `rg` for it on the current
   branch first. Zero hits means the work is already done — stop

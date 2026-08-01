@@ -2,7 +2,7 @@
 
 > Auto-generated. Run `scripts/generate_catalog_index.py` to refresh.
 
-**43 configurations supported** — 24 confirmed on real hardware, 19 awaiting verification.
+**44 configurations supported** — 26 confirmed on real hardware, 18 awaiting verification.
 
 ---
 
@@ -33,19 +33,18 @@ and share a diagnostics snapshot.
 
 | Modem | Transport | ISPs | Capture |
 |-------|-----------|------|---------|
-| S34 | HNAP | Comcast, Cox, Spectrum, Xfinity | generated |
+| S34 | HNAP | Comcast, Cox, Spectrum, Xfinity | synthetic |
 | SB6141 | HTML | Comcast, Cox, Spectrum, TWC, Mediacom | hybrid |
 | SB8200 (Form Login CBN) | CBN | Comcast, Cox, Spectrum, Xfinity | synthetic |
 | G54 | HTML | Cox, Spectrum, Xfinity | generated |
 | C3700 | HTML | Comcast, Cox, Spectrum | synthetic |
 | CM2000 | HTML | Comcast, Cox, Spectrum, Xfinity | synthetic |
 | CM600 | HTML | Comcast, Cox, Spectrum, TWC | synthetic |
-| F3896LG-VMB | HTML | Virgin Media UK | generated |
+| F3896LG-ZG | HTML | Ziggo | — |
 | CGA2121 | HTML | Telia | generated |
 | CGA4236 | HTML | Unknown | — |
 | CGA6444VF | HTML | Vodafone | — |
-| TC4400 | HTML | Comcast, Cox, Spectrum, Rogers, Shaw, Videotron, Vodafone Germany, Unitymedia, Teksavvy | generated |
-| XB6 | HTML | Rogers | — |
+| TC4400 | HTML | Comcast, Cox, Spectrum, Rogers, Shaw, Videotron, Vodafone Germany, Unitymedia, Teksavvy | — |
 | XB8 | HTML | Rogers, Comcast, Xfinity, Cox | reconstructed |
 
 ## Pending Review
@@ -89,8 +88,10 @@ Entries with an open capability gap are listed above, not here.
 | CM1200 (basic) | HTML | Comcast, Spectrum, Cox | — |
 | CM2050V | HTML | Comcast, Xfinity | — |
 | CM3000 | HTML | Comcast, Cox, Spectrum, Xfinity | — |
+| F3896LG-VMB | HTML | Virgin Media UK | generated |
 | DM1000 | HTML | Koodo | hybrid |
 | XB10 | HTML | Xfinity | — |
+| XB6 | HTML | Rogers | — |
 | XB7 | HTML | Rogers, Comcast, Xfinity | generated |
 
 ---

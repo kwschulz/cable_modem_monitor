@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+from solentlabs.cable_modem_monitor_core.test_harness.auth.base import ActionConfig
 from solentlabs.cable_modem_monitor_core.test_harness.auth.form_sjcl import (
     FormSjclAuthHandler,
 )
@@ -23,7 +24,7 @@ def _make_handler(
     restart_path: str = "",
 ) -> FormSjclAuthHandler:
     """Build a handler with deterministic test parameters."""
-    return FormSjclAuthHandler(
+    handler = FormSjclAuthHandler(
         login_page_path="/login.htm",
         login_endpoint="/api/login",
         pbkdf2_iterations=1000,
@@ -32,9 +33,17 @@ def _make_handler(
         decrypt_aad="nonce",
         csrf_header=csrf_header,
         cookie_name=cookie_name,
-        logout_path=logout_path,
-        restart_path=restart_path,
     )
+    handler.configure_actions(
+        ActionConfig(
+            cookie_name=cookie_name,
+            logout_method="GET",
+            logout_path=logout_path,
+            restart_method="POST",
+            restart_path=restart_path,
+        )
+    )
+    return handler
 
 
 # ------------------------------------------------------------------

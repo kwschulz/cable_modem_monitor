@@ -1,0 +1,185 @@
+# F3896LG REST API returns SC-QAM and OFDM/OFDMA in the same array.
+# OFDM/OFDMA power is reported as integer-tenths (53 = 5.3 dBmV).
+# Multi-array form with filter splits channel types so scale applies
+# only to OFDM/OFDMA power.
+
+downstream:
+  format: json
+  resource: "/rest/v1/cablemodem/downstream"
+  arrays:
+    # SC-QAM channels — power in normal float dBmV
+    - array_path: "downstream.channels"
+      filter:
+        channel_type: "qam"
+      fields:
+        - key: "channelId"
+          field: channel_id
+          type: integer
+        - key: "lockStatus"
+          field: lock_status
+          type: lock_status
+        - key: "channelType"
+          field: channel_type
+          type: string
+          map:
+            "sc_qam": "qam"
+        - key: "modulation"
+          field: modulation
+          type: modulation
+        - key: "frequency"
+          field: frequency
+          type: integer
+        - key: "power"
+          field: power
+          type: float
+        - key: "snr"
+          field: snr
+          type: float
+          fallback_key: "rxMer"
+        - key: "correctedErrors"
+          field: corrected
+          type: integer
+        - key: "uncorrectedErrors"
+          field: uncorrected
+          type: integer
+    # OFDM channels — power in integer-tenths, scale to dBmV
+    - array_path: "downstream.channels"
+      filter:
+        channel_type: "ofdm"
+      fields:
+        - key: "channelId"
+          field: channel_id
+          type: integer
+        - key: "lockStatus"
+          field: lock_status
+          type: lock_status
+        - key: "channelType"
+          field: channel_type
+          type: string
+        - key: "modulation"
+          field: modulation
+          type: modulation
+        - key: "power"
+          field: power
+          type: float
+          scale: 0.1
+        - key: "correctedErrors"
+          field: corrected
+          type: integer
+        - key: "uncorrectedErrors"
+          field: uncorrected
+          type: integer
+        - key: "channelWidth"
+          field: channel_width
+          type: integer
+        - key: "fftType"
+          field: fft_type
+          type: string
+        - key: "numberOfActiveSubCarriers"
+          field: active_subcarriers
+          type: integer
+
+upstream:
+  format: json
+  resource: "/rest/v1/cablemodem/upstream"
+  arrays:
+    # ATDMA channels — power in normal float dBmV
+    - array_path: "upstream.channels"
+      filter:
+        channel_type: "atdma"
+      fields:
+        - key: "channelId"
+          field: channel_id
+          type: integer
+        - key: "lockStatus"
+          field: lock_status
+          type: lock_status
+        - key: "channelType"
+          field: channel_type
+          type: string
+        - key: "modulation"
+          field: modulation
+          type: modulation
+        - key: "frequency"
+          field: frequency
+          type: integer
+        - key: "power"
+          field: power
+          type: float
+        - key: "symbolRate"
+          field: symbol_rate
+          type: integer
+    # OFDMA channels — power in integer-tenths, scale to dBmV
+    - array_path: "upstream.channels"
+      filter:
+        channel_type: "ofdma"
+      fields:
+        - key: "channelId"
+          field: channel_id
+          type: integer
+        - key: "lockStatus"
+          field: lock_status
+          type: lock_status
+        - key: "channelType"
+          field: channel_type
+          type: string
+        - key: "modulation"
+          field: modulation
+          type: modulation
+        - key: "power"
+          field: power
+          type: float
+          scale: 0.1
+        - key: "channelWidth"
+          field: channel_width
+          type: integer
+        - key: "fftType"
+          field: fft_type
+          type: string
+        - key: "numberOfActiveSubCarriers"
+          field: active_subcarriers
+          type: integer
+
+system_info:
+  sources:
+    - format: json
+      resource: "/rest/v1/cablemodem/state_"
+      fields:
+        - key: "upTime"
+          field: system_uptime
+          type: uptime
+          format: seconds
+          path: "cablemodem"
+        - key: "docsisVersion"
+          field: docsis_version
+          type: string
+          path: "cablemodem"
+        - key: "status"
+          field: docsis_status
+          type: string
+          path: "cablemodem"
+          map:
+            "operational": "Operational"
+    # This firmware publishes the version fields on a separate endpoint;
+    # state_ carries none. The VMB sibling has no equivalent source.
+    - format: json
+      resource: "/rest/v1/system/info"
+      fields:
+        - key: "hardwareVersion"
+          field: hardware_version
+          type: string
+          path: "info"
+        - key: "softwareVersion"
+          field: software_version
+          type: string
+          path: "info"
+
+# DOCSIS 3.1: aggregate QAM-only totals. OFDM LDPC codewords operate
+# at a vastly different scale and are not aggregated.
+aggregate:
+  total_corrected:
+    sum: corrected
+    channels: downstream.qam
+  total_uncorrected:
+    sum: uncorrected
+    channels: downstream.qam

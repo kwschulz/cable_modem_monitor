@@ -9,7 +9,6 @@ HNAP auth handler and HNAP server integration tests live in
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -22,20 +21,52 @@ from solentlabs.cable_modem_monitor_core.test_harness.auth import (
     HnapAuthHandler,
     create_auth_handler,
 )
+from solentlabs.cable_modem_monitor_core.test_harness.auth.base import ActionConfig
 from solentlabs.cable_modem_monitor_core.test_harness.routes import (
     RouteEntry,
     build_routes,
     normalize_path,
 )
-from solentlabs.cable_modem_monitor_core.test_harness.server import HARMockServer, _find_route
+from solentlabs.cable_modem_monitor_core.test_harness.server import (
+    _UNRESOLVED_PLACEHOLDER_RE,
+    HARMockServer,
+    _find_route,
+)
+
+from tests._helpers import load_fixture
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def _load_entries(name: str) -> list[dict[str, Any]]:
     """Load HAR entries from a fixture file."""
-    data = json.loads((FIXTURES_DIR / name).read_text())
+    data = load_fixture(FIXTURES_DIR / name)
     return list(data["_entries"])
+
+
+def _with_actions(
+    handler: AuthHandler,
+    *,
+    logout_path: str = "",
+    logout_method: str = "GET",
+    restart_path: str = "",
+    restart_method: str = "POST",
+) -> Any:
+    """Configure a directly-constructed handler's action endpoints.
+
+    The factory does this from modem.yaml; unit tests that build a
+    handler without one configure it here.
+    """
+    handler.configure_actions(
+        ActionConfig(
+            cookie_name="",
+            logout_method=logout_method,
+            logout_path=logout_path,
+            restart_method=restart_method,
+            restart_path=restart_path,
+        )
+    )
+    return handler
 
 
 def _make_config(data: dict[str, Any]) -> Any:
@@ -97,6 +128,21 @@ class TestBuildRoutes:
         routes = build_routes(entries)
 
         assert routes[("GET", "/missing.html")].status == 404
+
+    def test_entry_without_a_response_is_not_a_route(self) -> None:
+        """A request that never got a response cannot be replayed as one.
+
+        har-capture records status -1 when the modem tore the
+        connection down mid-request. Routing it served ``-1`` as an
+        HTTP status; the request must fall through instead.
+        """
+        entries = [
+            {
+                "request": {"method": "GET", "url": "http://192.168.100.1/logout.html"},
+                "response": {"status": -1, "headers": [], "content": {"text": ""}},
+            }
+        ]
+        assert build_routes(entries) == {}
 
     def test_empty_entries(self) -> None:
         """Empty HAR entries produce empty routes."""
@@ -423,15 +469,15 @@ class TestFormAuthHandler:
 
     def test_restart_request_detection(self) -> None:
         """POST to restart path is detected as restart request."""
-        handler = FormAuthHandler("/goform/login", restart_path="/goform/restart")
+        handler = _with_actions(FormAuthHandler("/goform/login"), restart_path="/goform/restart")
         assert handler.is_restart_request("POST", "/goform/restart")
         assert not handler.is_restart_request("GET", "/goform/restart")
         assert not handler.is_restart_request("POST", "/other")
 
     def test_restart_custom_method(self) -> None:
         """Restart with non-POST method (e.g. GET) is detected."""
-        handler = FormAuthHandler(
-            "/goform/login",
+        handler = _with_actions(
+            FormAuthHandler("/goform/login"),
             restart_path="/api/restart",
             restart_method="GET",
         )
@@ -440,7 +486,7 @@ class TestFormAuthHandler:
 
     def test_restart_clears_session(self) -> None:
         """Restart clears session state."""
-        handler = FormAuthHandler("/goform/login", restart_path="/goform/restart")
+        handler = _with_actions(FormAuthHandler("/goform/login"), restart_path="/goform/restart")
         handler.handle_login("POST", "/goform/login", b"user=admin", {})
         assert handler.is_authenticated({})
 
@@ -450,7 +496,7 @@ class TestFormAuthHandler:
 
     def test_logout_clears_session(self) -> None:
         """Logout clears session state (parity with restart)."""
-        handler = FormAuthHandler("/goform/login", logout_path="/goform/logout")
+        handler = _with_actions(FormAuthHandler("/goform/login"), logout_path="/goform/logout")
         handler.handle_login("POST", "/goform/login", b"user=admin", {})
         assert handler.is_authenticated({})
 
@@ -561,6 +607,355 @@ class TestHARMockServerNoAuth:
             resp = requests.get(f"{server.base_url}/status.html")
             assert resp.status_code == 200
             assert resp.text == "<html>DS data</html>"
+
+    def test_declared_post_login_endpoint_answered_when_absent_from_har(
+        self,
+        entries: list[dict[str, Any]],
+    ) -> None:
+        """A declared post-login path missing from the capture gets a synthesized 200.
+
+        Trimmed HARs routinely omit these side-effect calls, which would
+        otherwise 404 the replay for a modem that works in the field.
+        """
+        config = _make_config({"session": {"post_login_endpoints": ["/establish.html"]}})
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.get(f"{server.base_url}/establish.html")
+            assert resp.status_code == 200
+
+    def test_har_entry_wins_over_synthesized_post_login_response(
+        self,
+        entries: list[dict[str, Any]],
+    ) -> None:
+        """A captured response for a declared path is served, not the synthetic one."""
+        config = _make_config({"session": {"post_login_endpoints": ["/status.html"]}})
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.get(f"{server.base_url}/status.html")
+            assert resp.text == "<html>DS data</html>"
+
+
+class TestHARMockServerActionFidelity:
+    """Logout and restart answer from the capture, and can fail.
+
+    The harness used to intercept every action before route lookup and
+    answer it from a per-strategy handler, so a captured action response
+    was unreachable and no action request could fail. Regression: a
+    bearer logout went out as an unresolved ``{auth:user_id}`` path,
+    got 501 from a server with no ``do_DELETE``, and passed.
+    """
+
+    @pytest.fixture()
+    def entries(self) -> list[dict[str, Any]]:
+        """Load bearer HAR entries with a captured DELETE logout."""
+        return _load_entries("har_entries_bearer_actions.json")
+
+    @pytest.fixture()
+    def config(self) -> Any:
+        """Bearer config whose logout addresses the session in the URL."""
+        return _make_config(
+            {
+                "auth": {
+                    "strategy": "bearer",
+                    "login_endpoint": "/rest/v1/user/login",
+                    "token_path": "created.token",
+                    "user_id_path": "created.userId",
+                },
+                "actions": {
+                    "logout": {
+                        "type": "http",
+                        "method": "DELETE",
+                        "endpoint": "/rest/v1/user/{auth:user_id}/token/{auth:token}",
+                        "requires_session": True,
+                    },
+                },
+            }
+        )
+
+    def test_delete_is_dispatched(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """A declared DELETE reaches the dispatcher instead of the stdlib's 501."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.delete(f"{server.base_url}/rest/v1/user/7/token/CAPTURED_TOKEN")
+            assert resp.status_code != 501
+
+    def test_captured_action_response_wins_over_handler(
+        self,
+        entries: list[dict[str, Any]],
+        config: Any,
+    ) -> None:
+        """The capture's 204 is served, not the handler's synthesized 200."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.delete(f"{server.base_url}/rest/v1/user/7/token/CAPTURED_TOKEN")
+            assert resp.status_code == 204
+
+    def test_unresolved_placeholder_fails_loudly(
+        self,
+        entries: list[dict[str, Any]],
+        config: Any,
+    ) -> None:
+        """A request still carrying ``{auth:…}`` is a Core bug, not a route miss.
+
+        Percent-encoded by ``requests`` on the way out, so the check has
+        to unquote before looking.
+        """
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.delete(f"{server.base_url}/rest/v1/user/{{auth:user_id}}/token/CAPTURED_TOKEN")
+            assert resp.status_code == 500
+            assert "auth:user_id" in resp.text
+
+    def test_placeholder_body_does_not_span_a_nested_brace(self) -> None:
+        """`{` is excluded from the placeholder body, which keeps the match linear.
+
+        Allowing it makes the scan quadratic: on a path of repeated
+        `{auth:` with no closing brace, every start position runs to the
+        end of the string before failing (py/polynomial-redos). No real
+        placeholder nests a brace, so the exclusion costs nothing —
+        asserted here so the character class cannot quietly regress.
+        """
+        assert _UNRESOLVED_PLACEHOLDER_RE.search("/v1/{auth:user_id}/t") is not None
+        assert _UNRESOLVED_PLACEHOLDER_RE.search("/v1/{cookie:sessionToken}") is not None
+        assert _UNRESOLVED_PLACEHOLDER_RE.search("/v1/user/7/token/abc") is None
+
+        # The pathological shape: opener repeated, never closed.
+        assert _UNRESOLVED_PLACEHOLDER_RE.search("{auth:" * 64) is None
+
+        # A real placeholder buried in junk is still caught, but the match
+        # starts at the inner brace rather than spanning from the outer one.
+        nested = _UNRESOLVED_PLACEHOLDER_RE.search("{auth:{auth:x}")
+        assert nested is not None
+        assert nested.group(0) == "{auth:x}"
+
+    def test_action_served_status_is_recorded(
+        self,
+        entries: list[dict[str, Any]],
+        config: Any,
+    ) -> None:
+        """The server records what it answered, so a caller can assert on it."""
+        with HARMockServer(entries, modem_config=config) as server:
+            requests.delete(f"{server.base_url}/rest/v1/user/7/token/CAPTURED_TOKEN")
+            assert server.auth_handler.served_actions["logout"] == 204
+
+    def test_action_dispatched_for_strategy_without_its_own_matcher(self) -> None:
+        """Restart is matched from config for every strategy, not per-handler.
+
+        ``basic`` never implemented restart matching, so a declared
+        restart fell through to the route table and 404'd while the
+        action test still passed.
+        """
+        entries = _load_entries("har_entries_no_auth.json")
+        config = _make_config(
+            {
+                "auth": {"strategy": "basic"},
+                "actions": {
+                    "restart": {"type": "http", "method": "POST", "endpoint": "/goform/reboot"},
+                },
+            }
+        )
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.post(f"{server.base_url}/goform/reboot", data="x=1")
+            assert resp.status_code == 200
+            assert server.auth_handler.served_actions["restart"] == 200
+
+
+class TestHARMockServerBearerCaptureSeeding:
+    """The bearer handler issues the captured token, not a synthetic one.
+
+    A logout that addresses the session in its URL only replays if the
+    token Core carries is the token the captured logout path contains.
+    Enforcement compares against what the client sends, derived from the
+    login response body — never the captured ``Authorization`` header,
+    which har-capture sanitizes independently of the body.
+    """
+
+    @pytest.fixture()
+    def entries(self) -> list[dict[str, Any]]:
+        """Load bearer HAR entries with a captured login response."""
+        return _load_entries("har_entries_bearer_actions.json")
+
+    @pytest.fixture()
+    def config(self) -> Any:
+        """Bearer config matching the captured login response shape."""
+        return _make_config(
+            {
+                "auth": {
+                    "strategy": "bearer",
+                    "login_endpoint": "/rest/v1/user/login",
+                    "token_path": "created.token",
+                    "user_id_path": "created.userId",
+                },
+            }
+        )
+
+    def test_login_serves_the_captured_response(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """The captured login body reaches the client, userId included."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.post(f"{server.base_url}/rest/v1/user/login", json={"password": "pw"})
+            assert resp.status_code == 201
+            assert resp.json() == {"created": {"token": "CAPTURED_TOKEN", "userId": 7}}
+
+    def test_captured_token_is_enforced(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """Data requests need the captured token back on the Authorization header."""
+        with HARMockServer(entries, modem_config=config) as server:
+            ok = requests.get(
+                f"{server.base_url}/rest/v1/data",
+                headers={"Authorization": "Bearer CAPTURED_TOKEN"},
+            )
+            assert ok.status_code == 200
+
+    def test_synthetic_token_is_rejected(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """The old synthetic token no longer opens the session."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.get(
+                f"{server.base_url}/rest/v1/data",
+                headers={"Authorization": "Bearer mock-bearer-token"},
+            )
+            assert resp.status_code == 401
+
+    def test_falls_back_to_synthetic_token_without_a_capture(self, config: Any) -> None:
+        """A capture with no login response still yields a working login."""
+        entries = _load_entries("har_entries_no_auth.json")
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.post(f"{server.base_url}/rest/v1/user/login", json={"password": "pw"})
+            assert resp.status_code == 201
+            assert resp.json()["created"]["token"]
+
+
+class TestHARMockServerRequestBodyShape:
+    """A JSON key the capture never carried is refused, not routed.
+
+    Routes and action matching key on method and path, so nothing
+    compared what Core sent against what the capture recorded. A
+    synthesized fixture written to match Core's own request therefore
+    certified Core against itself: the F3896LG login carried a
+    ``username`` key for as long as ``BearerAuthManager`` sent one, and
+    every replay passed (#82).
+    """
+
+    @pytest.fixture()
+    def entries(self) -> list[dict[str, Any]]:
+        """Bearer entries whose captured login body is password-only."""
+        return _load_entries("har_entries_bearer_actions.json")
+
+    @pytest.fixture()
+    def config(self) -> Any:
+        """Bearer config matching the captured login."""
+        return _make_config(
+            {
+                "auth": {
+                    "strategy": "bearer",
+                    "login_endpoint": "/rest/v1/user/login",
+                    "token_path": "created.token",
+                },
+            }
+        )
+
+    def test_captured_shape_is_served(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """The body the capture recorded replays normally."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.post(f"{server.base_url}/rest/v1/user/login", json={"password": "pw"})
+            assert resp.status_code == 201
+
+    def test_invented_key_fails_loudly(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """The exact #82 defect: a username key the firmware was never sent."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.post(
+                f"{server.base_url}/rest/v1/user/login",
+                json={"username": "admin", "password": "pw"},
+            )
+            assert resp.status_code == 500
+            assert "username" in resp.text
+
+    def test_subset_of_captured_keys_is_allowed(self, entries: list[dict[str, Any]], config: Any) -> None:
+        """Sending fewer keys than the capture is routine, not a defect."""
+        with HARMockServer(entries, modem_config=config) as server:
+            resp = requests.post(f"{server.base_url}/rest/v1/user/login", json={})
+            assert resp.status_code == 201
+
+    def test_form_encoded_body_is_not_compared(self) -> None:
+        """Form posts carry browser-only fields; key comparison says nothing.
+
+        The fixture's captured login body is ``username=admin&password=secret``
+        — a real form post, so the endpoint must stay unindexed. Pointing
+        this at a capture with no POST at all would pass whatever the
+        exclusion did.
+        """
+        entries = _load_entries("har_entries_form_auth.json")
+        config = _make_config({"auth": {"strategy": "form", "action": "/goform/login"}})
+        with HARMockServer(entries, modem_config=config) as server:
+            assert ("POST", "/goform/login") not in server.json_body_keys
+            resp = requests.post(f"{server.base_url}/goform/login", json={"invented": "1"})
+            assert resp.status_code != 500
+
+
+class TestHARMockServerWireFraming:
+    """Wire re-framing: replayed headers must be true on the wire.
+
+    A HAR stores the decoded response body while keeping the original
+    headers, so a faithful replay must re-frame the body to match what
+    the headers promise (re-chunk, re-compress) and rewrite absolute
+    redirect targets to the harness origin. Regression: the TM1602A
+    fixture had Transfer-Encoding deleted to mask this gap.
+    """
+
+    @pytest.fixture()
+    def entries(self) -> list[dict[str, Any]]:
+        """Load wire-framing HAR entries from fixture."""
+        return _load_entries("har_entries_wire_framing.json")
+
+    def test_chunked_response_decodes_intact(self, entries: list[dict[str, Any]]) -> None:
+        """A chunked-marked body is re-chunked on the wire and decodes cleanly."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/chunked.html")
+            assert resp.status_code == 200
+            assert resp.text == "<html>chunked data</html>"
+            assert resp.headers["Transfer-Encoding"] == "chunked"
+            assert "Content-Length" not in resp.headers
+
+    def test_gzip_response_decodes_intact(self, entries: list[dict[str, Any]]) -> None:
+        """A gzip-marked body is re-compressed on the wire and decodes cleanly."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/gzipped.html")
+            assert resp.status_code == 200
+            assert resp.text == "<html>gzipped data</html>"
+            assert resp.headers["Content-Encoding"] == "gzip"
+
+    def test_chunked_gzip_combination(self, entries: list[dict[str, Any]]) -> None:
+        """Content-Encoding applies before Transfer-Encoding chunking."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/chunked-gzip.html")
+            assert resp.status_code == 200
+            assert resp.text == "<html>both encodings</html>"
+
+    def test_absolute_location_rewritten_to_harness_origin(self, entries: list[dict[str, Any]]) -> None:
+        """An absolute Location pointing at the captured host targets the harness."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/", allow_redirects=False)
+            assert resp.status_code == 302
+            assert resp.headers["Location"] == f"{server.base_url}/index.htm"
+
+    def test_absolute_redirect_can_be_followed(self, entries: list[dict[str, Any]]) -> None:
+        """Following a rewritten redirect stays inside the harness."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/", timeout=5)
+            assert resp.status_code == 200
+            assert resp.text == "<html>index</html>"
+
+    def test_relative_location_untouched(self, entries: list[dict[str, Any]]) -> None:
+        """A relative Location is replayed as captured."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/relative-redirect.html", allow_redirects=False)
+            assert resp.headers["Location"] == "/index.htm"
+
+    def test_unsupported_content_encoding_fails_loudly(self, entries: list[dict[str, Any]]) -> None:
+        """An encoding the harness cannot reconstruct returns 500, not a silent lie."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/brotli.html")
+            assert resp.status_code == 500
+            assert "br" in resp.text
+
+    def test_plain_response_gets_content_length(self, entries: list[dict[str, Any]]) -> None:
+        """Unframed responses carry an accurate Content-Length."""
+        with HARMockServer(entries) as server:
+            resp = requests.get(f"{server.base_url}/index.htm")
+            assert resp.headers["Content-Length"] == str(len("<html>index</html>"))
 
 
 class TestHARMockServerFormAuth:

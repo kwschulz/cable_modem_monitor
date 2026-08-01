@@ -88,6 +88,8 @@ def test_invalid_modem_config(fixture_path: Path):
 # │ auth_url_token.json      │ auth.ajax_login             │ True           │
 # │ auth_url_token.json      │ auth.token_prefix           │ "ct_"          │
 # │ auth_form_pbkdf2.json    │ auth.pbkdf2_iterations      │ 1000           │
+# │ auth_form_pbkdf2.json    │ session.post_login_endpoi.. │ ["/establi..]  │
+# │ auth_form_sjcl.json      │ session.post_login_endpoi.. │ [] (default)   │
 # │ auth_form_nonce.json     │ auth.nonce_length           │ 8              │
 # │ auth_basic.json          │ auth.challenge_cookie       │ False          │
 # │ auth_basic_challenge_..  │ auth.challenge_cookie       │ True           │
@@ -111,6 +113,8 @@ FIELD_ACCESS_CASES = [
     ("auth_url_token.json",              "auth.token_prefix",       "ct_"),
     ("auth_form_pbkdf2.json",            "auth.pbkdf2_iterations",  1000),
     ("auth_form_pbkdf2.json",            "auth.csrf_header",        "X-CSRF-TOKEN"),
+    ("auth_form_pbkdf2.json",            "session.post_login_endpoints", ["/establish.html"]),
+    ("auth_form_sjcl.json",              "session.post_login_endpoints", []),
     ("auth_form_nonce.json",             "auth.nonce_length",       8),
     ("auth_form_nonce.json",             "auth.success_prefix",     "Url:"),
     ("auth_basic.json",                  "auth.challenge_cookie",   False),

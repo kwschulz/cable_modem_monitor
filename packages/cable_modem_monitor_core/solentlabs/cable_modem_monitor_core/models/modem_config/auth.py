@@ -1,9 +1,10 @@
 """Auth strategy models for modem.yaml.
 
 Ten strategies as a discriminated union on the 'strategy' field.
-Each model carries ``display_name`` and ``transport`` ClassVars so
-display labels, transport validation sets, and factory dispatch can
-derive from the models themselves.
+Each model carries ``display_name``, ``transport``, and ``stateless``
+ClassVars so display labels, transport validation sets, factory
+dispatch, login-page detection, and the published constraint tables
+can derive from the models themselves.
 
 Per MODEM_YAML_SPEC.md Auth section and ARCHITECTURE_DECISIONS.md
 constraint model.
@@ -11,7 +12,7 @@ constraint model.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar, Literal, get_args
+from typing import Annotated, Any, ClassVar, Literal, NamedTuple, get_args
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_validator
 
@@ -20,11 +21,15 @@ class AuthStrategyBase(BaseModel):
     """Base for all auth strategy models.
 
     Carries self-describing ClassVars so display labels, transport
-    validation sets, and factory dispatch can derive from the models.
+    validation sets, login-page detection, and factory dispatch can
+    derive from the models. ``stateless`` means the strategy
+    establishes no server-side session. See ARCHITECTURE_DECISIONS.md
+    § How to add an auth strategy.
     """
 
     display_name: ClassVar[str]
     transport: ClassVar[str]
+    stateless: ClassVar[bool]
 
 
 class NoneAuth(AuthStrategyBase):
@@ -35,6 +40,7 @@ class NoneAuth(AuthStrategyBase):
 
     display_name: ClassVar[str] = "No Authentication"
     transport: ClassVar[str] = "http"
+    stateless: ClassVar[bool] = True
 
 
 class BasicAuth(AuthStrategyBase):
@@ -47,6 +53,7 @@ class BasicAuth(AuthStrategyBase):
 
     display_name: ClassVar[str] = "Basic Authentication"
     transport: ClassVar[str] = "http"
+    stateless: ClassVar[bool] = True
 
 
 class FormSuccess(BaseModel):
@@ -75,6 +82,7 @@ class FormAuth(AuthStrategyBase):
 
     display_name: ClassVar[str] = "Form Login"
     transport: ClassVar[str] = "http"
+    stateless: ClassVar[bool] = False
 
     @field_validator("password_field", mode="before")
     @classmethod
@@ -103,6 +111,7 @@ class FormNonceAuth(AuthStrategyBase):
 
     display_name: ClassVar[str] = "Form Login (Nonce)"
     transport: ClassVar[str] = "http"
+    stateless: ClassVar[bool] = False
 
 
 class UrlTokenAuth(AuthStrategyBase):
@@ -121,6 +130,7 @@ class UrlTokenAuth(AuthStrategyBase):
 
     display_name: ClassVar[str] = "URL Token"
     transport: ClassVar[str] = "http"
+    stateless: ClassVar[bool] = False
 
 
 class HnapAuth(AuthStrategyBase):
@@ -132,6 +142,7 @@ class HnapAuth(AuthStrategyBase):
 
     display_name: ClassVar[str] = "HNAP"
     transport: ClassVar[str] = "hnap"
+    stateless: ClassVar[bool] = False
 
 
 class FormPbkdf2Auth(AuthStrategyBase):
@@ -151,6 +162,7 @@ class FormPbkdf2Auth(AuthStrategyBase):
 
     display_name: ClassVar[str] = "Form Login (PBKDF2)"
     transport: ClassVar[str] = "http"
+    stateless: ClassVar[bool] = False
 
 
 class FormSjclAuth(AuthStrategyBase):
@@ -181,6 +193,7 @@ class FormSjclAuth(AuthStrategyBase):
 
     display_name: ClassVar[str] = "Form Login (SJCL)"
     transport: ClassVar[str] = "http"
+    stateless: ClassVar[bool] = False
 
 
 class FormCbnAuth(AuthStrategyBase):
@@ -208,6 +221,7 @@ class FormCbnAuth(AuthStrategyBase):
 
     display_name: ClassVar[str] = "Form Login CBN"
     transport: ClassVar[str] = "cbn"
+    stateless: ClassVar[bool] = False
 
 
 class BearerAuth(AuthStrategyBase):
@@ -217,9 +231,12 @@ class BearerAuth(AuthStrategyBase):
     strategy: Literal["bearer"]
     login_endpoint: str
     token_path: str
+    username_field: str = "username"
+    user_id_path: str = ""
 
     display_name: ClassVar[str] = "Bearer Token"
     transport: ClassVar[str] = "http"
+    stateless: ClassVar[bool] = False
 
 
 AuthConfig = Annotated[
@@ -256,13 +273,41 @@ _AUTH_MODELS: list[type[AuthStrategyBase]] = [
 ]
 
 
+class AuthStrategyRow(NamedTuple):
+    """One strategy's self-description, read straight off its ClassVars."""
+
+    strategy: str
+    display_name: str
+    transport: str
+    stateless: bool
+
+
+def get_auth_strategy_rows() -> list[AuthStrategyRow]:
+    """Return every strategy's constraint row, sorted by strategy literal.
+
+    The single authoritative source for the transport → auth
+    constraint tables published in ARCHITECTURE.md and
+    MODEM_YAML_SPEC.md; those tables are generated from this, not
+    hand-maintained. See ``scripts/generate_constraint_tables.py``.
+    """
+    return sorted(
+        AuthStrategyRow(
+            strategy=get_args(m.model_fields["strategy"].annotation)[0],
+            display_name=m.display_name,
+            transport=m.transport,
+            stateless=m.stateless,
+        )
+        for m in _AUTH_MODELS
+    )
+
+
 def get_strategy_display_labels() -> dict[str, str]:
     """Return ``{strategy_literal: display_name}`` for all auth models.
 
     Used by config flow to build human-readable variant dropdown labels.
     Replaces the hand-maintained ``AUTH_STRATEGY_LABELS`` dict.
     """
-    return {get_args(m.model_fields["strategy"].annotation)[0]: m.display_name for m in _AUTH_MODELS}
+    return {row.strategy: row.display_name for row in get_auth_strategy_rows()}
 
 
 def get_transport_strategy_sets() -> dict[str, frozenset[str]]:
@@ -273,9 +318,8 @@ def get_transport_strategy_sets() -> dict[str, frozenset[str]]:
     the declared auth strategy is valid for the declared transport.
     """
     groups: dict[str, set[str]] = {}
-    for m in _AUTH_MODELS:
-        strategy = get_args(m.model_fields["strategy"].annotation)[0]
-        groups.setdefault(m.transport, set()).add(strategy)
+    for row in get_auth_strategy_rows():
+        groups.setdefault(row.transport, set()).add(row.strategy)
     return {k: frozenset(v) for k, v in groups.items()}
 
 

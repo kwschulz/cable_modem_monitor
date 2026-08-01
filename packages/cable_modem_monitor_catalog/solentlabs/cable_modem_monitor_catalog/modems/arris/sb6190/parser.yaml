@@ -59,7 +59,6 @@ upstream:
           type: string
           map:
             "ATDMA": "atdma"
-            "TDMA": "tdma"
         - index: 3
           field: channel_id
           type: integer

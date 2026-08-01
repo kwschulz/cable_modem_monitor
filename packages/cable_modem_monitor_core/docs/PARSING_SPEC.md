@@ -7,11 +7,10 @@ channels with frequency, power, SNR, and error counts.
 
 The parsing system absorbs this variety through three distinct roles:
 
-- **`BaseParser` (ABC)** — the extraction interface. Seven format-specific
-  implementations (`HTMLTableParser`, `HTMLTableTransposedParser`,
-  `HTMLFieldsParser`, `JSEmbeddedParser`, `HNAPParser`, and
-  `StructuredParser` (ABC) → `JSONParser`, `XMLParser`),
-  each parameterized by parser.yaml section config.
+- **`BaseParser` (ABC)** — the extraction interface, one implementation
+  per format in `parsers/formats/`, each parameterized by parser.yaml
+  section config. The authoritative format list is
+  `ALL_FORMAT_MODELS` in `models/parser_config/config.py`.
 - **`ModemParserCoordinator`** — factory and orchestrator. Reads
   parser.yaml, creates `BaseParser` instances per section, runs them,
   chains parser.py post-processing, assembles `ModemData`.
@@ -179,8 +178,8 @@ extract data without making network calls.
 
 ### HTML and REST
 
-Keys are URL paths collected from `resource` fields in parser.yaml.
-One entry per unique path (deduplicated by the loader).
+Keys are the URL paths on the fetch list. One entry per unique path
+(deduplicated by the loader).
 
 ```python
 # HTML
@@ -268,10 +267,13 @@ by stripping the `Response` suffix. The parser.py `resources` attribute
 does not apply to HNAP — the batched request has no per-page fetch
 list, and no HNAP modem has needed a hook-only action.
 
-**Startup validation:** The orchestrator verifies at startup that
-every `resource` path in parser.yaml is fetchable (valid path format,
-modem reachable) and that every HNAP `response_key` has a
-corresponding action. Missing resources fail fast with a clear error.
+**Validation:** Nothing checks the fetch list at startup. A path that
+fails at poll time raises `ResourceLoadError` and ends the cycle
+(RESOURCE_LOADING_SPEC § Error Signals). A path that returns HTTP 200
+but fails to decode is logged and omitted from the resource dict; the
+absence surfaces as `0 of N anchors` → `LOAD_INTEGRITY` through
+[Parser Diagnostics](#parser-diagnostics). HNAP declares no
+per-resource paths, so neither applies to it.
 
 ### Path Navigation
 
@@ -634,23 +636,27 @@ modem actually publishes — it does not fabricate fields the modem
 doesn't report.
 
 - **Identity fields** (`channel_number`, `channel_id`, `channel_type`)
-  are universally required. They drive entity identity and must be
-  canonical on every channel.
+  are required on every *locked* channel. They drive entity identity
+  and must be canonical there. Unlocked channels are the one exception:
+  the nulling rule below removes `channel_type` along with everything
+  else, so the requirement does not apply to them.
 - **All other fields** in the per-type tables below are *if-published*:
   when the key is present and the value is non-null, it must conform to
   the contract; when the key is absent or the value is null, no
   violation. This covers modems that don't expose a column for the
   field (e.g., older DOCSIS 3.0 status pages without lock state) and
-  the unlocked-channel nulling rule (unlocked channels carry only
-  `channel_number` and `lock_status`; other fields null).
+  the unlocked-channel nulling rule (unlocked channels keep only
+  `channel_number` and `lock_status`; every other key is removed, not
+  set to null).
 
 Parser regressions that silently drop a field are caught by parser ↔
 golden self-consistency, not by spec conformance.
 
 #### Identity fields (all channel types)
 
-Every channel dict contains these fields. They are used for entity
-identity, position tracking, and lock status derivation.
+Every locked channel dict contains these fields. They are used for
+entity identity, position tracking, and lock status derivation. An
+unlocked channel keeps only `channel_number` and `lock_status`.
 
 | Field | Type | Notes |
 | ----- | ---- | ----- |
@@ -869,8 +875,9 @@ actually a stub-page false negative (see UC-19a).
 
 ### Contract
 
-For each `resource` referenced by `parser.yaml`, the coordinator
-reports two counts:
+For each `resource` on the fetch list — parser.yaml sections, the
+per-table and per-array paths inside them, and parser.py `resources`
+declarations — the coordinator reports two counts:
 
 | Field | Meaning |
 |-------|---------|
@@ -896,15 +903,24 @@ HNAP parsers know which `data_key` references resolved. This
 specification defines **what is reported**, not the mechanism by
 which each format counts.
 
-**XML sections are provisionally exempt**: they report trivially
-fulfilled anchors (`_parse_xml_channels` in `parsers/registries.py`).
-XMLSection declares multiple `tables[].resource` rather than one
-section-level resource, and the CBN transport has not exhibited the
-stub-page failure shape that drives UC-19a. If a CBN modem ever
-serves a login/stub page where channel XML is expected, XML sections
-opt in to real anchor counting at that point. Parsers may surface the count via tuple
-return, recorder injection, or coordinator-side inspection of the
-extracted data shape against `parser_config` — whichever fits the
+**Presence accounting covers what per-anchor counting doesn't.** A
+path no format parser counted is reported as one expected anchor,
+fulfilled only if the resource reached the parse layer. This is what
+covers XML `tables[]`, multi-array JSON `arrays[]`, and parser.py
+`resources` — none of which hang off a section-level `resource`, so
+no format parser attributes a count to them. A fetched resource that
+never arrives (decode failure, loader skip) therefore cannot read as
+a clean parse.
+
+**XML sections remain exempt from per-anchor counting**: they report
+trivially fulfilled anchors (`_parse_xml_channels` in
+`parsers/registries.py`), and the CBN transport has not exhibited the
+stub-page failure shape that drives UC-19a. Presence accounting still
+covers their table paths. If a CBN modem ever serves a login/stub
+page where channel XML is expected, XML sections opt in to real
+anchor counting at that point. Parsers may surface the count via
+tuple return, recorder injection, or coordinator-side inspection of
+the extracted data shape against `parser_config` — whichever fits the
 format cleanly.
 
 The `BaseParser` output shape (`ModemData`) is unchanged. Diagnostics
@@ -1097,10 +1113,16 @@ rows:
     field: channel_type
     type: string
     map:
-      "ATDMA": "atdma"
-      "TDMA": "atdma"
       "TDMA_AND_ATDMA": "atdma"
+      "ATDMA": "atdma"
+      # DOCS-IF31-MIB defines no channel type field, so this firmware
+      # renders the SC-QAM fallback "TDMA" for its OFDMA channels.
+      "TDMA": "ofdma"
 ```
+
+The `TDMA` row above is the Technicolor `.jst` platform's value set,
+where `TDMA` means OFDMA. Map what the capture shows; do not copy a
+mapping from another modem's page.
 
 **HNAP** (channel mapping):
 

@@ -23,13 +23,14 @@ actions:
       strategy: bearer
       login_endpoint: "/rest/v1/user/login"
       token_path: "created.token"
+      username_field: ""
 
 hardware:
   docsis_version: "3.1"
   chipset: "Broadcom BCM3390"
   release_date: "2021-10"
 
-status: awaiting_verification
+status: confirmed
 
 sources:
   auth_config: "Synthetic HAR — no authentication required"
@@ -51,7 +52,7 @@ notes: |
   DOCSIS 3.1 gateway made by Sagemcom. Chipset: Broadcom BCM3390.
   Sold by Virgin Media as the "Hub 5" (community name "SuperHub 5").
   REST API at /rest/v1/cablemodem/ - no authentication required.
-  33 SC-QAM downstream + 1 OFDM, 5 ATDMA upstream + 1 OFDMA.
+  32 SC-QAM downstream + 1 OFDM, 5 ATDMA upstream + 1 OFDMA.
   bootFilename shows "vmdg660" (Virgin's internal designation).
   Default IP: 192.168.100.1 (modem mode) or 192.168.0.1 (router mode).
 
@@ -60,6 +61,11 @@ notes: |
   the issue #82 response shapes, reboot flow confirmed via curl.
   Full declaration in the HAR's log.comment. Replace with a real
   full-session capture when a contributor provides one.
+
+  The synthesized login body carries a password and no username key,
+  the shape @edent's curl proved. It once carried a username because
+  it was written to match what Core sent, not what the firmware
+  accepts, and that made the fixture certify the client's own bug.
 references:
   issues:
     - "[#82 — [Modem Request] Virgin Media SuperHub - modem mode 5](https://github.com/solentlabs/cable_modem_monitor/issues/82)"

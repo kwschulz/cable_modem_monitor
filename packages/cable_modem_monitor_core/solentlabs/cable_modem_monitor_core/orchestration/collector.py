@@ -16,10 +16,10 @@ from typing import Any, Final
 
 import requests
 
-from ..auth.base import AuthContext, AuthResult, BaseAuthManager
+from ..auth.base import AuthContext, AuthResult, BaseAuthManager, LoginLockoutError
 from ..auth.factory import create_auth_manager
 from ..connectivity import create_session
-from ..loaders.fetch_list import collect_fetch_targets
+from ..fetch_list import collect_fetch_targets
 from ..loaders.hnap import HNAPLoadError
 from ..loaders.http import (
     HTTPResourceLoader,
@@ -34,6 +34,7 @@ from .actions import execute_action
 from .auth_failure import (
     _auth_failure_hint,
     _build_auth_failed_event,
+    _build_http_status_error_event,
     _should_detect_login_pages,
     _strategy_name,
 )
@@ -45,10 +46,10 @@ from .events import (
     HnapConnectionFailed,
     HnapLoadError as HnapLoadErrorEvent,
     HnapSessionExpired,
-    HttpStatusError,
     LogoutExecuted,
     LogoutFailed,
     ParseError,
+    PostLoginFetchFailed,
     ResourceDecodeError,
     ResourceFetched,
     ResourceLoadError as ResourceLoadErrorEvent,
@@ -63,15 +64,6 @@ from .signals import CollectorSignal
 _logger = logging.getLogger(__name__)
 _LOGOUT_LOG_LEVEL: Final[int] = logging.DEBUG
 _DEFAULT_AUTH_LOG_LEVEL: Final[int] = logging.DEBUG
-
-
-class LoginLockoutError(Exception):
-    """Firmware anti-brute-force triggered.
-
-    Raised by HNAP auth strategies when the modem responds with
-    ``LoginResult: "LOCKUP"`` or ``"REBOOT"``. The orchestrator
-    catches this and applies backoff policy.
-    """
 
 
 class ModemDataCollector:
@@ -193,14 +185,18 @@ class ModemDataCollector:
             return self._classify_hnap_error(exc)
         except ResourceLoadError as exc:
             if exc.status_code in (401, 403):
-                hint = _auth_failure_hint(self._modem_config)
+                hint = _auth_failure_hint(self._auth_manager)
                 log_event(
                     _logger,
-                    HttpStatusError(
+                    _build_http_status_error_event(
                         model=self._modem_config.model,
                         path=exc.path,
                         status_code=exc.status_code,
                         reason=hint,
+                        request_line=exc.request_line,
+                        content_type=exc.content_type,
+                        response_body=exc.response_body,
+                        password=self._password,
                     ),
                 )
                 return ModemResult(
@@ -362,14 +358,7 @@ class ModemDataCollector:
     # ------------------------------------------------------------------
 
     def _build_session(self) -> requests.Session:
-        """Build a ``requests.Session`` configured for this modem.
-
-        Applies the modem's legacy-SSL setting, copies session-scoped
-        headers from modem.yaml, and runs the auth manager's
-        ``configure_session`` hook. Called once during ``__init__``
-        for the polling session, and once per diagnostic capture
-        attempt via :meth:`run_capture_attempt` for isolation.
-        """
+        """Build the ``requests.Session`` for this modem's polling lifetime."""
         session = create_session(legacy_ssl=self._legacy_ssl)
         session_headers: dict[str, str] = {}
         if self._modem_config.session and self._modem_config.session.headers:
@@ -411,8 +400,63 @@ class ModemDataCollector:
                     level=EventLevel.DEBUG,
                 ),
             )
+            # Part of establishing the login, so it belongs here rather
+            # than in execute() — restart.py authenticates directly and
+            # dispatches its action without ever reaching execute().
+            self._fetch_post_login_endpoints()
 
         return result
+
+    def _fetch_post_login_endpoints(self) -> None:
+        """GET each declared post-login path in order; responses are discarded.
+
+        Some SPA firmware treats the browser's first post-login call as
+        part of establishing the session and rejects data requests until
+        it has been made (#120). Best-effort by design: login already
+        succeeded, so failing here would report bad credentials for a
+        working password, and a genuinely required call shows up anyway
+        as the data fetch's own 401 alongside this warning. A transient
+        hiccup, or firmware moving the path, must not kill monitoring on
+        a modem that was working.
+        """
+        # Reached only on the fresh-login branch of authenticate(), so
+        # there is no reused-session case to guard against here.
+        session_config = self._modem_config.session
+        if session_config is None:
+            return
+        for path in session_config.post_login_endpoints:
+            try:
+                response = self._session.get(
+                    self._post_login_url(path),
+                    timeout=self._modem_config.timeout,
+                )
+            except requests.RequestException as exc:
+                self._log_post_login_failure(path, None, f"{type(exc).__name__}: {exc}")
+                continue
+            if not 200 <= response.status_code < 300:
+                self._log_post_login_failure(path, response.status_code, response.reason or "")
+
+    def _post_login_url(self, path: str) -> str:
+        """Build a post-login URL, carrying session-level query params like every other fetch."""
+        url = f"{self._base_url}{path}"
+        query_params = self._modem_config.session.query_params if self._modem_config.session else {}
+        if query_params:
+            sep = "&" if "?" in url else "?"
+            qs = "&".join(f"{k}={v}" for k, v in query_params.items())
+            url = f"{url}{sep}{qs}"
+        return url
+
+    def _log_post_login_failure(self, path: str, status_code: int | None, reason: str) -> None:
+        """Emit the WARNING for a post-login endpoint that did not answer 2xx."""
+        log_event(
+            _logger,
+            PostLoginFetchFailed(
+                model=self._modem_config.model,
+                path=path,
+                status_code=status_code,
+                reason=reason,
+            ),
+        )
 
     def _load_resources(
         self,
@@ -658,11 +702,13 @@ class ModemDataCollector:
         actions = self._modem_config.actions
         if actions is None or actions.logout is None:
             return
-        # requires_session=True means the endpoint needs a valid session cookie to
-        # function. Skip the call when we have no cookies — it would fail anyway.
+        # requires_session=True means the endpoint needs a live session to
+        # function. Skip the call when it is already gone; it would fail anyway.
         # Unauthenticated endpoints (False, the default) can clear any active
-        # server-side session without credentials.
-        if isinstance(actions.logout, HttpAction) and actions.logout.requires_session and not self._session.cookies:
+        # server-side session without credentials. The test is session validity,
+        # not cookie presence: bearer holds a live session in the Authorization
+        # header with an empty jar.
+        if isinstance(actions.logout, HttpAction) and actions.logout.requires_session and not self.session_is_valid:
             return
         with contextlib.suppress(Exception):
             execute_action(self, self._modem_config, actions.logout, log_level=_LOGOUT_LOG_LEVEL)

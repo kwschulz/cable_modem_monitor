@@ -6,7 +6,7 @@
       "channel_type": "qam",
       "frequency": 682000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 7.8,
       "snr": 40.9
     },
@@ -16,7 +16,7 @@
       "channel_type": "qam",
       "frequency": 114000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 5.7,
       "snr": 40.9
     },
@@ -26,7 +26,7 @@
       "channel_type": "qam",
       "frequency": 130000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 6.1,
       "snr": 41.1
     },
@@ -36,7 +36,7 @@
       "channel_type": "qam",
       "frequency": 570000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 4.6,
       "snr": 40.2
     },
@@ -46,7 +46,7 @@
       "channel_type": "qam",
       "frequency": 578000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 4.7,
       "snr": 40.3
     },
@@ -56,7 +56,7 @@
       "channel_type": "qam",
       "frequency": 586000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 5.2,
       "snr": 40.5
     },
@@ -66,7 +66,7 @@
       "channel_type": "qam",
       "frequency": 594000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 5.7,
       "snr": 40.7
     },
@@ -76,7 +76,7 @@
       "channel_type": "qam",
       "frequency": 602000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 5.4,
       "snr": 40.4
     },
@@ -86,7 +86,7 @@
       "channel_type": "qam",
       "frequency": 618000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 6.8,
       "snr": 40.8
     },
@@ -96,7 +96,7 @@
       "channel_type": "qam",
       "frequency": 626000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 6.8,
       "snr": 40.8
     },
@@ -106,7 +106,7 @@
       "channel_type": "qam",
       "frequency": 634000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 6.5,
       "snr": 40.5
     },
@@ -116,7 +116,7 @@
       "channel_type": "qam",
       "frequency": 642000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 7.0,
       "snr": 40.6
     },
@@ -126,7 +126,7 @@
       "channel_type": "qam",
       "frequency": 650000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 7.1,
       "snr": 40.9
     },
@@ -136,7 +136,7 @@
       "channel_type": "qam",
       "frequency": 658000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 7.4,
       "snr": 40.9
     },
@@ -146,7 +146,7 @@
       "channel_type": "qam",
       "frequency": 666000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 7.4,
       "snr": 40.6
     },
@@ -156,7 +156,7 @@
       "channel_type": "qam",
       "frequency": 674000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 7.6,
       "snr": 40.5
     },
@@ -166,7 +166,7 @@
       "channel_type": "qam",
       "frequency": 690000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 7.9,
       "snr": 40.9
     },
@@ -176,7 +176,7 @@
       "channel_type": "qam",
       "frequency": 698000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 7.6,
       "snr": 40.5
     },
@@ -186,7 +186,7 @@
       "channel_type": "qam",
       "frequency": 706000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 8.7,
       "snr": 41.1
     },
@@ -196,7 +196,7 @@
       "channel_type": "qam",
       "frequency": 714000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 8.4,
       "snr": 40.9
     },
@@ -206,7 +206,7 @@
       "channel_type": "qam",
       "frequency": 722000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 8.2,
       "snr": 40.8
     },
@@ -216,7 +216,7 @@
       "channel_type": "qam",
       "frequency": 730000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 8.9,
       "snr": 40.5
     },
@@ -226,7 +226,7 @@
       "channel_type": "qam",
       "frequency": 738000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 9.0,
       "snr": 40.8
     },
@@ -236,7 +236,7 @@
       "channel_type": "qam",
       "frequency": 746000000,
       "lock_status": "locked",
-      "modulation": "256-QAM",
+      "modulation": "QAM256",
       "power": 9.0,
       "snr": 40.8
     },
@@ -273,7 +273,7 @@
       "channel_number": 1,
       "channel_type": "atdma",
       "frequency": 30800000,
-      "modulation": "64-qam",
+      "modulation": "QAM64",
       "power": 41.5
     },
     {
@@ -281,7 +281,7 @@
       "channel_number": 2,
       "channel_type": "atdma",
       "frequency": 37200000,
-      "modulation": "64-qam",
+      "modulation": "QAM64",
       "power": 41.5
     },
     {
@@ -289,7 +289,7 @@
       "channel_number": 3,
       "channel_type": "atdma",
       "frequency": 44600000,
-      "modulation": "64-qam",
+      "modulation": "QAM64",
       "power": 40.3
     },
     {
@@ -297,7 +297,7 @@
       "channel_number": 4,
       "channel_type": "atdma",
       "frequency": 51000000,
-      "modulation": "64-qam",
+      "modulation": "QAM64",
       "power": 41.5
     },
     {
@@ -305,7 +305,7 @@
       "channel_number": 5,
       "channel_type": "ofdma",
       "frequency": 46000000,
-      "modulation": "16-qam",
+      "modulation": "QAM16",
       "power": 35.2
     }
   ]

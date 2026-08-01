@@ -62,7 +62,6 @@ upstream:
       type: string
       map:
         "ATDMA": "atdma"
-        "TDMA": "atdma"
 
 # System info from getSysInfo.asp. Response is a root-level JSON array;
 # the loader wraps it as {"_raw": [...]}.

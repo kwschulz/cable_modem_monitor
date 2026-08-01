@@ -1,0 +1,29 @@
+{
+  "_description": "Multi-array JSON section where each array carries its own resource — same no-section-level-resource shape as XML tables.",
+  "_config": {
+    "downstream": {
+      "format": "json",
+      "arrays": [
+        {
+          "resource": "/qam.json",
+          "array_path": "rows",
+          "fields": [
+            { "key": "id", "field": "channel_number", "type": "integer" }
+          ]
+        },
+        {
+          "resource": "/ofdm.json",
+          "array_path": "rows",
+          "fields": [
+            { "key": "id", "field": "channel_number", "type": "integer" }
+          ]
+        }
+      ]
+    }
+  },
+  "_resources": {
+    "/qam.json": { "rows": [{ "id": 1 }] },
+    "/ofdm.json": { "rows": [{ "id": 2 }] }
+  },
+  "_absent_resource": "/ofdm.json"
+}

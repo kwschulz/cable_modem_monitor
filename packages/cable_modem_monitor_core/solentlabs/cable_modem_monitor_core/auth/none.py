@@ -10,7 +10,7 @@ import logging
 import requests
 
 from ..models.modem_config.auth import NoneAuth
-from .base import AuthResult, BaseAuthManager
+from .base import AuthFailureMode, AuthResult, BaseAuthManager
 
 
 class NoneAuthManager(BaseAuthManager):
@@ -19,6 +19,10 @@ class NoneAuthManager(BaseAuthManager):
     All data endpoints are publicly accessible. The session is used
     as-is with no credentials attached.
     """
+
+    def auth_failure_mode(self) -> AuthFailureMode:
+        """No credentials exist, so a 401 means the catalog entry is wrong."""
+        return AuthFailureMode.NOT_CONFIGURED
 
     def authenticate(
         self,

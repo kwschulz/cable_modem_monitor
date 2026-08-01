@@ -12,7 +12,6 @@ Adding a test case = drop a JSON file in fixtures/json_parser/valid/.
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -26,13 +25,10 @@ from solentlabs.cable_modem_monitor_core.parsers.formats.json_parser import (
     _navigate_path,
 )
 
+from tests._helpers import collect_fixtures, load_fixture
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "json_parser"
-VALID_FIXTURES = sorted((FIXTURES_DIR / "valid").glob("*.json"))
-
-
-def _load_fixture(path: Path) -> dict[str, Any]:
-    """Load a JSON fixture file."""
-    return dict(json.loads(path.read_text()))
+VALID_FIXTURES = collect_fixtures(FIXTURES_DIR / "valid")
 
 
 def _build_resources(
@@ -57,7 +53,7 @@ def test_extraction(fixture_path: Path, caplog: pytest.LogCaptureFixture) -> Non
     every listed substring appears in at least one WARN-level record
     (or that no WARNs fired, when the list is empty).
     """
-    data = _load_fixture(fixture_path)
+    data = load_fixture(fixture_path)
 
     # Multi-resource fixtures use _resources dict; single-resource use _resource + _json
     if "_resources" in data:

@@ -146,7 +146,9 @@ availability. Firmware- and reboot-change logging is unaffected: a
 real change to Software Version or Last Boot Time is still a value
 change and still logs one line.
 
-**Boot-time source normalization.** Every boot-time source is
+#### Boot-time source normalization
+
+Every boot-time source is
 converted to a duration and anchored to HA's clock; the modem's wall
 clock is never used as an absolute anchor (its timezone and sync
 state are unknown). Source priority:

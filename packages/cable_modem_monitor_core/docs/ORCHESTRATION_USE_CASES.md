@@ -247,7 +247,7 @@ only one authenticated session.
 
 ---
 
-### UC-13: LOAD_AUTH backoff — session issues self-correct
+### UC-13: LOAD_AUTH threshold — session issues self-correct
 
 **Preconditions:** Data page returned 401/403. Session issue, not
 credential rejection. LOAD_AUTH uses the threshold-based circuit
@@ -411,16 +411,23 @@ detection misses.
 | 1 | Consumer calls `get_modem_data()` | | |
 | 2 | Collector: auth succeeds (or session reused) | | |
 | 3 | Resource Loader: GET /status.html → HTTP 200, body contains login form | | |
-| 4 | Resource Loader: detects login page indicators | | |
+| 4 | Resource Loader: detects login page, raises `LoginPageDetectedError` | fetch aborts, resources already fetched that poll are discarded | WARNING log |
 | 5 | Collector returns `ModemResult(signal=LOAD_AUTH)` | | |
-| 6 | Orchestrator: clear session, streak++ | | |
+| 6 | Orchestrator: logout (best-effort), clear session | session cleared | |
+| 7 | Orchestrator: retry collection once in same poll — fresh login, refetch every target | | |
+| 8 | Retry succeeds | streak→0 | `ModemSnapshot(ONLINE)` |
+| 9 | Retry serves the login page again | streak++ | `ModemSnapshot(AUTH_FAILED)` |
+| 10 | Streak reaches the threshold | circuit breaker opens | HA starts reauth flow |
 
 **Assertions:**
 
 - Signal is LOAD_AUTH (not PARSE_ERROR) — correct root cause classification
 - Login page detection checks for `<input type="password">` or similar
-- Session is cleared for fresh login on next poll
-- WARNING log: "Data page /status.html appears to be a login page"
+- The raise aborts the whole poll, not just the tripped page: a partial resource set is never parsed
+- Recovery is a same-poll retry (UC-18 path), not a wait for the next poll
+- Two consecutive same-poll recoveries disable cached session reuse (UC-18)
+- The breaker does not close on its own; the reauth flow's config-entry reload is what clears it
+- WARNING log: "Data page /status.html appears to be a login page — session: cookies=[…] basic_auth=…"
 
 ---
 
@@ -490,13 +497,13 @@ header-safe token.
 | 4 | Auth: returns `AuthResult(success=True)` with no credential cookie (no spurious success artefact) | | |
 | 5 | Resource Loader: GET data page → HTTP 200, body is the login page | | |
 | 6 | Resource Loader: detects login page → `LOAD_AUTH` (UC-19) | | |
-| 7 | Orchestrator: clear session, streak++ | session cleared | |
+| 7 | Orchestrator: clear session, retry once in same poll; streak++ if the retry also fails | session cleared | |
 
 **Assertions:**
 
 - Auth never injects a non-header-safe value as the credential cookie — prevents the `http.client.putheader` `ValueError` (no stack trace for an expected failure)
 - Signal is `LOAD_AUTH`, reached through the existing UC-19 detection — no new failure branch
-- Single occurrence self-corrects on the next poll (same threshold-based backoff as UC-19/UC-13); persistent failures escalate normally
+- Single occurrence self-corrects in the same poll via the UC-19 retry; persistent failures escalate normally
 - Auth log at the manager's level: body is a login page, credential cookie not injected
 
 **Background:** SB8200 inject variant (#124, rct). The login response
@@ -513,31 +520,19 @@ login-page classification the loader already applies (UC-19).
 **Preconditions:** Modem working for months. User changes password on
 modem's web UI. Session is still valid in memory.
 
-> **Note:** This UC documents the *current* behavior (circuit breaker
-> at streak=6). See UC-86 for the target behavior — AUTH_FAILED means
-> credentials are known bad, so retrying with the same credentials is
-> pointless and risks triggering modem anti-brute-force lockouts.
-
 | Poll | What happens | Streak | Status |
 |------|-------------|--------|--------|
 | N | Session valid → reuse → load → parse → OK | 0 | ONLINE |
 | ... | (months of normal operation) | 0 | ONLINE |
 | N+K | Session expires → re-auth → wrong password | 1 | AUTH_FAILED |
-| N+K+1 | AUTH_FAILED | 2 | AUTH_FAILED |
-| N+K+2 | LOCKUP → AUTH_LOCKOUT, backoff=4 | 3 | AUTH_FAILED |
-| N+K+3 | Backoff (3 remaining) | 3 | AUTH_FAILED |
-| N+K+4 | Backoff (2 remaining) | 3 | AUTH_FAILED |
-| N+K+5 | Backoff (1 remaining) | 3 | AUTH_FAILED |
-| N+K+6 | Backoff cleared → AUTH_FAILED | 4 | AUTH_FAILED |
-| N+K+7 | AUTH_FAILED | 5 | AUTH_FAILED |
-| N+K+8 | AUTH_LOCKOUT, streak=6 → circuit OPEN | 6 | AUTH_FAILED |
-| N+K+9+ | Circuit open, no collection | 6 | AUTH_FAILED |
+| N+K+1+ | Circuit open, no collection | 1 | AUTH_FAILED |
 
 **Assertions:**
 
 - Session reuse delays the failure until the session naturally expires
-- Circuit breaker trips after ~2 lockout cycles (threshold 6)
-- User sees escalating log messages with streak count (1/6, 2/6, ... 6/6)
+- Exactly one login attempt against the modem with the stale password —
+  the circuit trips on the first AUTH_FAILED, so wrong-password logins
+  never accumulate toward firmware anti-brute-force
 - ERROR log at circuit trip is actionable: "Reconfigure credentials to resume"
 - After rebuild with correct password → back to normal (UC-16)
 
@@ -800,7 +795,7 @@ User observes a flakey modem and wants to try restarting again.
 | Step | Action | Observable |
 |------|--------|------------|
 | 1 | Consumer calls `restart()` while recovery is active. | |
-| 2 | Orchestrator proceeds normally — authenticates, executes the action, clears session, calls `recovery.begin()`. | If modem is reachable and accepts the command: reboot re-triggers, recovery window restarts. If modem is unreachable: `error="command_failed"` returned. |
+| 2 | Orchestrator proceeds normally — authenticates, executes the action, clears session, calls `recovery.begin()`. | If modem is reachable and accepts the command: reboot re-triggers, recovery window restarts. If modem is unreachable or refuses the command: `error="command_failed"` returned. |
 
 **Assertions:**
 
@@ -883,8 +878,9 @@ User presses restart button. Recovery is not active.
 ### UC-46: (retired)
 
 Restart has no probe loop and no response timeout under the new
-model. The command either dispatches (success) or raises
-(`error="command_failed"`). If the modem never comes back after the
+model. The command either dispatches (success) or fails — raised,
+or refused by the modem (`error="command_failed"`). If the modem
+never comes back after the
 command, that shows up through normal polling during the recovery
 window (UNREACHABLE snapshots until/unless the modem returns, or
 until the window elapses and the coordinator falls back to normal
@@ -1609,20 +1605,11 @@ sequenceDiagram
     participant C as Consumer
     participant U as User
 
-    loop Polls 1-3
-        O->>M: Auth attempt (wrong password)
-        M-->>O: auth_failed
-        O->>O: streak++
-    end
+    O->>M: Auth attempt (wrong password)
+    M-->>O: auth_failed
+    O->>O: streak=1
 
-    O->>M: Auth attempt
-    M-->>O: HNAP lockout
-    O->>O: streak=4, backoff=3
-
-    Note over O: Polls 5-6: backoff then auth_failed
-    O->>O: streak=5, streak=6
-
-    O->>O: Circuit breaker OPEN (streak >= 6)
+    O->>O: Circuit breaker OPEN (credentials rejected)
     O->>C: AUTH_FAILED, circuit_breaker_open=True
     C->>U: "Credentials invalid"
     U->>C: Provide new password
@@ -1635,20 +1622,19 @@ sequenceDiagram
 
 | Step | Action | State change | Observable |
 |------|--------|-------------|------------|
-| 1 | Poll: auth fails (wrong password) | streak=1 | auth_failed |
-| 2 | Polls 2-3: auth fails | streak=2,3 | auth_failed |
-| 3 | Poll 4: HNAP lockout | streak=4, backoff=3 | auth_failed |
-| 4 | Polls 5-6: backoff active, then auth fails | streak=5,6 | auth_failed |
-| 5 | Circuit breaker opens (streak >= 6) | circuit_open=True | Polling stopped |
-| 6 | Consumer detects circuit breaker state | | Shows credential error |
-| 7 | User provides new password | | |
-| 8 | Consumer validates (connectivity + auth + parse) | | |
-| 9 | On success: consumer persists credentials, rebuilds orchestrator (HA: entry update + reload) | fresh instance — streak=0, circuit=closed, session=none | |
-| 10 | Next poll: fresh login with new credentials | | ONLINE |
+| 1 | Poll: auth fails (wrong password) | streak=1, circuit_open=True | auth_failed |
+| 2 | Consumer detects circuit breaker state | | Shows credential error |
+| 3 | User provides new password | | |
+| 4 | Consumer validates (connectivity + auth + parse) | | |
+| 5 | On success: consumer persists credentials, rebuilds orchestrator (HA: entry update + reload) | fresh instance — streak=0, circuit=closed, session=none | |
+| 6 | Next poll: fresh login with new credentials | | ONLINE |
 
 **Assertions:**
 
-- Circuit breaker opens after AUTH_FAILURE_THRESHOLD (6) consecutive failures
+- Circuit breaker opens on the first AUTH_FAILED — rejected credentials
+  are known bad, so a second attempt buys nothing and risks provoking
+  firmware lockout. `AUTH_FAILURE_THRESHOLD` governs the session-shaped
+  signals (LOAD_AUTH, LOAD_INTEGRITY), not this path.
 - Consumer surfaces credential error and provides reauth mechanism
 - Reauth validates new credentials before accepting
 - The rebuild leaves no auth state behind — streak, circuit, backoff,
@@ -1981,3 +1967,34 @@ issued and recovery is already open from a signal-check trigger, the
 command is refused (UC-42). If the command is issued first, any
 subsequent reboot-signal match during the command's window is a no-op
 (window is already open; re-entry does nothing).
+
+---
+
+### UC-89: Restart refused by the modem
+
+**Preconditions:** `actions.restart` is declared. The user presses
+restart. Nothing raises: the modem answers, but it answers no.
+
+Two ways this arrives, both returning `ActionResult(success=False)`
+rather than an exception:
+
+| Step | Action | Observable |
+|------|--------|-----------|
+| 1 | `actions.restart` declares `action_auth` and the per-action login is refused (bad or missing credentials → HTTP 401). The command is never sent. | `Restart command failed [MODEL]: Per-action auth failed: Login returned HTTP 401` |
+| 2 | Or the command itself is sent and the modem answers 4xx/5xx. | `Restart command failed [MODEL]: Action refused with status 401` |
+
+**Assertions:**
+
+- `restart()` returns `success=False`, `error="command_failed"`
+- **No recovery window opens** — there is no reboot to poll through
+- **The collector session is not cleared** — the reason to clear it is
+  firmware invalidating it during a reboot, and no reboot happened
+- The consumer surfaces the failure. HA raises `HomeAssistantError`
+  from the button press, so the user sees it rather than a success
+  notification for a modem that never restarted
+
+**Why this is its own case.** A modem with no monitoring auth but a
+credentialed restart (`auth.strategy: none` + `action_auth`) has a
+config-entry state where monitoring works perfectly and restart cannot
+work at all: no password was ever stored, because nothing needed one.
+Silence here reads as success to the only person who can fix it (#82).

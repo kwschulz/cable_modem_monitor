@@ -8,10 +8,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
+import defusedxml.ElementTree as DefusedET
 import pytest
 from bs4 import BeautifulSoup
 from solentlabs.cable_modem_monitor_core.models.parser_config import ParserConfig
@@ -23,8 +23,10 @@ from solentlabs.cable_modem_monitor_core.parsers.registries import (
     _merge_channels,
 )
 
+from tests._helpers import collect_fixtures, load_fixture
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "coordinator"
-VALID_FIXTURES = sorted((FIXTURES_DIR / "valid").glob("*.json"))
+VALID_FIXTURES = collect_fixtures(FIXTURES_DIR / "valid")
 
 
 def _build_resources(html_map: dict[str, str]) -> dict[str, BeautifulSoup]:
@@ -39,7 +41,7 @@ def _build_json_resources(json_map: dict[str, Any]) -> dict[str, Any]:
 
 def _load_fixture(name: str) -> dict[str, Any]:
     """Load a named fixture from the coordinator fixtures directory."""
-    return dict(json.loads((FIXTURES_DIR / "valid" / name).read_text()))
+    return load_fixture(FIXTURES_DIR / "valid" / name)
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +56,7 @@ def _load_fixture(name: str) -> dict[str, Any]:
 )
 def test_extraction(fixture_path: Path) -> None:
     """Coordinator produces expected ModemData from fixture."""
-    data = json.loads(fixture_path.read_text())
+    data = load_fixture(fixture_path)
 
     # Fixtures use either _html (HTML resources) or _json (JSON resources)
     if "_html" in data:
@@ -675,6 +677,111 @@ class TestParseDiagnostics:
         _, diagnostics = coordinator.parse({})
 
         assert diagnostics.has_zero_fulfillment is True
+
+
+# ---------------------------------------------------------------------------
+# Declared-resource accounting — a declared resource absent from the dict
+# ---------------------------------------------------------------------------
+
+# Sections whose resources hang off tables/arrays rather than a
+# section-level `resource`, so no format parser attributes a count to
+# them. Each fixture carries the config, the bodies, and which path to
+# withhold for the absent case.
+DIAGNOSTICS_FIXTURES = collect_fixtures(FIXTURES_DIR / "diagnostics")
+DIAGNOSTICS_IDS = [f.stem for f in DIAGNOSTICS_FIXTURES]
+
+_VERSION_RESOURCE = "/version.json"
+
+
+def _build_declared_resources(data: dict[str, Any], omit: str = "") -> dict[str, Any]:
+    """Build a resource dict from a diagnostics fixture, optionally omitting one path.
+
+    String bodies are XML (cbn transport); everything else is already
+    decoded JSON, matching what the loaders hand the parse layer.
+    """
+    return {
+        key: DefusedET.fromstring(body) if isinstance(body, str) else body
+        for key, body in data["_resources"].items()
+        if key != omit
+    }
+
+
+class _DeclaringPostProcessor:
+    """parser.py stand-in that declares a resource parser.yaml never maps."""
+
+    resources = {_VERSION_RESOURCE: "json"}
+
+    def parse_system_info(self, system_info: dict[str, Any], resources: dict[str, Any]) -> dict[str, Any]:
+        payload = resources.get(_VERSION_RESOURCE, {})
+        if payload:
+            system_info["software_version"] = payload["sw"]
+        return system_info
+
+
+@pytest.mark.parametrize("fixture_path", DIAGNOSTICS_FIXTURES, ids=DIAGNOSTICS_IDS)
+class TestDeclaredResourceAccounting:
+    """Every resource on the fetch list must reach the parse layer."""
+
+    def test_all_declared_resources_present(self, fixture_path: Path) -> None:
+        """Every declared resource arrived → no zero fulfillment."""
+        data = load_fixture(fixture_path)
+        coordinator = ModemParserCoordinator(ParserConfig.model_validate(data["_config"]))
+
+        _, diagnostics = coordinator.parse(_build_declared_resources(data))
+
+        assert diagnostics.has_zero_fulfillment is False
+
+    def test_absent_declared_resource_reports_zero(self, fixture_path: Path) -> None:
+        """A declared resource that never arrived → that path reports zero."""
+        data = load_fixture(fixture_path)
+        absent = data["_absent_resource"]
+        coordinator = ModemParserCoordinator(ParserConfig.model_validate(data["_config"]))
+
+        _, diagnostics = coordinator.parse(_build_declared_resources(data, omit=absent))
+
+        assert diagnostics.has_zero_fulfillment is True
+        assert diagnostics.zero_fulfillment_resources == [absent]
+
+    def test_present_post_processor_resource(self, fixture_path: Path) -> None:
+        """A parser.py-declared resource that arrived → no zero fulfillment."""
+        data = load_fixture(fixture_path)
+        coordinator = ModemParserCoordinator(ParserConfig.model_validate(data["_config"]), _DeclaringPostProcessor())
+
+        resources = _build_declared_resources(data)
+        resources[_VERSION_RESOURCE] = {"sw": "1.2.3"}
+        parsed, diagnostics = coordinator.parse(resources)
+
+        assert parsed["system_info"]["software_version"] == "1.2.3"
+        assert diagnostics.has_zero_fulfillment is False
+
+    def test_absent_post_processor_resource_reports_zero(self, fixture_path: Path) -> None:
+        """A parser.py-declared resource that never arrived reports zero.
+
+        The hook degrades to producing nothing, which without accounting
+        is indistinguishable from a modem that reports no version.
+        """
+        data = load_fixture(fixture_path)
+        coordinator = ModemParserCoordinator(ParserConfig.model_validate(data["_config"]), _DeclaringPostProcessor())
+
+        _, diagnostics = coordinator.parse(_build_declared_resources(data))
+
+        assert diagnostics.has_zero_fulfillment is True
+        assert diagnostics.zero_fulfillment_resources == [_VERSION_RESOURCE]
+
+
+def test_parser_counted_resource_not_double_counted() -> None:
+    """A path a format parser already counted keeps its real anchor count.
+
+    Section-level resources are counted by the format parser, so presence
+    accounting must not add a second entry for the same path.
+    """
+    config = ParserConfig.model_validate(_JS_PARSER_CONFIG)
+    coordinator = ModemParserCoordinator(config)
+
+    _, diagnostics = coordinator.parse(_build_resources({"/status.html": _FULL_HTML}))
+
+    count = diagnostics.by_resource["/status.html"]
+    assert (count.expected, count.fulfilled) == (3, 3)
 
 
 # ---------------------------------------------------------------------------

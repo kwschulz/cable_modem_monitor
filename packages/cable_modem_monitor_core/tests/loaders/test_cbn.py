@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 from requests.cookies import RequestsCookieJar
+from solentlabs.cable_modem_monitor_core.fetch_list import ResourceTarget
 from solentlabs.cable_modem_monitor_core.loaders.cbn import CBNLoader
-from solentlabs.cable_modem_monitor_core.loaders.fetch_list import ResourceTarget
 
 _SAMPLE_XML = "<downstream_table><downstream><freq>500</freq></downstream></downstream_table>"
 _MALFORMED_XML = "this is not xml {{"

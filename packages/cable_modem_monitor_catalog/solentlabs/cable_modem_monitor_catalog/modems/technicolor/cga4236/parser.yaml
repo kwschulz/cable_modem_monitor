@@ -24,7 +24,7 @@ downstream:
           unit: "dB"
         - key: Modulation
           field: modulation
-          type: string
+          type: modulation
         - key: Correcteds
           field: corrected
           type: integer
@@ -84,7 +84,7 @@ upstream:
           unit: "dBmV"
         - key: Modulation
           field: modulation
-          type: string
+          type: modulation
         - key: SymbolRate
           field: symbol_rate
           type: integer

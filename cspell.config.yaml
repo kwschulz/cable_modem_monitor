@@ -46,6 +46,7 @@ ignoreWords:
   - rplancha
   - Rpem
   - SNTLABS
+  - totev
   - Vonk
   - Fzcw
   - didnt
@@ -55,6 +56,9 @@ ignoreWords:
   - fehlgeschlagen
   - Kanalbenennung
   - módem
+  # Source citations in catalog modem.yaml: publication name, Dutch product name
+  - Telecompaper
+  - zwart
 
 words:
   # Home Assistant tooling
@@ -64,6 +68,7 @@ words:
   - hass
   - hassfest
   - homeassistant
+  - websession
 
   # DOCSIS / cable protocol
   - AESCCM

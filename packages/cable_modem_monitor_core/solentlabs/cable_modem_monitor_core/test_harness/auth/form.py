@@ -35,11 +35,9 @@ class FormAuthHandler(AuthHandler):
         login_path: The login endpoint path (from modem.yaml ``auth.action``).
         cookie_name: Session cookie name if cookie-based (from
             modem.yaml ``auth.cookie_name``). Empty for IP-based.
-        logout_path: The logout endpoint path (from modem.yaml
-            ``actions.logout.endpoint``). Empty if no logout.
-        restart_path: The restart endpoint path (from modem.yaml
-            ``actions.restart.endpoint``). Empty if no restart.
-        restart_method: HTTP method for restart (default POST).
+
+    Logout and restart endpoints are not passed here — the base class
+    matches them from the declared actions block for every strategy.
     """
 
     _SESSION_TOKEN = "mock-session-token"
@@ -48,15 +46,10 @@ class FormAuthHandler(AuthHandler):
         self,
         login_path: str,
         cookie_name: str = "",
-        logout_path: str = "",
-        restart_path: str = "",
-        restart_method: str = "POST",
     ) -> None:
+        super().__init__()
         self._login_path = normalize_path(login_path)
         self._cookie_name = cookie_name
-        self._logout_path = normalize_path(logout_path) if logout_path else ""
-        self._restart_path = normalize_path(restart_path) if restart_path else ""
-        self._restart_method = restart_method.upper()
         self._authenticated = False
 
     def is_login_request(self, method: str, path: str) -> bool:
@@ -104,23 +97,11 @@ class FormAuthHandler(AuthHandler):
             return {"Set-Cookie": f"{self._cookie_name}={self._SESSION_TOKEN}; Path=/"}
         return {}
 
-    def is_logout_request(self, method: str, path: str) -> bool:
-        """Check if this request targets the logout endpoint."""
-        if not self._logout_path:
-            return False
-        return normalize_path(path) == self._logout_path
-
     def handle_logout(self) -> RouteEntry:
         """Clear session state on logout."""
         self._authenticated = False
         _logger.debug("Mock server: logout — session cleared")
         return RouteEntry(status=200, headers=[], body="OK")
-
-    def is_restart_request(self, method: str, path: str) -> bool:
-        """Check if this request targets the restart endpoint."""
-        if not self._restart_path:
-            return False
-        return method == self._restart_method and normalize_path(path) == self._restart_path
 
     def handle_restart(self) -> RouteEntry:
         """Accept restart and clear session (modem is rebooting)."""
@@ -136,11 +117,7 @@ def create_handler(
     """Entry point for dynamic auth handler dispatch."""
     auth = modem_config.auth
     login_path = getattr(auth, "action", "") or getattr(auth, "login_endpoint", "")
-    action_cfg = extract_action_config(modem_config)
     return FormAuthHandler(
         login_path=login_path,
-        cookie_name=action_cfg.cookie_name,
-        logout_path=action_cfg.logout_path,
-        restart_path=action_cfg.restart_path,
-        restart_method=action_cfg.restart_method,
+        cookie_name=extract_action_config(modem_config).cookie_name,
     )

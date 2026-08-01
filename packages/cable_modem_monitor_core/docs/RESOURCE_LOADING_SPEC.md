@@ -26,7 +26,7 @@ by key and cast to the expected type.
 
 ### HTTP Transport — HTML Formats
 
-Keys are URL paths from parser.yaml `resource` fields. Values are parsed HTML.
+Keys are the URL paths on the fetch list. Values are parsed HTML.
 
 ```python
 {
@@ -46,7 +46,7 @@ Keys are URL paths from parser.yaml `resource` fields. Values are parsed HTML.
 
 ### HTTP Transport — Structured Formats
 
-Keys are URL paths from parser.yaml `resource` fields. Values are parsed
+Keys are the URL paths on the fetch list. Values are parsed
 structured data (dict).
 
 ```python
@@ -58,7 +58,7 @@ structured data (dict).
 ```
 
 - Same key convention as HTML formats — path only
-- Values are `dict` from format-specific decoding (`json.loads()`, `xmltodict.parse()`, or `b64decode()` + `json.loads()`)
+- Values are `dict` from format-specific decoding (`json.loads()`, or `b64decode()` + `json.loads()`)
 - The value type is always `dict` regardless of the wire format
 - **Type enforcement:** If JSON decoding succeeds but the root value is not a
   `dict` (e.g., a JSON array, string, or scalar), the loader must treat it as a
@@ -96,7 +96,7 @@ reference the action names via `response_key` in parser.yaml.
 
 ### Page Fetching (HTTP Transport)
 
-For each unique `resource` path from parser.yaml:
+For each unique path on the fetch list:
 
 1. Build the full URL: `{protocol}://{host}{path}`
 2. Attach auth credentials to the request (strategy-specific):
@@ -109,7 +109,6 @@ For each unique `resource` path from parser.yaml:
 5. Parse the response (format-dependent):
    - HTML formats: `normalize_html(text)` → `BeautifulSoup(..., "html.parser")`
    - `json`: `json.loads(text)`
-   - `xml`: `xmltodict.parse(text)`
 6. Key the result by path (not by semantic name)
 
 **HTML normalization:** Before BS4 parsing, `normalize_html()` fixes known
@@ -167,8 +166,7 @@ token on every response.
 
 **Fetch cycle:**
 
-1. For each target in the fetch list (derived from parser.yaml
-   `resource` fields):
+1. For each target in the fetch list:
    a. Read the current `sessionToken` from `session.cookies`
    b. POST to `getter_endpoint` with body
       `token=<sessionToken>&fun=<target.path>` — token **must be the
@@ -192,8 +190,8 @@ token on every response.
 }
 ```
 
-Keys are the `fun` parameter strings (matching parser.yaml `resource`
-fields). Values are `defusedxml.ElementTree.Element` objects
+Keys are the `fun` parameter strings on the fetch list. Values are
+`defusedxml.ElementTree.Element` objects
 representing the parsed XML root.
 
 **Token rotation:** The server sets a new `sessionToken` cookie via
@@ -341,8 +339,9 @@ policy (see Signal and Policy Separation in `ARCHITECTURE.md`).
 | Request timeout | `Timeout` | Status `unreachable` |
 | HTTP 401/403 | Status code in response | Stale session → retry auth |
 | HTTP 5xx | Status code in response | Status `unreachable` |
-| Login page on data URL | `LOAD_AUTH` | Clear session, increment auth streak |
+| Login page on data URL | `LOAD_AUTH` | Clear session, retry once in the same poll; streak++ if the retry fails |
 | Empty response body | Empty parsed result | Parser handles gracefully |
+| Body will not decode as its format | `ResourceDecodeError` logged, path omitted from the resource dict | Parse layer reports the path unfulfilled → `LOAD_INTEGRITY` (PARSING_SPEC § Parser Diagnostics) |
 | SSL handshake failure | `SSLError` | Check `legacy_ssl` flag |
 
 On any 4xx/5xx response, the loader's exception message includes the
@@ -431,19 +430,47 @@ The fall-through case is fully covered by UC-19a (see
 
 The Resource Loader checks each HTTP 200 HTML response for login page
 indicators before adding it to the resource dict. Detection is
-automatic for form-based auth strategies (`form`, `form_nonce`,
-`form_pbkdf2`, `form_sjcl`, `url_token`). Not applicable to `none`,
-`basic`, or `hnap`.
+automatic for any auth strategy that ARCHITECTURE.md's Auth Manager
+table marks as not stateless on the `http` transport: a stateless
+strategy holds no session that can expire, and the other transports
+never reach this loader. That table is generated from the auth
+models, and so is this rule — `_should_detect_login_pages` reads the
+same `stateless` and `transport` ClassVars rather than restating
+them.
 
-**Detection invariant:** Data pages from parser.yaml (status,
-connection, channel info) do not contain `<input type="password">`.
-Login pages always do. If the response contains a password input
-field, it is a login page served at a data URL.
+**Detection invariant:** The data pages on the fetch list (status,
+connection, channel info) do not carry a password field. Login pages
+always do. A password field on a data URL means the modem served a
+login page there.
 
-When detected, the loader signals `LOAD_AUTH` instead of returning
-the response in the resource dict. The orchestrator clears the
-session and increments the auth streak — the next poll starts with
-a fresh login.
+**The test is a substring, not a DOM query.** `_is_login_page`
+lowercases the undecoded body and looks for `type="password"` or
+`type='password'`. This is deliberately looser than parsing for an
+`<input type="password">` node: it runs before decode, so it costs
+nothing and still reads a body that fails to decode, and it fires on
+markup too broken to yield an `input` node and on login forms that
+exist only inside a script template — the SPA shape the false-negative
+row below describes. The tradeoff is that the string also matches
+inside inline JS or a comment on a genuine data page, which is the
+false-positive row.
+
+When detected, the loader raises `LoginPageDetectedError`; the
+collector maps it to `LOAD_AUTH` (the collection layer owns the
+signal). The raise aborts the fetch, discarding every resource
+already retrieved that poll — a session serving a login page at one
+data URL is dead for the rest, and recovery refetches the whole list
+anyway.
+
+Recovery runs in the same poll, not the next one. The orchestrator
+attempts logout (best-effort), clears the session, re-authenticates,
+and refetches every target. If that succeeds the poll succeeds and
+the auth streak resets. If it fails, the streak increments and the
+poll reports `AUTH_FAILED`; at the threshold the auth circuit breaker
+opens and blocks further polling. The breaker does not close on its
+own — the HA layer starts a reauth flow, and completing it reloads
+the config entry, which is what clears the state. See
+[ORCHESTRATION_SPEC.md](ORCHESTRATION_SPEC.md) § Auth Circuit
+Breaker and UC-19.
 
 **Scope:** Only applies to HTTP transport, HTML format responses.
 Structured formats (JSON, XML) and HNAP transport are not checked.
@@ -452,7 +479,7 @@ Structured formats (JSON, XML) and HNAP transport are not checked.
 
 | Failure | Impact | Likelihood | Mitigation |
 |---------|--------|------------|------------|
-| False positive (data page has `<input type="password">`) | Auth failure loop — session cleared every poll | Very low — parser.yaml only references status/data pages, not settings/admin pages | Detected during HAR regression; override via `session.login_page` (future, if needed) |
+| False positive (data page has `<input type="password">`) | Every poll aborts, retries, and fails; at the threshold the breaker opens and prompts reauth for credentials that are not wrong | Very low — the fetch list holds only status/data pages, not settings/admin pages | Detected during HAR regression; override via `session.login_page` (future, if needed) |
 | False negative (response without `<input type="password">` is not real data) | Falls through to the parser and produces silent empty results — incorrectly surfaces as `no_signal`. Covers both JS-rendered SPA login forms and stub responses (issue #151). | Low — but observed in the field (CM1200, 2026-05-02) | Runtime: Parser Coordinator detects `0 of N expected anchors fulfilled` and raises `LOAD_INTEGRITY` (see UC-19a, `PARSING_SPEC § Parser Diagnostics`). Intake: HAR-time MCP onboarding flag (see below) |
 
 If a false positive occurs in the field, the escape hatch is a

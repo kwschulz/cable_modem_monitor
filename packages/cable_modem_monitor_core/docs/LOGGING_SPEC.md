@@ -97,10 +97,13 @@ and strips the query string from `url` and scrubs the password from
 | `SessionCleared` | DEBUG | Session cleared |
 | `LogoutExecuted` | DEBUG | Logout action sent |
 | `LogoutFailed` | WARNING | Logout action failed |
+| `PostLoginFetchFailed` | WARNING | A `session.post_login_endpoints` path did not answer 2xx; collection continues |
 | `HnapSessionExpired` | WARNING | HNAP HTTP error on a reused session — session likely expired |
 | `StubPageDetected` | WARNING | 0 of N expected parser anchors found — stub/login page served at data URL |
 
 Fields — `LogoutFailed`: `model`, `reason: str`
+Fields — `PostLoginFetchFailed`: `model`, `path: str`,
+`status_code: int | None` (None on a transport error), `reason: str`
 Fields — `HnapSessionExpired`: `model`, `status_code: int`
 Fields — `StubPageDetected`: `model`, `path: str`, `anchors_found: int`,
 `anchors_expected: int`
@@ -158,7 +161,16 @@ Fields — `CollectionComplete`: `model`, `ds_count: int`, `us_count: int`, `ela
 Fields — `ParseError`: `model`, `reason: str`
 Fields — `ResourceLoadError` / `HttpStatusError` / `ConnectionFailedDuringLoad`:
 `model`, `path: str`, `status_code: int | None`, `reason: str`
+Fields — `HttpStatusError` also carries `request_line: str`, `content_type: str`,
+`response_body: str`, populated for 401/403 only and empty otherwise.
 Fields — `HnapConnectionFailed` / `HnapLoadError`: `model`, `reason: str`
+
+A 401/403 during load renders multi-line, mirroring `AuthFailed` — summary,
+then `request:` (method, URL, and headers sent, with sensitive values masked
+as `<set, len=N>`), `response:`, and `body:`. A bare status line cannot tell a
+rejected session from a missing header or cookie. The collector constructs the
+event because it is the only layer that knows the password: it scrubs
+`response_body` and truncates it to the log-line budget first.
 
 | Event | Level | When |
 |---|---|---|

@@ -1,16 +1,16 @@
 {
-  "_description": "Unlocked channel: lock_status is canonical, other fields null per unlocked-channel-nulling rule",
+  "_description": "Unlocked channel: the nulling rule removes every key except channel_number and lock_status, channel_type included, so the identity requirement does not apply",
   "_data": {
     "downstream": [
       {
         "channel_number": 32,
-        "channel_id": null,
-        "channel_type": "qam",
-        "lock_status": "not_locked",
-        "modulation": null,
-        "frequency": null,
-        "power": null,
-        "snr": null
+        "lock_status": "not_locked"
+      }
+    ],
+    "upstream": [
+      {
+        "channel_number": 6,
+        "lock_status": "not_locked"
       }
     ]
   }

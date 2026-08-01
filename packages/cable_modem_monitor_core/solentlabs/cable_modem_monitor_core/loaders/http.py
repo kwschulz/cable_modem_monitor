@@ -19,10 +19,10 @@ import requests
 from bs4 import BeautifulSoup
 
 from ..auth.base import AuthResult
+from ..fetch_list import ResourceTarget
 from ..models.parser_config.config import ALL_FORMAT_MODELS
 from ..models.parser_config.format_registry import lookup_decode_kind
 from .diagnostics import describe_request
-from .fetch_list import ResourceTarget
 from .html_normalize import normalize_html
 
 _logger = logging.getLogger(__name__)
@@ -167,10 +167,12 @@ class HTTPResourceLoader:
 
             if response.status_code in (401, 403):
                 raise ResourceLoadError(
-                    f"HTTP {response.status_code} on {target.path} — session likely expired"
-                    f"\n  request: {describe_request(response.request, headers=self._headers)}",
+                    f"HTTP {response.status_code} on {target.path}",
                     status_code=response.status_code,
                     path=target.path,
+                    request_line=describe_request(response.request, headers=self._headers),
+                    response_body=response.text,
+                    content_type=content_type,
                 )
 
             if response.status_code >= 400:
@@ -241,6 +243,9 @@ class ResourceLoadError(Exception):
         status_code: HTTP status code if the error was an HTTP response.
             None for connection/timeout errors.
         path: Resource path that failed (e.g., "/status.html").
+        request_line: Sanitized description of the request we sent.
+        response_body: Raw response body; the caller scrubs it before logging.
+        content_type: Response Content-Type, for reading the body correctly.
     """
 
     def __init__(
@@ -248,10 +253,18 @@ class ResourceLoadError(Exception):
         message: str,
         status_code: int | None = None,
         path: str = "",
+        request_line: str = "",
+        response_body: str = "",
+        content_type: str = "",
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.path = path
+        # Fields, not message text: the collector rebuilds the message and is
+        # the layer that sanitizes these (LOGGING_SPEC.md).
+        self.request_line = request_line
+        self.response_body = response_body
+        self.content_type = content_type
 
 
 class LoginPageDetectedError(ResourceLoadError):
@@ -305,18 +318,19 @@ def _decode_response(
             return {"_raw": data}, None
         return data, None
 
-    if kind == "xml":
-        return None, "XML format not yet supported"
-
-    _logger.warning("Unknown format '%s', returning as BeautifulSoup", fmt)
-    return BeautifulSoup(normalize_html(text), "html.parser"), None
+    # Only html and json reach here: every format whose transports include
+    # "http" declares one of those two decode kinds. XML is CBN-only and
+    # decodes in loaders/cbn.py. Reaching this means a config escaped
+    # cross-file validation, so fail rather than coerce to BeautifulSoup —
+    # a silent HTML coercion hands the parser structurally valid garbage.
+    return None, f"unsupported decode kind '{kind}' for format '{fmt}'"
 
 
 def _is_login_page(text: str) -> bool:
     """Check if an HTML response contains login form indicators.
 
-    Data pages from parser.yaml (status, connection, channel info)
-    do not contain password input fields. Login pages always do.
+    The data pages on the fetch list (status, connection, channel
+    info) do not contain password input fields. Login pages always do.
     This invariant enables login page detection without
     modem-specific configuration.
 

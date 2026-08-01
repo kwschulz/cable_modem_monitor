@@ -61,6 +61,20 @@ caused a modem that really returns bad tags to be processed
 incorrectly. The only sanctioned transformation is PII value
 sanitization at intake, which replaces values and never structure.
 
+### Hand-applied sanitization
+
+har-capture's automated pass misses some surfaces (URL paths, the
+HAR's structured `cookies` arrays, strings inside bundled JS assets).
+When a value must be sanitized by hand:
+
+- Substitute `[REDACTED]` for the value. Substitution only — never
+  delete an entry, a header, or a field.
+- Declare the substitution in the modem's `modem.yaml` `notes:`:
+  what was replaced, and why the automated pass missed it.
+
+Precedent: the Sagemcom F3896LG-ZG session token in a logout URL
+path, declared in that modem's notes.
+
 ### Assembled fixtures
 
 Not every fixture is a wire capture. Before har-capture existed,
@@ -83,6 +97,13 @@ that must declare itself:
 - The assembly is only valid when it round-trips: run the parser over
   the assembled HAR and diff the output against the evidence — zero
   mismatches required.
+- **Request bodies come from the evidence, never from what Core sends.**
+  A body written to match the client turns the fixture into a mirror:
+  the replay passes because Core agrees with itself, and the firmware
+  is never consulted. The F3896LG-VMB login carried a `username` key
+  copied from Core's own request, and the restart it certified could
+  not work on hardware (#82). If the evidence does not show a body,
+  leave the entry out rather than inventing one.
 
 **Partial evidence.** Sometimes no full session exists: a contributor
 can share diagnostics or page source but not run a capture, a sanitizer
@@ -355,6 +376,13 @@ name or a likely label (e.g., "uptime", "Up Time") and add the mapping to
 the parser.yaml. A parser that ships without a Tier-1 field will fail
 `verify_diagnostics` at confirmation time.
 
+`generate_golden_file` runs the parser coordinator, not the
+orchestrator, so its output omits every orchestrator-derived field —
+`rate_corrected` / `rate_uncorrected`, signal classification, status
+derivation. Use it for the channel-count and field sanity check above.
+The committed golden comes from the orchestrated replay in Step 9,
+which is what CI compares against.
+
 Then write the catalog package:
 
 ```python
@@ -367,10 +395,22 @@ See [ONBOARDING_SPEC.md](ONBOARDING_SPEC.md) for the full
 
 ## Step 9: Run Tests
 
-```python
-from solentlabs.cable_modem_monitor_core.test_harness.runner import run_tests
-test_result = run_tests(modem_dir)
+The authoritative check is the catalog suite — it replays the HAR
+through the full orchestrator, which is what CI runs:
+
+```bash
+.venv/bin/python -m pytest packages/cable_modem_monitor_catalog/tests/ \
+  --no-header -q -k "<model>"
 ```
+
+On a golden mismatch the replay writes `modem.actual.json` next to the
+HAR. Once the diff is what you intend, promote it to
+`modem.expected.json` and re-run.
+
+`catalog_tools.run_tests(modem_dir)` exists as an MCP tool and returns
+the same structured diff, but it calls the non-orchestrated pipeline,
+so a modem whose golden carries orchestrator-derived fields fails there
+while passing CI. Diagnose with it if you like; decide with pytest.
 
 If tests fail, diagnose from the structured diff:
 
@@ -516,20 +556,21 @@ must be verified independently.
 
 ### Step 15a: Run Catalog Tests
 
-After flipping status, run the full catalog test suite before
-committing:
+Run the full catalog test suite before committing:
 
 ```bash
 .venv/bin/python -m pytest packages/cable_modem_monitor_catalog/tests/ --no-header -q
 ```
 
-`test_confirmed_modem_golden_spec_conformance` only fires for confirmed
-modems, so this is the first time it runs for this entry. A parser
-that passed `test_modem_har_replay` during onboarding can still fail
-the conformance gate here — the two tests check different things.
+This is ordinary pre-commit verification, not a promotion gate. Every
+test here already ran on the commit that added the entry:
+`test_modem_golden_spec_conformance` covers every modem regardless of
+`status:`, so flipping to `confirmed` activates nothing new. A failure
+means this step's edits broke something, not that latent drift surfaced.
+
 Fix any failures before proceeding to Step 16. If the golden needs
-updating after a parser fix, regenerate with the actual output from
-the failing test run and re-run until clean.
+updating after a parser fix, promote the `modem.actual.json` the
+failing replay writes next to the HAR and re-run until clean.
 
 ### Step 16: Commit and Reply
 
@@ -647,9 +688,14 @@ are no errors in `modem_data`.
 9. **Logout is an operational requirement — confirm it works.** Logout prevents
    stale server-side sessions from blocking re-authentication. For every modem
    with `actions.logout` configured, ask the contributor to confirm the endpoint
-   responds (any 2xx or redirect) after a successful login. If the logout
-   request appeared in the HAR with a Cookie header, set `requires_session: true`;
-   if no Cookie header was present, set `requires_session: false` (the default).
+   responds (any 2xx or redirect) after a successful login. Set
+   `requires_session: true` when the captured logout request carried the
+   credential its auth strategy uses: a `Cookie` header for cookie-based
+   strategies, an `Authorization` header for `bearer`. Set it to `false`
+   (the default) when the request carried no credential at all. Judge by the
+   credential, not by the presence of any cookie — the F3896LG logout carries
+   a `sidebar_state` UI cookie that authenticates nothing, while the header is
+   what the endpoint actually needs.
 10. **Fixture values trace to observed artifacts.** Every value written into a
     golden file or verified.json must come from a real artifact — the
     contributor's diagnostics, a HAR, page source, or a posted screenshot. Never

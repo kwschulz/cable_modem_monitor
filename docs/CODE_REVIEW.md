@@ -389,8 +389,13 @@ Two distinct test shapes:
   mutations): assertions stay inline. Each behavior is one test
   function; the assertion shape *is* the test.
 
-Don't mix shapes. A behavioural test should not load a fixture; a
-schema test should not assert on field defaults.
+What decides the shape is where the meaning lives, not the test's
+category. Data the assertion is *about* stays visible in the test;
+data that is only setup — a parser config a diagnostics test needs in
+order to have something to parse — belongs in a fixture, however
+behavioural the assertion. A behavioural test loading a fixture for
+its scaffolding is keeping its logic clean, not mixing shapes. A
+schema test should still not assert on field defaults.
 
 Fixture content uses placeholder values, never production formats:
 no real URLs, hostnames, or vendor-specific payload shapes in
