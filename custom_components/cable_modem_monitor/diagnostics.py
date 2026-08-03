@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -260,6 +261,14 @@ def _get_recent_logs(
 # ------------------------------------------------------------------
 
 
+def _has_credentials(entry_data: Mapping[str, Any]) -> bool:
+    """Whether the entry carries any credential at all."""
+    # OR, not AND: password-only modems (auth.username_field: "") store
+    # no username, so an AND test reports "no credentials" on a working
+    # entry. Matches Core's test in orchestrator._log_poll_context.
+    return bool(entry_data.get("username") or entry_data.get("password"))
+
+
 def _build_diagnostics_dict(
     hass: HomeAssistant,
     entry: CableModemConfigEntry,
@@ -312,7 +321,7 @@ def _build_diagnostics_dict(
             "variant": entry.data.get(CONF_VARIANT),
             "protocol": entry.data.get(CONF_PROTOCOL, "http"),
             "legacy_ssl": entry.data.get(CONF_LEGACY_SSL, False),
-            "has_credentials": bool(entry.data.get("username") and entry.data.get("password")),
+            "has_credentials": _has_credentials(entry.data),
             "supports_icmp": entry.data.get(CONF_SUPPORTS_ICMP, False),
             "supports_head": entry.data.get(CONF_SUPPORTS_HEAD, False),
             "credential_encoding": entry.data.get(CONF_CREDENTIAL_ENCODING, "plain"),

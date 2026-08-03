@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Opening your modem's web page no longer stops the integration.** On
+  firmware that permits one session at a time, logging in with a browser
+  takes the slot and the modem then refuses the integration's next login.
+  That refusal was read as a rejected password: polling stopped on the
+  first occurrence and Home Assistant asked the user to re-enter
+  credentials that were never wrong. These modems already declare
+  themselves by configuring a logout action, and the spec already said
+  recovery happens once the other session ends, which the immediate stop
+  prevented by leaving no further polls to recover with. A refused login
+  there now counts toward the existing threshold instead, so closing the
+  modem's web page is enough to bring polling back. A password genuinely
+  changed at the modem still reaches the reauthentication prompt, at the
+  threshold rather than on the first poll. Firmware anti-brute-force
+  lockout is untouched and still stops polling at once. (Related to #185)
+
+- **Diagnostics reported no credentials on password-only modems.** The
+  check required a username, which modems authenticating on a password
+  alone never store, so the report contradicted the poll log two sections
+  below it. (Related to #185)
+
 ## [3.14.0-beta.17] - 2026-07-31
 
 ### Added

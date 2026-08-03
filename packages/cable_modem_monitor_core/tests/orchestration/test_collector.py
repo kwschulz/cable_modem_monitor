@@ -999,6 +999,22 @@ class TestAttemptLogoutBeforeRetry:
         mock_clear.assert_not_called()
 
 
+class TestIsSingleSession:
+    """Logout presence is the declared single-session signal."""
+
+    def test_true_when_logout_configured(self) -> None:
+        """A configured logout action marks the firmware single-session."""
+        config = _make_config(logout_endpoint="/logout")
+        collector = ModemDataCollector(config, MagicMock(), None, "http://localhost", "", "")
+        assert collector.is_single_session is True
+
+    def test_false_without_logout(self) -> None:
+        """No logout action means concurrent sessions are allowed."""
+        config = _make_config()
+        collector = ModemDataCollector(config, MagicMock(), None, "http://localhost", "", "")
+        assert collector.is_single_session is False
+
+
 # ------------------------------------------------------------------
 # Tests — login page detection (behavioral, inline — server-based)
 # ------------------------------------------------------------------

@@ -26,8 +26,12 @@ def _make_policy(
     threshold: int = 3,
     max_backoff: int = 6,
     stale_threshold: int = 2,
+    single_session: bool = False,
 ) -> SignalPolicy:
     collector = MagicMock()
+    # Set explicitly: a bare MagicMock attribute is truthy, which would
+    # silently route AUTH_FAILED down the single-session threshold path.
+    collector.is_single_session = single_session
     return SignalPolicy(
         collector,
         auth_failure_threshold=threshold,
@@ -143,6 +147,43 @@ def test_circuit_breaker_open_on_auth_lockout():
     assert_event_emitted(events, AuthCircuitBreakerOpen)
     event = next(e for e in events if isinstance(e, AuthCircuitBreakerOpen))
     assert event.level == EventLevel.ERROR
+
+
+# ---------------------------------------------------------------------------
+# AUTH_FAILED on single-session firmware, threshold trip (UC-87a)
+# ---------------------------------------------------------------------------
+
+
+def test_single_session_auth_failed_does_not_open_breaker():
+    """A refused login while the slot is occupied must not stop polling."""
+    policy = _make_policy(model="F3896LG-ZG", single_session=True)
+    with capture_events() as events:
+        policy.apply(_auth_failed_result())
+    assert not [e for e in events if isinstance(e, AuthCircuitBreakerOpen)]
+
+
+def test_single_session_auth_failed_trips_at_threshold():
+    """The breaker still opens if the slot never frees."""
+    policy = _make_policy(model="F3896LG-ZG", threshold=2, single_session=True)
+    with capture_events() as events:
+        policy.apply(_auth_failed_result())  # streak=1, no trip
+        policy.apply(_auth_failed_result())  # streak=2, trips
+    assert_event_emitted(events, AuthCircuitBreakerOpen, model="F3896LG-ZG")
+
+
+def test_single_session_login_404_still_trips_immediately():
+    """An absent login endpoint is not a session conflict; stop at once."""
+    # Retrying a 404 would keep posting credentials at an unknown device,
+    # and the trip must carry the status so the blocked-poll message says
+    # endpoint-not-found rather than reconfigure-credentials.
+    policy = _make_policy(model="F3896LG-ZG", single_session=True)
+    result = ModemResult(success=False, signal=CollectorSignal.AUTH_FAILED, auth_status_code=404)
+    with capture_events() as events:
+        policy.apply(result)
+    assert policy.circuit_open is True
+    assert policy.circuit_trip_status_code == 404
+    event = next(e for e in events if isinstance(e, AuthCircuitBreakerOpen))
+    assert event.status_code == 404
 
 
 # ---------------------------------------------------------------------------

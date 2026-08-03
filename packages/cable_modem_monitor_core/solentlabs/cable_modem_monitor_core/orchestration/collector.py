@@ -307,6 +307,15 @@ class ModemDataCollector:
         return True
 
     @property
+    def is_single_session(self) -> bool:
+        """Whether the firmware enforces one active session at a time."""
+        # Logout presence is the declared signal for this, per
+        # MODEM_YAML_SPEC § Single-session modems. Named here so the
+        # policy layer can ask without open-coding the actions lookup.
+        actions = self._modem_config.actions
+        return actions is not None and actions.logout is not None
+
+    @property
     def last_resource_fetches(self) -> list[ResourceFetch]:
         """Per-resource timing from the last successful collection."""
         return self._last_resource_fetches

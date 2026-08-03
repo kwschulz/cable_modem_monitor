@@ -120,15 +120,21 @@ def _fail_result(
 
 def _mock_collector(
     results: list[ModemResult] | ModemResult | None = None,
+    *,
+    single_session: bool = False,
 ) -> MagicMock:
     """Build a mock ModemDataCollector.
 
     Args:
         results: Single result or list of results for sequential
             execute() calls. Defaults to a single OK result.
+        single_session: Whether the firmware enforces one session.
     """
     collector = MagicMock()
     collector.session_is_valid = True
+    # Set explicitly: a bare MagicMock attribute is truthy, which would
+    # silently route AUTH_FAILED down the single-session threshold path.
+    collector.is_single_session = single_session
     collector._session = MagicMock()
     collector._base_url = "http://192.168.100.1"
     collector._auth_context = None

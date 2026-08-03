@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from custom_components.cable_modem_monitor.diagnostics import (
     _create_log_entry,
     _get_logs_from_file,
@@ -499,6 +501,57 @@ async def test_diagnostics_last_exception_truncated(mock_runtime_data):
     assert "last_error" in result
     assert result["last_error"]["type"] == "RuntimeError"
     assert "truncated" in result["last_error"]["message"]
+
+
+# ┌────────────┬────────────┬──────────┬──────────────────────────────────┐
+# │ username   │ password   │ expected │ description                      │
+# ├────────────┼────────────┼──────────┼──────────────────────────────────┤
+# │ "admin"    │ "secret"   │ True     │ both supplied                    │
+# │ ""         │ "secret"   │ True     │ password-only modem (#185)       │
+# │ "admin"    │ ""         │ True     │ username-only                    │
+# │ ""         │ ""         │ False    │ open modem, no auth              │
+# │ absent     │ absent     │ False    │ keys missing entirely            │
+# └────────────┴────────────┴──────────┴──────────────────────────────────┘
+#
+# fmt: off
+HAS_CREDENTIALS_CASES = [
+    # (entry_overrides,                          expected, id)
+    ({"username": "admin", "password": "secret"}, True,    "both"),
+    ({"username": "",      "password": "secret"}, True,    "password-only"),
+    ({"username": "admin", "password": ""},       True,    "username-only"),
+    ({"username": "",      "password": ""},       False,   "neither"),
+    ({},                                          False,   "keys-absent"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [(c[0], c[1]) for c in HAS_CREDENTIALS_CASES],
+    ids=[c[2] for c in HAS_CREDENTIALS_CASES],
+)
+async def test_diagnostics_has_credentials(mock_runtime_data, overrides, expected):
+    """has_credentials tracks Core's OR test, so password-only entries report True."""
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.runtime_data = mock_runtime_data
+    entry.data = {k: v for k, v in MOCK_ENTRY_DATA.items() if k not in ("username", "password")}
+    entry.data.update(overrides)
+    entry.title = "Solent Labs TPS-2000"
+    entry.entry_id = "test_123"
+
+    async def fake_executor(fn, *args):
+        return fn(*args)
+
+    hass.async_add_executor_job = fake_executor
+
+    with patch(
+        "custom_components.cable_modem_monitor.diagnostics.get_log_entries",
+        return_value=SAMPLE_LOG_BUFFER_ENTRY,
+    ):
+        result = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert result["config_entry"]["has_credentials"] is expected
 
 
 async def test_diagnostics_health_coord_data_none(mock_runtime_data):

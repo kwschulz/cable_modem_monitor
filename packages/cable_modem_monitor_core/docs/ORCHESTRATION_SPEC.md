@@ -202,7 +202,7 @@ class CollectorSignal(Enum):
 | Signal | Orchestrator Policy |
 |--------|-------------------|
 | `OK` | Reset auth streak, derive statuses, return `ModemSnapshot` (see § Connection Status Derivation) |
-| `AUTH_FAILED` | Trip circuit breaker immediately, report `auth_failed` |
+| `AUTH_FAILED` | Trip circuit breaker immediately, report `auth_failed` (see UC-87). Exception: on single-session modems (`actions.logout` configured) a refused login may only mean the slot is occupied, so the breaker trips at threshold instead — unless the login 404'd, which still trips immediately (see UC-87a) |
 | `AUTH_LOCKOUT` | Trip circuit breaker immediately, report `auth_failed` |
 | `CONNECTIVITY` | Abort, report `unreachable`, apply connectivity backoff |
 | `LOAD_ERROR` | Abort, report `unreachable` |

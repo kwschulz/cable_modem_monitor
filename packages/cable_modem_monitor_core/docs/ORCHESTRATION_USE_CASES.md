@@ -1895,7 +1895,9 @@ HA are now wrong. Current session in memory may still be valid.
 **Why not retry?** AUTH_FAILED means the modem explicitly rejected the
 credentials. Unlike CONNECTIVITY (network glitch) or LOAD_AUTH (stale
 session), there is no transient condition that would make the same
-password work on the next attempt. Retrying with known-bad credentials:
+password work on the next attempt — except on single-session firmware,
+where an occupied session slot is exactly that condition (UC-87a).
+Retrying with known-bad credentials:
 
 1. Wastes polls against a modem that will always reject them
 2. Risks triggering firmware anti-brute-force (AUTH_LOCKOUT, or worse,
@@ -1913,6 +1915,53 @@ rejecting the login itself.
 > rejection) trips the breaker immediately; LOAD_AUTH keeps
 > threshold=6 with same-poll self-correction (UC-18). The HA adapter
 > starts the reauth flow when the breaker opens (UC-81 step 6).
+
+---
+
+### UC-87a: Runtime — login refused while the session slot is occupied
+
+**Preconditions:** Integration running normally against single-session
+firmware (`actions.logout` configured — see MODEM_YAML_SPEC
+§ Single-session modems). Stored credentials are correct. The user
+opens the modem's own web UI and logs in, taking the only session slot.
+
+| Poll | What happens | Streak | Status |
+|------|-------------|--------|--------|
+| N | User's browser holds the slot; cached session rejected → LOAD_AUTH → same-poll relogin refused | 1 | AUTH_FAILED |
+| N+1..N+4 | Browser still logged in; login still refused | 2-5 | AUTH_FAILED |
+| N+5 | Browser session released or timed out → login succeeds | 0 | ONLINE |
+
+**Target behavior:**
+
+- AUTH_FAILED takes the threshold path, not the immediate trip
+- Polling continues, so the condition clears on its own once the user
+  closes the modem's web UI
+- No reauth prompt for credentials that were never wrong
+- If the slot never frees, the breaker still opens at threshold and
+  UC-81 raises reauth as usual
+- **A login 404 is exempt** and still trips immediately: no session slot
+  frees an absent endpoint, and retrying would keep posting credentials
+  at an unknown device. The trip carries the status code so the blocked
+  poll reports endpoint-not-found rather than reconfigure-credentials
+
+**Why this differs from UC-87:** UC-87 trips immediately because no
+transient condition can make the same password work later. On
+single-session firmware that premise is false: the spec already states
+that a second login fails while one session is active, so a refused
+login is ambiguous between "wrong password" and "slot busy". The config
+flow remains the gate for genuinely wrong credentials (UC-86), which
+makes "slot busy" the far more likely reading at runtime.
+
+**Cost accepted:** on single-session firmware a password changed at the
+modem takes `auth_failure_threshold` polls to surface the reauth prompt
+instead of one. Reusing the existing threshold rather than adding a
+second knob is deliberate.
+
+> **Status:** Implemented. `SignalPolicy.apply` routes AUTH_FAILED
+> through `_maybe_trip_circuit_breaker()` when
+> `collector.is_single_session`. AUTH_LOCKOUT is unaffected and still
+> trips immediately — firmware anti-brute-force is a real lockout.
+> Reported on #185 (Sagemcom F3896LG-ZG, one concurrent session).
 
 ### UC-88: Reboot-signal trigger
 
