@@ -62,6 +62,7 @@
       "network_unreachable": "Kan inte nå modemet.\n\nKontrollera:\n1. Du är på modemets nätverk (inte gäst-WiFi)\n2. VPN är frånkopplat\n3. IP-adressen är korrekt (vanligtvis 192.168.100.1)\n4. Modemets webbgränssnitt är tillgängligt i din webbläsare",
       "cannot_connect": "Modemet svarar inte.\n\nKontrollera:\n1. IP-adressen är korrekt\n2. Försök inkludera protokollet (t.ex. http://192.168.100.1)\n3. Modemets webbgränssnitt är tillgängligt från Home Assistants nätverk",
       "invalid_auth": "Inloggningen misslyckades.\n\nKontrollera:\n1. Användarnamnet är korrekt (vanligtvis 'admin')\n2. Lösenordet är korrekt (kontrollera modemets etikett)\n3. Försök logga in via din webbläsare först för att verifiera uppgifterna",
+      "modem_busy": "Modemet är upptaget och avvisade inloggningen.\n\nDet är inte ett problem med användarnamn eller lösenord. Fast programvara som bara tillåter en session åt gången svarar så här när någon annan är inloggad på modemets webbsida, eller när din leverantörs support är ansluten. Det händer även medan modemet startar om.\n\nStäng modemets webbsida om du har den öppen och försök igen.",
       "session_rejected": "Inloggningen lyckades, men modemet avvisade databegäran.\n\nInloggningen fungerade, så det är inte ett problem med användarnamn eller lösenord. Home Assistant-loggen innehåller redan en varning om den misslyckade begäran med modemets svar.",
       "parse_failed": "Ansluten men kunde inte läsa modemdata.\n\nDetta kan innebära att ditt modem behöver ett annat variantval. Försök gå tillbaka och välj ett annat alternativ, eller kontrollera att modemets firmware stöds.",
       "unknown": "Oväntat fel. Kontrollera Home Assistant-loggarna för detaljer."
@@ -102,6 +103,7 @@
       "network_unreachable": "Kan inte nå modemet. Kontrollera IP-adress och nätverksanslutning.",
       "cannot_connect": "Modemet svarar inte. Kontrollera IP-adress och protokoll.",
       "invalid_auth": "Inloggningen misslyckades. Kontrollera användarnamn och lösenord.",
+      "modem_busy": "Modemet är upptaget och avvisade inloggningen. Inget problem med inloggningsuppgifterna; stäng modemets webbsida om den är öppen och försök igen.",
       "session_rejected": "Inloggningen lyckades, men modemet avvisade databegäran. Inget problem med inloggningsuppgifterna; se varningen i Home Assistant-loggen.",
       "parse_failed": "Ansluten men kunde inte läsa modemdata.",
       "unknown": "Oväntat fel. Kontrollera Home Assistant-loggarna."

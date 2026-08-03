@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.18] - 2026-08-03
+
+### Added
+
+- **Ziggo Sagemcom F3896LG-ZG confirmed on hardware.** Verified via
+  contributor diagnostics on beta.17: 34 downstream (32 SC-QAM plus 2
+  OFDM) and 6 upstream (4 ATDMA plus 2 OFDMA) channels locked in bridge
+  mode, hardware 1.2, software LG-RDK_12.13.16-2504.5, all signals
+  nominal. Restart is confirmed on hardware as well, the modem's own
+  event log recording "Cable Modem Reboot because of - Reboot UI". It is
+  the first of the two F3896LG entries with a verified restart; the
+  Virgin Media sibling's remains untested. (Related to #185)
+
+### Changed
+
+- **The GitHub landing page leads with the supported-modems list.** The
+  badge row opened with "Help Add Your Modem", asking for contributor
+  effort before answering the question a visitor actually arrives with,
+  which is whether their own modem works. Repo traffic showed the modem
+  request page below the top-ten path cutoff while the supported-modems
+  list was the third most-viewed path.
+
+### Fixed
+
+- **A busy modem no longer reads as a wrong password.** Firmware that
+  permits one session at a time turns the integration's login away while
+  someone else holds the slot, and answers with a 5xx to say so. Every
+  non-2xx on a login was treated as a rejected credential, so opening the
+  modem's own web page stopped polling on the first occurrence and asked
+  the user to re-enter a password that was never wrong. The advice on that
+  form, to try logging in via a browser first, was the very thing causing
+  it. A login answering 5xx is now classified `AUTH_UNAVAILABLE`: the poll
+  reports the modem unreachable, nothing accumulates toward the circuit
+  breaker, and no credential prompt is raised however long the condition
+  lasts. It clears by itself when the other session ends. Setup and
+  reauthentication now report the modem as busy for the same reason
+  instead of blaming the credentials. A genuinely wrong password still
+  answers 401 or 403 and still stops on the first poll, and firmware
+  anti-brute-force lockout is untouched.
+
+  This is the rule the data path already applied. There, 401/403 means
+  the session and every other status means the modem, so an identical 5xx
+  produced "unreachable" when it landed on a data page and a credential
+  prompt when it landed on the login. The cause is not always the user's
+  to fix: on this firmware an ISP support session holds the same slot, and
+  no password change would release it. (Related to #185)
+
+- **Diagnostics reported no credentials on password-only modems.** The
+  check required a username, which modems authenticating on a password
+  alone never store, so the report contradicted the poll log two sections
+  below it. (Related to #185)
+
 ## [3.14.0-beta.17] - 2026-07-31
 
 ### Added

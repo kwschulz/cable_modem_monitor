@@ -1892,6 +1892,11 @@ HA are now wrong. Current session in memory may still be valid.
 - After successful reauth → back to normal (UC-16)
 - Zero risk of triggering modem anti-brute-force lockout
 
+**Scope.** UC-87 is the 401/403 case: the modem examined the credential
+and rejected it. A login that answers 5xx never reaches this use case —
+the modem declined to serve the request without judging the credential,
+which is UC-87a. A 404 is UC-87b.
+
 **Why not retry?** AUTH_FAILED means the modem explicitly rejected the
 credentials. Unlike CONNECTIVITY (network glitch) or LOAD_AUTH (stale
 session), there is no transient condition that would make the same
@@ -1913,6 +1918,88 @@ rejecting the login itself.
 > rejection) trips the breaker immediately; LOAD_AUTH keeps
 > threshold=6 with same-poll self-correction (UC-18). The HA adapter
 > starts the reauth flow when the breaker opens (UC-81 step 6).
+
+---
+
+### UC-87a: Runtime — login refused because the modem is busy
+
+**Preconditions:** Integration running normally, stored credentials
+correct. Something makes the modem decline to serve a login. Observed
+causes on the Sagemcom F3896LG (single-session firmware): the user logs
+into the modem's own web page and takes the only session slot, or ISP
+customer care is connected to it. A modem mid-reboot behaves the same
+way. All answer the login with 5xx.
+
+| Poll | What happens | Streak | Status |
+|------|-------------|--------|--------|
+| N | Login answers 5xx | 0 | UNREACHABLE |
+| N+1..N+k | Still busy; polling continues at normal cadence | 0 | UNREACHABLE |
+| N+k+1 | Condition clears; login succeeds | 0 | ONLINE |
+
+**Target behavior:**
+
+- Emit `AUTH_UNAVAILABLE`, report `unreachable`
+- Never increment the auth streak, never trip the circuit breaker,
+  never raise a credential prompt, at any repetition count
+- Polling continues, so the condition clears on its own
+- The config flow reports the modem as busy, not the credentials as bad
+
+**Why never, rather than eventually:** a threshold only delays the wrong
+answer. The user cannot shorten an ISP customer-care session, so a
+reauth form offers a remedy that cannot work, and re-entering a correct
+password is not what resolves it. Escalating a "try later" into a
+credential accusation is wrong on the first poll and equally wrong on
+the six hundredth.
+
+**Why the whole 5xx class, not a specific code:** 5xx is the server
+declining to serve the request. It carries no judgment about the
+credential, which is the only thing that would justify stopping. Reading
+the class keeps this free of per-modem error tables and covers a
+rebooting modem with the same rule. Firmware may distinguish causes
+further — the F3896LG returns `errorCode` 65545 for another user holding
+the session and 65546 for customer care, and its own UI renders separate
+messages for each — but Core does not need the distinction to choose the
+right behavior, and encoding those codes would be modem-specific
+behavior (MODEM_YAML_SPEC § Principles).
+
+**Consistency:** this is the rule the data path already applies.
+RESOURCE_LOADING_SPEC states that on a data page, 401/403 maps to
+`LOAD_AUTH` and other status codes map to `LOAD_ERROR`. Before this use
+case existed, the identical 5xx produced `unreachable` from a data page
+and a credential prompt from the login.
+
+**Evidence:** #185 HAR (Sagemcom F3896LG-ZG). The captured `index.js`
+login handler branches on `status == 503` with `errorCode` 65545 or
+65546 and renders "Someone else is currently logged into the settings
+page. Only one session is allowed at a time." and "Customer care is
+still connected to your interface." A wrong password is handled by a
+different mechanism entirely: the UI re-reads
+`GET /rest/v1/user/login`, whose response carries
+`numberOfContiguousFailures` and `lockoutTime`.
+
+> **Status:** Implemented. The collector classifies a 5xx login response
+> as `AUTH_UNAVAILABLE`; `SignalPolicy.apply` maps it to `UNREACHABLE`
+> with no side effects, matching `LOAD_ERROR`.
+
+---
+
+### UC-87b: Runtime — login endpoint absent
+
+**Preconditions:** The configured host is not the expected device, or
+firmware moved the login endpoint. The login answers 404.
+
+**Target behavior:**
+
+- `AUTH_FAILED`, circuit breaker trips immediately
+- The trip carries the status code so the blocked-poll message reports
+  endpoint-not-found rather than reconfigure-credentials
+- Distinct from UC-87a: no amount of waiting makes an absent endpoint
+  appear, and retrying would keep posting credentials at an unknown
+  device
+
+> **Status:** Implemented. `_trip_circuit_breaker(status_code=404)`;
+> the orchestrator's blocked-poll branch reads
+> `circuit_trip_status_code`.
 
 ### UC-88: Reboot-signal trigger
 

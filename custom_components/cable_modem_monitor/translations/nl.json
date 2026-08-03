@@ -62,6 +62,7 @@
       "network_unreachable": "Kan modem niet bereiken.\n\nControleer:\n1. U bent op het netwerk van de modem (niet gast-WiFi)\n2. VPN is uitgeschakeld\n3. IP-adres is correct (meestal 192.168.100.1)\n4. De webinterface van de modem is toegankelijk in uw browser",
       "cannot_connect": "Modem reageert niet.\n\nControleer:\n1. IP-adres is correct\n2. Probeer het protocol toe te voegen (bijv. http://192.168.100.1)\n3. De webinterface van de modem is toegankelijk vanuit het Home Assistant-netwerk",
       "invalid_auth": "Aanmelding mislukt.\n\nControleer:\n1. Gebruikersnaam is correct (meestal 'admin')\n2. Wachtwoord is correct (controleer het label van de modem)\n3. Probeer eerst in te loggen via uw browser om de inloggegevens te controleren",
+      "modem_busy": "De modem is bezig en heeft de aanmelding geweigerd.\n\nDit is geen probleem met de gebruikersnaam of het wachtwoord. Firmware die maar één sessie tegelijk toestaat, antwoordt zo wanneer iemand anders is aangemeld op de webpagina van de modem, of wanneer de supportafdeling van uw provider verbonden is. Het gebeurt ook terwijl de modem opnieuw opstart.\n\nSluit de webpagina van de modem als u die open hebt staan en probeer het opnieuw.",
       "session_rejected": "Aanmelding geslaagd, maar de modem weigerde het gegevensverzoek.\n\nDe aanmelding werkte, dus dit is geen probleem met de gebruikersnaam of het wachtwoord. Het Home Assistant-logboek bevat al een waarschuwing over het mislukte verzoek met het antwoord van de modem.",
       "parse_failed": "Verbonden, maar kon de modemgegevens niet lezen.\n\nDit kan betekenen dat uw modem een andere variantselectie nodig heeft. Probeer terug te gaan en een andere optie te kiezen, of controleer of de firmware van uw modem wordt ondersteund.",
       "unknown": "Onverwachte fout. Controleer de Home Assistant-logs voor details."
@@ -102,6 +103,7 @@
       "network_unreachable": "Kan modem niet bereiken. Controleer het IP-adres en de netwerkverbinding.",
       "cannot_connect": "Modem reageert niet. Controleer het IP-adres en het protocol.",
       "invalid_auth": "Aanmelding mislukt. Controleer gebruikersnaam en wachtwoord.",
+      "modem_busy": "De modem is bezig en heeft de aanmelding geweigerd. Geen probleem met de inloggegevens; sluit de webpagina van de modem als die open staat en probeer het opnieuw.",
       "session_rejected": "Aanmelding geslaagd, maar de modem weigerde het gegevensverzoek. Geen probleem met de inloggegevens; zie de waarschuwing in het Home Assistant-logboek.",
       "parse_failed": "Verbonden, maar kon de modemgegevens niet lezen.",
       "unknown": "Onverwachte fout. Controleer de Home Assistant-logs."

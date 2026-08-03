@@ -244,10 +244,15 @@ def restart_requires_credentials(modem_dir: Path, variant: str | None) -> bool:
 
 # Maps collector signals to strings.json error keys.  These keys are
 # looked up by HA's frontend in strings.json / translations/*.json.
+# AUTH_UNAVAILABLE is the one auth-phase signal that is not invalid_auth:
+# the modem declined to serve the login rather than judging the
+# credential, so blaming the password sends the user to fix the wrong
+# thing (UC-87a).
 
 _SIGNAL_ERROR_MAP: dict[CollectorSignal, str] = {
     CollectorSignal.CONNECTIVITY: "cannot_connect",
     CollectorSignal.AUTH_FAILED: "invalid_auth",
+    CollectorSignal.AUTH_UNAVAILABLE: "modem_busy",
     CollectorSignal.AUTH_LOCKOUT: "invalid_auth",
     CollectorSignal.LOAD_ERROR: "cannot_connect",
     CollectorSignal.LOAD_AUTH: "invalid_auth",
@@ -469,6 +474,9 @@ def _run_validation(
     # rejects credentials, surface the real error immediately — never
     # retry, since retries on single-session firmware would collide
     # with our own previous attempt and obscure the original failure.
+    # AUTH_UNAVAILABLE is deliberately absent: a busy modem is not a
+    # credential problem, so it raises RuntimeError like the other
+    # collection failures rather than PermissionError (UC-87a).
     auth_signals = (CollectorSignal.AUTH_FAILED, CollectorSignal.AUTH_LOCKOUT, CollectorSignal.LOAD_AUTH)
     result = _attempt_validation(
         modem_config=modem_config,

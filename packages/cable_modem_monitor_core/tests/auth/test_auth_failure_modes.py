@@ -98,7 +98,11 @@ def _manager_for(strategy: str) -> Any:
     auth = TypeAdapter(AuthConfig).validate_python({"strategy": strategy, **_MINIMAL_AUTH[strategy]})
     # create_auth_manager only reads .auth; a full ModemConfig would add
     # a dozen unrelated required fields to every row of _MINIMAL_AUTH.
-    return create_auth_manager(cast("ModemConfig", SimpleNamespace(auth=auth)))
+    # ModemConfig is named unquoted so the import is a live reference: a
+    # string cast reads as an unused import to CodeQL (py/unused-import),
+    # and moving it under TYPE_CHECKING relocates that finding rather
+    # than resolving it.
+    return create_auth_manager(cast(ModemConfig, SimpleNamespace(auth=auth)))
 
 
 # ---------------------------------------------------------------------------

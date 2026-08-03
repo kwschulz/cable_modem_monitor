@@ -146,6 +146,25 @@ def test_circuit_breaker_open_on_auth_lockout():
 
 
 # ---------------------------------------------------------------------------
+# AUTH_UNAVAILABLE, never trips (UC-87a)
+# ---------------------------------------------------------------------------
+
+
+def _auth_unavailable_result() -> ModemResult:
+    return ModemResult(success=False, signal=CollectorSignal.AUTH_UNAVAILABLE, auth_status_code=503)
+
+
+def test_auth_unavailable_emits_no_breaker_event():
+    """A busy modem produces no lockout event, however long it stays busy."""
+    policy = _make_policy(model="F3896LG-ZG", threshold=2)
+    with capture_events() as events:
+        for _ in range(10):
+            policy.apply(_auth_unavailable_result())
+    assert not [e for e in events if isinstance(e, AuthCircuitBreakerOpen)]
+    assert policy.circuit_open is False
+
+
+# ---------------------------------------------------------------------------
 # AuthCircuitBreakerOpen — threshold trip (LOAD_AUTH)
 # ---------------------------------------------------------------------------
 

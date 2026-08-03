@@ -62,6 +62,7 @@
       "network_unreachable": "Impossible d'atteindre le modem.\n\nVérifiez :\n1. Vous êtes sur le réseau du modem (pas le WiFi invité)\n2. Le VPN est déconnecté\n3. L'adresse IP est correcte (généralement 192.168.100.1)\n4. L'interface web du modem est accessible dans votre navigateur",
       "cannot_connect": "Le modem ne répond pas.\n\nVérifiez :\n1. L'adresse IP est correcte\n2. Essayez d'inclure le protocole (ex. : http://192.168.100.1)\n3. L'interface web du modem est accessible depuis le réseau de Home Assistant",
       "invalid_auth": "Échec de connexion.\n\nVérifiez :\n1. Le nom d'utilisateur est correct (généralement 'admin')\n2. Le mot de passe est correct (vérifiez l'étiquette du modem)\n3. Essayez de vous connecter via votre navigateur d'abord pour vérifier les identifiants",
+      "modem_busy": "Le modem est occupé et a refusé la connexion.\n\nCe n'est pas un problème de nom d'utilisateur ou de mot de passe. Un micrologiciel n'autorisant qu'une seule session à la fois répond ainsi lorsqu'une autre personne est connectée à la page web du modem, ou lorsque le support de votre opérateur est connecté. Cela se produit aussi pendant le redémarrage du modem.\n\nFermez la page web du modem si elle est ouverte, puis réessayez.",
       "session_rejected": "Connexion réussie, mais le modem a refusé la requête de données.\n\nLa connexion a fonctionné, il ne s'agit donc pas d'un problème de nom d'utilisateur ou de mot de passe. Le journal Home Assistant contient déjà un avertissement sur la requête en échec avec la réponse du modem.",
       "parse_failed": "Connecté, mais impossible de lire les données du modem.\n\nCela peut signifier que votre modem nécessite une sélection de variante différente. Essayez de revenir en arrière et de sélectionner une autre option, ou vérifiez que le firmware de votre modem est compatible.",
       "unknown": "Erreur inattendue. Vérifiez les journaux de Home Assistant pour plus de détails."
@@ -102,6 +103,7 @@
       "network_unreachable": "Impossible d'atteindre le modem. Vérifiez l'adresse IP et la connectivité réseau.",
       "cannot_connect": "Le modem ne répond pas. Vérifiez l'adresse IP et le protocole.",
       "invalid_auth": "Échec de connexion. Vérifiez le nom d'utilisateur et le mot de passe.",
+      "modem_busy": "Le modem est occupé et a refusé la connexion. Ce n'est pas un problème d'identifiants ; fermez la page web du modem si elle est ouverte, puis réessayez.",
       "session_rejected": "Connexion réussie, mais le modem a refusé la requête de données. Ce n'est pas un problème d'identifiants ; consultez l'avertissement dans le journal Home Assistant.",
       "parse_failed": "Connecté, mais impossible de lire les données du modem.",
       "unknown": "Erreur inattendue. Vérifiez les journaux de Home Assistant."

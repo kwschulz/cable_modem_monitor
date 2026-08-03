@@ -979,10 +979,14 @@ The session maintains this cookie across requests.
 
 ### Single-session modems
 
-Some modems allow only one active session. If a second session is
-attempted while one is active, login fails. Declare `actions.logout`
-to signal this — Core uses logout presence to drive single-session
-behaviour:
+Some modems permit only one active session at a time. Firmware differs
+in who loses when a second login arrives: some refuse the newcomer,
+answering 5xx (see UC-87a); others accept it and evict the incumbent,
+so it is the displaced client whose next request fails. Either way the
+integration should hold the slot for as little time as it can.
+
+Declare `actions.logout` on both. Core uses logout presence to drive
+single-session behaviour:
 
 ```yaml
 auth:
@@ -1010,16 +1014,20 @@ When `actions.logout` is configured, logout fires in two places:
   (see below).
 
 The integration cannot clear another client's session — it holds no
-credential for one. If a third-party session holds the slot and the
-pre-retry logout doesn't free it, login fails with
-`AuthResult.FAILURE` and status reports `auth_failed`. Recovery
-happens when the other session ends (explicit logout or modem-side
-timeout).
+credential for one. On firmware that refuses the newcomer, a
+third-party session the pre-retry logout cannot free means our login
+is refused. Firmware that reports this as 5xx is classified
+`AUTH_UNAVAILABLE` and reports `unreachable`, leaving polling alive so
+recovery happens on its own when the other session ends (explicit
+logout or modem-side timeout).
+That classification is driven by the login's status code, not by
+logout presence, so it applies to any firmware that answers this way.
+See UC-87a.
 
 See RUNTIME_POLLING_SPEC.md for the full session lifecycle.
 
-Evidence: modems that reject concurrent sessions — a second login
-attempt fails while an existing session is active.
+Evidence for the refusing family: a second login attempt fails while an
+existing session is active.
 
 ### SPA-style modems
 

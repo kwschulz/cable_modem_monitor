@@ -18,11 +18,15 @@ from solentlabs.cable_modem_monitor_core.orchestration.signals import (
 )
 
 
+def _collector() -> MagicMock:
+    """Build a mock ModemDataCollector."""
+    return MagicMock()
+
+
 @pytest.fixture()
 def policy() -> SignalPolicy:
     """Create a SignalPolicy with a mock collector."""
-    collector = MagicMock()
-    return SignalPolicy(collector)
+    return SignalPolicy(_collector())
 
 
 # ┌──────────────────────┬──────────────────────┬──────────────────────┐
@@ -90,7 +94,7 @@ class TestLoadIntegrityTreatedLikeLoadAuth:
 
     def test_load_integrity_clears_session(self) -> None:
         """LOAD_INTEGRITY triggers session clear (same as LOAD_AUTH)."""
-        collector = MagicMock()
+        collector = _collector()
         policy = SignalPolicy(collector)
         result = ModemResult(success=False, signal=CollectorSignal.LOAD_INTEGRITY)
         policy.apply(result)
@@ -119,3 +123,72 @@ class TestLoadIntegrityTreatedLikeLoadAuth:
         assert policy.auth_failure_streak == 1
         policy.clear_streak()
         assert policy.auth_failure_streak == 0
+
+
+# UC-87a: a login answering 5xx means the modem declined to serve the
+# request, not that it judged the credential. It must never reach a
+# credential prompt at any repetition count, because some causes (ISP
+# customer care holding the session) are outside the user's control.
+class TestAuthUnavailable:
+    """AUTH_UNAVAILABLE is a wait, not a verdict."""
+
+    @staticmethod
+    def _unavailable() -> ModemResult:
+        return ModemResult(
+            success=False,
+            signal=CollectorSignal.AUTH_UNAVAILABLE,
+            error="Login returned HTTP 503",
+            auth_status_code=503,
+        )
+
+    def test_reports_unreachable(self) -> None:
+        """The modem answered, but declined; that is not an auth failure."""
+        policy = SignalPolicy(_collector())
+        assert policy.apply(self._unavailable()) == ConnectionStatus.UNREACHABLE
+
+    def test_does_not_touch_the_auth_streak(self) -> None:
+        """A busy modem must not accumulate toward a credential verdict."""
+        policy = SignalPolicy(_collector())
+        policy.apply(self._unavailable())
+        assert policy.auth_failure_streak == 0
+
+    def test_never_trips_the_breaker(self) -> None:
+        """Not at threshold, not at ten times threshold."""
+        policy = SignalPolicy(_collector())
+        for _ in range(policy._threshold * 10):
+            policy.apply(self._unavailable())
+        assert policy.circuit_open is False
+        assert policy.auth_failure_streak == 0
+
+    def test_does_not_clear_the_session(self) -> None:
+        """Nothing is wrong with the session; only the modem is busy."""
+        collector = _collector()
+        policy = SignalPolicy(collector)
+        policy.apply(self._unavailable())
+        collector.clear_session.assert_not_called()
+
+
+class TestAuthFailedTripsImmediately:
+    """UC-87 and UC-87b: a credential verdict or an absent endpoint stops at once."""
+
+    @staticmethod
+    def _auth_failed(status: int) -> ModemResult:
+        return ModemResult(
+            success=False,
+            signal=CollectorSignal.AUTH_FAILED,
+            error=f"Login returned HTTP {status}",
+            auth_status_code=status,
+        )
+
+    def test_credentials_rejected_trips_on_first_failure(self) -> None:
+        """UC-87 is unchanged: 401 is a verdict on the credential."""
+        policy = SignalPolicy(_collector())
+        policy.apply(self._auth_failed(401))
+        assert policy.circuit_open is True
+
+    def test_absent_endpoint_trips_and_records_status(self) -> None:
+        """UC-87b: the trip carries 404 so the blocked poll names the endpoint."""
+        policy = SignalPolicy(_collector())
+        policy.apply(self._auth_failed(404))
+        assert policy.circuit_open is True
+        assert policy.circuit_trip_status_code == 404

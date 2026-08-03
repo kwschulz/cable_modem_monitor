@@ -19,6 +19,7 @@ class TestCollectorSignal:
         expected = {
             "ok",
             "auth_failed",
+            "auth_unavailable",
             "auth_lockout",
             "connectivity",
             "load_error",
@@ -69,7 +70,7 @@ class TestHealthStatus:
 # ┌──────────────────┬─────────────┬──────────────────────────────┐
 # │ Enum             │ Count       │ Purpose                      │
 # ├──────────────────┼─────────────┼──────────────────────────────┤
-# │ CollectorSignal  │ 8 members   │ Pipeline failure classes     │
+# │ CollectorSignal  │ 9 members   │ Pipeline failure classes     │
 # │ ConnectionStatus │ 5 members   │ Derived from poll outcome    │
 # │ DocsisStatus     │ 4 members   │ Derived from lock_status     │
 # │ HealthStatus     │ 5 members   │ Derived from probes          │
@@ -77,7 +78,7 @@ class TestHealthStatus:
 #
 # fmt: off
 ENUM_MEMBER_COUNTS = [
-    (CollectorSignal,  8, "pipeline failure classes"),
+    (CollectorSignal,  9, "pipeline failure classes"),
     (ConnectionStatus, 5, "poll outcome statuses"),
     (DocsisStatus,     4, "DOCSIS lock statuses"),
     (HealthStatus,     5, "health probe statuses"),

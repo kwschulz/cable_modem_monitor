@@ -62,6 +62,7 @@
       "network_unreachable": "No se puede alcanzar el módem.\n\nVerifica:\n1. Estás en la red del módem (no en WiFi de invitados)\n2. El VPN está desconectado\n3. La dirección IP es correcta (normalmente 192.168.100.1)\n4. La interfaz web del módem es accesible desde tu navegador",
       "cannot_connect": "El módem no responde.\n\nVerifica:\n1. La dirección IP es correcta\n2. Intenta incluir el protocolo (ej., http://192.168.100.1)\n3. La interfaz web del módem es accesible desde la red de Home Assistant",
       "invalid_auth": "Error de inicio de sesión.\n\nVerifica:\n1. El usuario es correcto (normalmente 'admin')\n2. La contraseña es correcta (revisa la etiqueta del módem)\n3. Intenta iniciar sesión desde tu navegador primero para verificar las credenciales",
+      "modem_busy": "El módem está ocupado y rechazó el inicio de sesión.\n\nNo es un problema de usuario ni de contraseña. El firmware que solo permite una sesión a la vez responde así cuando otra persona ha iniciado sesión en la página web del módem, o cuando el equipo de soporte de su proveedor está conectado. También ocurre mientras el módem se reinicia.\n\nCierre la página web del módem si la tiene abierta y vuelva a intentarlo.",
       "session_rejected": "Inicio de sesión correcto, pero el módem rechazó la solicitud de datos.\n\nEl inicio de sesión funcionó, así que no es un problema de usuario ni de contraseña. El registro de Home Assistant ya contiene una advertencia sobre la solicitud fallida con la respuesta del módem.",
       "parse_failed": "Conectado, pero no se pudieron leer los datos del módem.\n\nEsto puede significar que tu módem necesita una selección de variante diferente. Intenta volver atrás y seleccionar otra opción, o verifica que el firmware de tu módem sea compatible.",
       "unknown": "Error inesperado. Revisa los registros de Home Assistant para más detalles."
@@ -102,6 +103,7 @@
       "network_unreachable": "No se puede alcanzar el módem. Verifica la dirección IP y la conectividad de red.",
       "cannot_connect": "El módem no responde. Verifica la dirección IP y el protocolo.",
       "invalid_auth": "Error de inicio de sesión. Verifica el usuario y la contraseña.",
+      "modem_busy": "El módem está ocupado y rechazó el inicio de sesión. No es un problema de credenciales; cierre la página web del módem si está abierta y vuelva a intentarlo.",
       "session_rejected": "Inicio de sesión correcto, pero el módem rechazó la solicitud de datos. No es un problema de credenciales; consulta la advertencia en el registro de Home Assistant.",
       "parse_failed": "Conectado, pero no se pudieron leer los datos del módem.",
       "unknown": "Error inesperado. Revisa los registros de Home Assistant."

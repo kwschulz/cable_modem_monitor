@@ -40,6 +40,8 @@ class SignalPolicy:
 
     Circuit breaker trip modes:
     - AUTH_FAILED / AUTH_LOCKOUT: trip immediately (credentials rejected).
+    - AUTH_UNAVAILABLE: never trips; the modem declined to serve the
+      login rather than judging the credential (UC-87a).
     - LOAD_AUTH: trip at threshold (session issue, may self-correct).
 
     Args:
@@ -190,6 +192,15 @@ class SignalPolicy:
             self._auth_failure_streak += 1
             self._trip_circuit_breaker(status_code=result.auth_status_code)
             return ConnectionStatus.AUTH_FAILED
+
+        if signal == CollectorSignal.AUTH_UNAVAILABLE:
+            # UC-87a. The modem answered "try later"; it did not judge the
+            # credential. No streak, no breaker, no session clear, at any
+            # repetition count: a threshold would only delay the wrong
+            # answer, and causes like an ISP support session holding the
+            # slot are ones the user cannot act on anyway. Same treatment
+            # LOAD_ERROR gets for the identical status on a data page.
+            return ConnectionStatus.UNREACHABLE
 
         if signal == CollectorSignal.AUTH_LOCKOUT:
             self._auth_failure_streak += 1

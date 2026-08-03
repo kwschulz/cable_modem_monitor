@@ -78,9 +78,16 @@ When editing either, keep the distinction and the per-file link rule.
    the list of changed files and proposed commit message. Let the
    developer stage them.
 
-5. **No external actions without discussion.** Never create GitHub
-   issues, PRs, commits, pushes, label changes, or any external-
-   facing action without explicit discussion first.
+5. **No external actions without discussion, per action.** Never
+   create GitHub issues, PRs, commits, pushes, label changes, or any
+   external-facing action without explicit discussion first.
+   Approval of a *plan* containing an external action is not approval
+   of the action — confirm again immediately before executing it.
+   Iterating on draft text ("how about X", "change Y to Z") is
+   drafting, not authorization, even when the developer supplies the
+   final wording; only "post it" / "send it" authorizes the call.
+   Local actions (edits, tests, lint) inherit plan-level approval
+   normally.
 
 6. **Before deleting or moving ANY file, run `rg <filename>` across
    the entire project.** Files are referenced by non-Python sources
@@ -212,8 +219,8 @@ propose fixes first.
 
 ## Verification Discipline
 
-The first two rules govern the rest of this section. Every other rule
-here asks for a check done privately; these two put the check in the
+The first three rules govern the rest of this section. Every other rule
+here asks for a check done privately; these three put the check in the
 reply, where a skipped one is visible without re-running the work.
 
 - **Cite what you opened.** When stating a fact or a cause about the
@@ -231,32 +238,35 @@ reply, where a skipped one is visible without re-running the work.
   window — and every wrong conclusion was an invented cause laid over
   one of them, each disproved by a single `git log` or `grep` that ran
   only after the user pushed back.
+- **Review your own diff before declaring it done.** For any change to
+  runtime behavior (policy, auth, orchestration, recovery), re-read the
+  full diff as a reviewer hunting for what it breaks, not as the author
+  confirming it works. Name in the reply the failure mode you looked
+  for. Green tool gates are not this check: black, ruff, mypy, pyright,
+  pre-commit and `validate-ci` were all green on the #185 auth change
+  while it would have posted credentials six times at an unknown device
+  and then shown the user the wrong remedy. Both defects were found only
+  because the developer asked for a review, which is not a gate.
 
 - **Verify against ground truth, not against doc claims.** When
   asked to review a planning doc / status doc / roadmap, summarize
   what's *actually true* (check code, git, issues), not what the
   doc *says*.
-- **Empty output is not an empty set.** Never assert from a command
-  whose output you haven't confirmed is well-formed. A `--jq`
+- **Empty output is not an empty set.** Never assert absence from a
+  command whose output you haven't confirmed is well-formed. A `--jq`
   expression that silently emits nothing is indistinguishable from a
   real zero: totev#313 was reported as "closed same day, no comments,
   no fix" and made a session's headline conclusion, when it in fact
-  had two comments that reversed the reading entirely. Before any
-  claim rests on absence, re-run in a different shape — `--json` and
-  parse, or count the records.
+  had two comments that reversed the reading entirely.
 - **Verify the premise before creating a worktree.** For any task
   that says "remove X" or "clean up Y," `rg` for it on the current
   branch first. Zero hits means the work is already done — stop
   before spinning up a worktree.
-- **Verify handoff work.** Other Claude sessions on the same
-  worktree may regress earlier work. After a handoff, run the full
-  pipeline (mock-server / golden-file / channel counts) — don't
-  just check tests pass. Tests passing doesn't mean the right
-  things are being tested.
-- **After any context hand-off, audit the full diff before touching
+- **After any hand-off, audit the full diff before touching
   anything.** Run `git diff HEAD --stat` and review every changed
-  file. The gitStatus snapshot in the session header can be stale
-  if the previous session modified files after it was taken.
+  file. The gitStatus snapshot in the session header can be stale,
+  and another session on the same worktree may have regressed
+  earlier work.
 - **Never spawn a sub-agent to implement a feature that touches
   existing code, specs, or tests.** Sub-agents lack project history
   and make unsolicited "cleanup" decisions — removing fields,
@@ -364,6 +374,11 @@ reply, where a skipped one is visible without re-running the work.
   (`# Phase 1 — auth`), rationale notes, or numbered-procedure
   markers during a rewrite. The "default to no comments" rule
   targets WHAT-noise, not WHY-context.
+- **No em-dashes in code comments.** Punctuate with commas,
+  semicolons, or periods, or split the sentence. Same instinct as
+  the contributor-comms rule below, extended to code. Applies to
+  comments being written or already under edit; don't rewrite
+  existing comments solely for this.
 - **Isolate before sprawl.** If a feature would touch >2 files,
   it probably needs its own module. Spreading wiring across
   `button.py`, `sensor.py`, `coordinator.py`, and `__init__.py`
@@ -542,6 +557,19 @@ No auto-close keywords (`Fixes #X`, `Closes #X`, `Resolves #X`) in PR
 bodies *or* commit messages — GitHub scans every commit in a merge
 and closes regardless of qualifier. Use `Related to #X` /
 `Addresses #X` instead.
+
+Before authorizing any merge to main, scan the whole merge range and
+flag every match to the developer as a blocker:
+
+```bash
+git log <base>..<head> --format='%H%n%B%n---' | grep -inE '(clos(e|es|ed)|fix(es|ed)?|resolv(es|ed)?)[[:space:]]+#[0-9]+'
+```
+
+The parser doesn't read English: "would resolve #X if…" closes it, and
+so does "doesn't fix #X". This bit PR #145, where "still required to
+confirm fix resolves #81 specifically" auto-closed #81 on merge and it
+had to be reopened by hand. Applies equally when Claude authored the
+offending commit in an earlier session.
 
 Issue label glossary and state semantics live in
 [CONTRIBUTING.md § Issue Labels](CONTRIBUTING.md#issue-labels) and
