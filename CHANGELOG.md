@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Ziggo Sagemcom F3896LG-ZG confirmed on hardware.** Verified via
+  contributor diagnostics on beta.17: 34 downstream (32 SC-QAM plus 2
+  OFDM) and 6 upstream (4 ATDMA plus 2 OFDMA) channels locked in bridge
+  mode, hardware 1.2, software LG-RDK_12.13.16-2504.5, all signals
+  nominal. Restart is confirmed on hardware as well, the modem's own
+  event log recording "Cable Modem Reboot because of - Reboot UI". It is
+  the first of the two F3896LG entries with a verified restart; the
+  Virgin Media sibling's remains untested. (Related to #185)
+
+### Changed
+
+- **The GitHub landing page leads with the supported-modems list.** The
+  badge row opened with "Help Add Your Modem", asking for contributor
+  effort before answering the question a visitor actually arrives with,
+  which is whether their own modem works. Repo traffic showed the modem
+  request page below the top-ten path cutoff while the supported-modems
+  list was the third most-viewed path.
+
 ### Fixed
 
 - **A busy modem no longer reads as a wrong password.** Firmware that
