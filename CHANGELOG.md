@@ -9,20 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Opening your modem's web page no longer stops the integration.** On
-  firmware that permits one session at a time, logging in with a browser
-  takes the slot and the modem then refuses the integration's next login.
-  That refusal was read as a rejected password: polling stopped on the
-  first occurrence and Home Assistant asked the user to re-enter
-  credentials that were never wrong. These modems already declare
-  themselves by configuring a logout action, and the spec already said
-  recovery happens once the other session ends, which the immediate stop
-  prevented by leaving no further polls to recover with. A refused login
-  there now counts toward the existing threshold instead, so closing the
-  modem's web page is enough to bring polling back. A password genuinely
-  changed at the modem still reaches the reauthentication prompt, at the
-  threshold rather than on the first poll. Firmware anti-brute-force
-  lockout is untouched and still stops polling at once. (Related to #185)
+- **A busy modem no longer reads as a wrong password.** Firmware that
+  permits one session at a time turns the integration's login away while
+  someone else holds the slot, and answers with a 5xx to say so. Every
+  non-2xx on a login was treated as a rejected credential, so opening the
+  modem's own web page stopped polling on the first occurrence and asked
+  the user to re-enter a password that was never wrong. The advice on that
+  form, to try logging in via a browser first, was the very thing causing
+  it. A login answering 5xx is now classified `AUTH_UNAVAILABLE`: the poll
+  reports the modem unreachable, nothing accumulates toward the circuit
+  breaker, and no credential prompt is raised however long the condition
+  lasts. It clears by itself when the other session ends. Setup and
+  reauthentication now report the modem as busy for the same reason
+  instead of blaming the credentials. A genuinely wrong password still
+  answers 401 or 403 and still stops on the first poll, and firmware
+  anti-brute-force lockout is untouched.
+
+  This is the rule the data path already applied. There, 401/403 means
+  the session and every other status means the modem, so an identical 5xx
+  produced "unreachable" when it landed on a data page and a credential
+  prompt when it landed on the login. The cause is not always the user's
+  to fix: on this firmware an ISP support session holds the same slot, and
+  no password change would release it. (Related to #185)
 
 - **Diagnostics reported no credentials on password-only modems.** The
   check required a username, which modems authenticating on a password

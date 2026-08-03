@@ -62,6 +62,7 @@
       "network_unreachable": "Não é possível alcançar o modem.\n\nVerifique:\n1. Você está na rede do modem (não WiFi de convidados)\n2. VPN está desconectado\n3. Endereço IP está correto (geralmente 192.168.100.1)\n4. Interface web do modem está acessível no seu navegador",
       "cannot_connect": "O modem não está respondendo.\n\nVerifique:\n1. Endereço IP está correto\n2. Tente incluir o protocolo (ex.: http://192.168.100.1)\n3. Interface web do modem está acessível pela rede do Home Assistant",
       "invalid_auth": "Falha no login.\n\nVerifique:\n1. Usuário está correto (geralmente 'admin')\n2. Senha está correta (verifique a etiqueta do modem)\n3. Tente fazer login pelo navegador primeiro para verificar as credenciais",
+      "modem_busy": "O modem está ocupado e recusou o login.\n\nNão é um problema de usuário ou senha. Firmwares que permitem apenas uma sessão por vez respondem assim quando outra pessoa está conectada à página web do modem, ou quando a equipe de suporte do seu provedor está conectada. Também acontece enquanto o modem reinicia.\n\nFeche a página web do modem, se estiver aberta, e tente novamente.",
       "session_rejected": "Login realizado com sucesso, mas o modem recusou a requisição de dados.\n\nO login funcionou, portanto não é um problema de usuário ou senha. O log do Home Assistant já contém um aviso sobre a requisição que falhou, com a resposta do modem.",
       "parse_failed": "Conectado, mas não foi possível ler os dados do modem.\n\nIsso pode significar que seu modem precisa de uma seleção de variante diferente. Tente voltar e selecionar outra opção, ou verifique se o firmware do seu modem é suportado.",
       "unknown": "Erro inesperado. Verifique os logs do Home Assistant para detalhes."
@@ -102,6 +103,7 @@
       "network_unreachable": "Não foi possível alcançar o modem. Verifique o endereço IP e a conectividade de rede.",
       "cannot_connect": "O modem não está respondendo. Verifique o endereço IP e o protocolo.",
       "invalid_auth": "Falha no login. Verifique o usuário e a senha.",
+      "modem_busy": "O modem está ocupado e recusou o login. Não é um problema de credenciais; feche a página web do modem, se estiver aberta, e tente novamente.",
       "session_rejected": "Login realizado com sucesso, mas o modem recusou a requisição de dados. Não é um problema de credenciais; consulte o aviso no log do Home Assistant.",
       "parse_failed": "Conectado, mas não foi possível ler os dados do modem.",
       "unknown": "Erro inesperado. Verifique os logs do Home Assistant."

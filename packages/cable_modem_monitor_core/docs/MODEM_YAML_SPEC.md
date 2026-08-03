@@ -1009,20 +1009,15 @@ When `actions.logout` is configured, logout fires in two places:
   never released. Whether the call proceeds depends on `requires_session`
   (see below).
 
-Logout presence also changes how a refused login is read. `AUTH_FAILED`
-normally trips the circuit breaker immediately, because a rejected
-credential will not start working (UC-87). Here it can: the slot frees
-when the other session ends. So on these modems `AUTH_FAILED` trips at
-`auth_failure_threshold` instead, leaving polling alive to recover
-(UC-87a). A login that answers 404 is exempt and still stops at once —
-an absent endpoint is not a busy slot.
-
 The integration cannot clear another client's session — it holds no
 credential for one. If a third-party session holds the slot and the
-pre-retry logout doesn't free it, login fails with
-`AuthResult.FAILURE` and status reports `auth_failed`. Recovery
-happens when the other session ends (explicit logout or modem-side
-timeout).
+pre-retry logout doesn't free it, the login fails. Firmware that
+reports this as 5xx is classified `AUTH_UNAVAILABLE` and reports
+`unreachable`, leaving polling alive so recovery happens on its own
+when the other session ends (explicit logout or modem-side timeout).
+That classification is driven by the login's status code, not by
+logout presence, so it applies to any firmware that answers this way.
+See UC-87a.
 
 See RUNTIME_POLLING_SPEC.md for the full session lifecycle.
 

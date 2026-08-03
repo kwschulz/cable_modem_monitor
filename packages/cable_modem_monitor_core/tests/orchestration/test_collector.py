@@ -999,20 +999,60 @@ class TestAttemptLogoutBeforeRetry:
         mock_clear.assert_not_called()
 
 
-class TestIsSingleSession:
-    """Logout presence is the declared single-session signal."""
+def _login_failure(status: int | None) -> dict[str, Any]:
+    """Build an auth_return for a login the modem answered with *status*."""
+    response = MagicMock()
+    response.status_code = status
+    response.url = "http://localhost/rest/v1/user/login"
+    response.request.method = "POST"
+    response.headers = {"Content-Type": "application/json"}
+    response.text = f'{{"status":{status},"message":"Service Unavailable"}}'
+    return {
+        "auth_return": AuthResult(
+            success=False,
+            error=f"Login returned HTTP {status}",
+            response=response if status is not None else None,
+        )
+    }
 
-    def test_true_when_logout_configured(self) -> None:
-        """A configured logout action marks the firmware single-session."""
-        config = _make_config(logout_endpoint="/logout")
-        collector = ModemDataCollector(config, MagicMock(), None, "http://localhost", "", "")
-        assert collector.is_single_session is True
 
-    def test_false_without_logout(self) -> None:
-        """No logout action means concurrent sessions are allowed."""
-        config = _make_config()
-        collector = ModemDataCollector(config, MagicMock(), None, "http://localhost", "", "")
-        assert collector.is_single_session is False
+# ┌────────┬─────────────────────┬──────────────────────────────────────┐
+# │ status │ expected signal     │ why                                  │
+# ├────────┼─────────────────────┼──────────────────────────────────────┤
+# │ 401    │ AUTH_FAILED         │ credential examined and rejected     │
+# │ 403    │ AUTH_FAILED         │ credential examined and rejected     │
+# │ 404    │ AUTH_FAILED         │ login endpoint absent (UC-87b)       │
+# │ 500    │ AUTH_UNAVAILABLE    │ modem declined to serve (UC-87a)     │
+# │ 502    │ AUTH_UNAVAILABLE    │ modem declined to serve              │
+# │ 503    │ AUTH_UNAVAILABLE    │ session slot busy on the F3896LG     │
+# │ 504    │ AUTH_UNAVAILABLE    │ modem declined to serve              │
+# │ none   │ AUTH_FAILED         │ no response to inspect               │
+# └────────┴─────────────────────┴──────────────────────────────────────┘
+#
+# fmt: off
+LOGIN_STATUS_CASES = [
+    (401,  CollectorSignal.AUTH_FAILED,      "401-rejected"),
+    (403,  CollectorSignal.AUTH_FAILED,      "403-rejected"),
+    (404,  CollectorSignal.AUTH_FAILED,      "404-absent-endpoint"),
+    (500,  CollectorSignal.AUTH_UNAVAILABLE, "500-declined"),
+    (502,  CollectorSignal.AUTH_UNAVAILABLE, "502-declined"),
+    (503,  CollectorSignal.AUTH_UNAVAILABLE, "503-busy"),
+    (504,  CollectorSignal.AUTH_UNAVAILABLE, "504-declined"),
+    (None, CollectorSignal.AUTH_FAILED,      "no-response"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [(c[0], c[1]) for c in LOGIN_STATUS_CASES],
+    ids=[c[2] for c in LOGIN_STATUS_CASES],
+)
+def test_login_failure_signal_by_status(status: int | None, expected: CollectorSignal) -> None:
+    """A 5xx login is the modem declining to serve, not a credential verdict (UC-87a)."""
+    result = _run_collector_with_failure(**_login_failure(status))
+    assert result.signal is expected
+    assert result.auth_status_code == status
 
 
 # ------------------------------------------------------------------

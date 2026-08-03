@@ -189,6 +189,7 @@ class CollectorSignal(Enum):
 
     OK = "ok"                          # Collection completed — modem_data is populated
     AUTH_FAILED = "auth_failed"        # Wrong credentials or strategy mismatch
+    AUTH_UNAVAILABLE = "auth_unavailable"  # Login answered 5xx: modem busy, not a credential verdict
     AUTH_LOCKOUT = "auth_lockout"      # Firmware anti-brute-force triggered
     CONNECTIVITY = "connectivity"      # Connection refused, timeout, DNS failure
     LOAD_ERROR = "load_error"          # HTTP error on data page (5xx, 404)
@@ -202,7 +203,8 @@ class CollectorSignal(Enum):
 | Signal | Orchestrator Policy |
 |--------|-------------------|
 | `OK` | Reset auth streak, derive statuses, return `ModemSnapshot` (see § Connection Status Derivation) |
-| `AUTH_FAILED` | Trip circuit breaker immediately, report `auth_failed` (see UC-87). Exception: on single-session modems (`actions.logout` configured) a refused login may only mean the slot is occupied, so the breaker trips at threshold instead — unless the login 404'd, which still trips immediately (see UC-87a) |
+| `AUTH_FAILED` | Trip circuit breaker immediately, report `auth_failed`. Covers 401/403 (credentials rejected, UC-87) and 404 (login endpoint absent, UC-87b) |
+| `AUTH_UNAVAILABLE` | Abort poll, report `unreachable`. No auth streak, no circuit breaker, no credential surface — the modem answered "try later", which is not a verdict on the credential (see UC-87a) |
 | `AUTH_LOCKOUT` | Trip circuit breaker immediately, report `auth_failed` |
 | `CONNECTIVITY` | Abort, report `unreachable`, apply connectivity backoff |
 | `LOAD_ERROR` | Abort, report `unreachable` |

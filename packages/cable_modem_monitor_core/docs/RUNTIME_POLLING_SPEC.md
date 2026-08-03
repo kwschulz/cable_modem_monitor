@@ -214,6 +214,18 @@ for the full schema.
    immediately. Connectivity failures never count
    toward the auth circuit breaker.
 
+2a. **A login answering 5xx is not a credential verdict.** The auth
+   path already refuses to read a transport failure as a rejected
+   password (`ConnectionError` and `Timeout` on auth abort the poll and
+   report `unreachable`). The same reasoning extends to HTTP status:
+   5xx means the modem declined to serve the request, not that it
+   examined the credential and rejected it. These emit
+   `AUTH_UNAVAILABLE`, never touch the auth streak, and never reach a
+   credential prompt no matter how many polls in a row they occur —
+   some causes (ISP customer care holding the session) are outside the
+   user's control entirely, so escalating to a reauth form only offers
+   a remedy that cannot work. See UC-87a.
+
 3. **No within-poll retries.** Every failure mode waits for the next
    scheduled poll cycle. This is inherent rate limiting — even at the
    minimum 30-second cadence, the modem gets breathing room between
@@ -514,7 +526,8 @@ Every signal a protocol layer can emit and the orchestrator's policy:
 | Signal | Source | Orchestrator Policy | Status |
 |--------|--------|-------------------|--------|
 | `AuthResult.SUCCESS` | Auth Manager | Proceed to loading | `online` (if parse succeeds) |
-| `AuthResult.FAILURE` | Auth Manager | Trip circuit breaker immediately | `auth_failed` |
+| `AuthResult.FAILURE`, login answered 401/403/404 | Auth Manager | Trip circuit breaker immediately | `auth_failed` |
+| `AuthResult.FAILURE`, login answered 5xx | Auth Manager | Abort poll, no auth streak, no breaker | `unreachable` |
 | `LoginLockoutError` | Auth Manager | Trip circuit breaker immediately | `auth_failed` |
 | `ConnectionError` on auth | Auth Manager (propagated) | Abort poll, connectivity backoff | `unreachable` |
 | `Timeout` on auth | Auth Manager (propagated) | Abort poll, connectivity backoff | `unreachable` |

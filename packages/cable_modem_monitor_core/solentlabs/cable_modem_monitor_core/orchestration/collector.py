@@ -165,11 +165,21 @@ class ModemDataCollector:
                     password=self._password,
                 ),
             )
+            status = auth_result.response.status_code if auth_result.response is not None else None
+            # A 5xx is the modem declining to serve the login, not a verdict
+            # on the credential, so it must not reach the circuit breaker.
+            # Mirrors the data path, where 401/403 is LOAD_AUTH and every
+            # other status is LOAD_ERROR (RESOURCE_LOADING_SPEC). See UC-87a.
+            signal = (
+                CollectorSignal.AUTH_UNAVAILABLE
+                if status is not None and 500 <= status < 600
+                else CollectorSignal.AUTH_FAILED
+            )
             return ModemResult(
                 success=False,
-                signal=CollectorSignal.AUTH_FAILED,
+                signal=signal,
                 error=auth_result.error,
-                auth_status_code=(auth_result.response.status_code if auth_result.response is not None else None),
+                auth_status_code=status,
             )
 
         # Phase 2: Load resources
@@ -305,15 +315,6 @@ class ModemDataCollector:
 
         # Already authenticated — assume valid until server rejects
         return True
-
-    @property
-    def is_single_session(self) -> bool:
-        """Whether the firmware enforces one active session at a time."""
-        # Logout presence is the declared signal for this, per
-        # MODEM_YAML_SPEC § Single-session modems. Named here so the
-        # policy layer can ask without open-coding the actions lookup.
-        actions = self._modem_config.actions
-        return actions is not None and actions.logout is not None
 
     @property
     def last_resource_fetches(self) -> list[ResourceFetch]:

@@ -18,13 +18,9 @@ from solentlabs.cable_modem_monitor_core.orchestration.signals import (
 )
 
 
-def _collector(*, single_session: bool = False) -> MagicMock:
-    """Build a mock collector with single-session state set explicitly."""
-    # A bare MagicMock attribute is truthy, which would route AUTH_FAILED
-    # down the single-session threshold path without anyone asking for it.
-    collector = MagicMock()
-    collector.is_single_session = single_session
-    return collector
+def _collector() -> MagicMock:
+    """Build a mock ModemDataCollector."""
+    return MagicMock()
 
 
 @pytest.fixture()
@@ -129,79 +125,70 @@ class TestLoadIntegrityTreatedLikeLoadAuth:
         assert policy.auth_failure_streak == 0
 
 
-# Single-session firmware refuses a login while another session holds the
-# slot, so a user opening the modem's own web UI produces a refused login
-# on perfectly good credentials. UC-87's immediate trip assumes no
-# transient condition can make the same password work later; that premise
-# is false here. See ORCHESTRATION_USE_CASES UC-87a.
-class TestAuthFailedOnSingleSessionFirmware:
-    """AUTH_FAILED takes the threshold path on single-session firmware."""
+# UC-87a: a login answering 5xx means the modem declined to serve the
+# request, not that it judged the credential. It must never reach a
+# credential prompt at any repetition count, because some causes (ISP
+# customer care holding the session) are outside the user's control.
+class TestAuthUnavailable:
+    """AUTH_UNAVAILABLE is a wait, not a verdict."""
 
     @staticmethod
-    def _auth_failed() -> ModemResult:
+    def _unavailable() -> ModemResult:
+        return ModemResult(
+            success=False,
+            signal=CollectorSignal.AUTH_UNAVAILABLE,
+            error="Login returned HTTP 503",
+            auth_status_code=503,
+        )
+
+    def test_reports_unreachable(self) -> None:
+        """The modem answered, but declined; that is not an auth failure."""
+        policy = SignalPolicy(_collector())
+        assert policy.apply(self._unavailable()) == ConnectionStatus.UNREACHABLE
+
+    def test_does_not_touch_the_auth_streak(self) -> None:
+        """A busy modem must not accumulate toward a credential verdict."""
+        policy = SignalPolicy(_collector())
+        policy.apply(self._unavailable())
+        assert policy.auth_failure_streak == 0
+
+    def test_never_trips_the_breaker(self) -> None:
+        """Not at threshold, not at ten times threshold."""
+        policy = SignalPolicy(_collector())
+        for _ in range(policy._threshold * 10):
+            policy.apply(self._unavailable())
+        assert policy.circuit_open is False
+        assert policy.auth_failure_streak == 0
+
+    def test_does_not_clear_the_session(self) -> None:
+        """Nothing is wrong with the session; only the modem is busy."""
+        collector = _collector()
+        policy = SignalPolicy(collector)
+        policy.apply(self._unavailable())
+        collector.clear_session.assert_not_called()
+
+
+class TestAuthFailedTripsImmediately:
+    """UC-87 and UC-87b: a credential verdict or an absent endpoint stops at once."""
+
+    @staticmethod
+    def _auth_failed(status: int) -> ModemResult:
         return ModemResult(
             success=False,
             signal=CollectorSignal.AUTH_FAILED,
-            error="login refused",
-            auth_status_code=401,
+            error=f"Login returned HTTP {status}",
+            auth_status_code=status,
         )
 
-    def test_multi_session_still_trips_immediately(self) -> None:
-        """UC-87 is unchanged for firmware that allows concurrent sessions."""
-        policy = SignalPolicy(_collector(single_session=False))
-        policy.apply(self._auth_failed())
+    def test_credentials_rejected_trips_on_first_failure(self) -> None:
+        """UC-87 is unchanged: 401 is a verdict on the credential."""
+        policy = SignalPolicy(_collector())
+        policy.apply(self._auth_failed(401))
         assert policy.circuit_open is True
 
-    def test_single_session_does_not_trip_on_first_failure(self) -> None:
-        """One refused login must not strand polling behind a reauth prompt."""
-        policy = SignalPolicy(_collector(single_session=True))
-        policy.apply(self._auth_failed())
-        assert policy.circuit_open is False
-        assert policy.auth_failure_streak == 1
-
-    def test_single_session_trips_at_threshold(self) -> None:
-        """A password genuinely changed on the modem still reaches reauth."""
-        policy = SignalPolicy(_collector(single_session=True))
-        for _ in range(policy._threshold):
-            policy.apply(self._auth_failed())
-        assert policy.circuit_open is True
-
-    def test_single_session_status_is_still_auth_failed(self) -> None:
-        """Status reporting is unchanged; only the trip rule differs."""
-        policy = SignalPolicy(_collector(single_session=True))
-        assert policy.apply(self._auth_failed()) == ConnectionStatus.AUTH_FAILED
-
-    def test_released_slot_resets_the_streak(self) -> None:
-        """The browser logging out lets the next poll succeed and clears the streak."""
-        policy = SignalPolicy(_collector(single_session=True))
-        policy.apply(self._auth_failed())
-        policy.apply(self._auth_failed())
-        assert policy.auth_failure_streak == 2
-        policy.clear_streak()
-        assert policy.auth_failure_streak == 0
-        assert policy.circuit_open is False
-
-    def test_lockout_still_trips_immediately_on_single_session(self) -> None:
-        """Firmware anti-brute-force is a real lockout; threshold must not apply."""
-        policy = SignalPolicy(_collector(single_session=True))
-        policy.apply(ModemResult(success=False, signal=CollectorSignal.AUTH_LOCKOUT))
-        assert policy.circuit_open is True
-
-    def test_login_404_still_trips_immediately_on_single_session(self) -> None:
-        """No session slot frees an absent login endpoint."""
-        policy = SignalPolicy(_collector(single_session=True))
-        result = ModemResult(
-            success=False,
-            signal=CollectorSignal.AUTH_FAILED,
-            auth_status_code=404,
-        )
-        policy.apply(result)
+    def test_absent_endpoint_trips_and_records_status(self) -> None:
+        """UC-87b: the trip carries 404 so the blocked poll names the endpoint."""
+        policy = SignalPolicy(_collector())
+        policy.apply(self._auth_failed(404))
         assert policy.circuit_open is True
         assert policy.circuit_trip_status_code == 404
-
-    def test_threshold_trip_records_the_refusal_status(self) -> None:
-        """circuit_trip_status_code must survive the threshold path."""
-        policy = SignalPolicy(_collector(single_session=True))
-        for _ in range(policy._threshold):
-            policy.apply(self._auth_failed())
-        assert policy.circuit_trip_status_code == 401

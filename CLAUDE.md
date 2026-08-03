@@ -219,8 +219,8 @@ propose fixes first.
 
 ## Verification Discipline
 
-The first two rules govern the rest of this section. Every other rule
-here asks for a check done privately; these two put the check in the
+The first three rules govern the rest of this section. Every other rule
+here asks for a check done privately; these three put the check in the
 reply, where a skipped one is visible without re-running the work.
 
 - **Cite what you opened.** When stating a fact or a cause about the
@@ -238,6 +238,15 @@ reply, where a skipped one is visible without re-running the work.
   window — and every wrong conclusion was an invented cause laid over
   one of them, each disproved by a single `git log` or `grep` that ran
   only after the user pushed back.
+- **Review your own diff before declaring it done.** For any change to
+  runtime behavior (policy, auth, orchestration, recovery), re-read the
+  full diff as a reviewer hunting for what it breaks, not as the author
+  confirming it works. Name in the reply the failure mode you looked
+  for. Green tool gates are not this check: black, ruff, mypy, pyright,
+  pre-commit and `validate-ci` were all green on the #185 auth change
+  while it would have posted credentials six times at an unknown device
+  and then shown the user the wrong remedy. Both defects were found only
+  because the developer asked for a review, which is not a gate.
 
 - **Verify against ground truth, not against doc claims.** When
   asked to review a planning doc / status doc / roadmap, summarize

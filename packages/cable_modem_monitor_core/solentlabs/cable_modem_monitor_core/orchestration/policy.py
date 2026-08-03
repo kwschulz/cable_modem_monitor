@@ -39,17 +39,16 @@ class SignalPolicy:
     connectivity timeouts don't count toward the auth circuit breaker.
 
     Circuit breaker trip modes:
-    - AUTH_LOCKOUT: trip immediately (firmware anti-brute-force).
-    - AUTH_FAILED: trip immediately (credentials rejected), except on
-      single-session firmware, where a refused login may just mean the
-      slot is occupied, so those take the threshold path.
+    - AUTH_FAILED / AUTH_LOCKOUT: trip immediately (credentials rejected).
+    - AUTH_UNAVAILABLE: never trips; the modem declined to serve the
+      login rather than judging the credential (UC-87a).
     - LOAD_AUTH: trip at threshold (session issue, may self-correct).
 
     Args:
         collector: ModemDataCollector for session clearing on LOAD_AUTH.
         auth_failure_threshold: Consecutive LOAD_AUTH failures before
-            tripping the circuit breaker. AUTH_LOCKOUT, and AUTH_FAILED
-            off single-session firmware, trip immediately regardless.
+            tripping the circuit breaker. AUTH_FAILED and AUTH_LOCKOUT
+            trip immediately regardless of this value.
         max_connectivity_backoff: Maximum polls to skip during
             connectivity backoff. Backoff grows as
             min(2^(streak-1), max).
@@ -191,20 +190,17 @@ class SignalPolicy:
 
         if signal == CollectorSignal.AUTH_FAILED:
             self._auth_failure_streak += 1
-            # Single-session firmware refuses a login while another
-            # session holds the slot (MODEM_YAML_SPEC § Single-session
-            # modems), so a refused login there is not proof of a bad
-            # credential and UC-87's "no transient condition" premise
-            # does not hold. The threshold path keeps polling alive, so
-            # closing the modem's web UI recovers on its own.
-            # A 404 is exempt: no session slot frees an absent login
-            # endpoint, and retrying would keep posting credentials at
-            # an unknown device (see _trip_circuit_breaker).
-            if self._collector.is_single_session and result.auth_status_code != 404:
-                self._maybe_trip_circuit_breaker(status_code=result.auth_status_code)
-                return ConnectionStatus.AUTH_FAILED
             self._trip_circuit_breaker(status_code=result.auth_status_code)
             return ConnectionStatus.AUTH_FAILED
+
+        if signal == CollectorSignal.AUTH_UNAVAILABLE:
+            # UC-87a. The modem answered "try later"; it did not judge the
+            # credential. No streak, no breaker, no session clear, at any
+            # repetition count: a threshold would only delay the wrong
+            # answer, and causes like an ISP support session holding the
+            # slot are ones the user cannot act on anyway. Same treatment
+            # LOAD_ERROR gets for the identical status on a data page.
+            return ConnectionStatus.UNREACHABLE
 
         if signal == CollectorSignal.AUTH_LOCKOUT:
             self._auth_failure_streak += 1
@@ -304,19 +300,11 @@ class SignalPolicy:
             ),
         )
 
-    def _maybe_trip_circuit_breaker(self, status_code: int | None = None) -> None:
+    def _maybe_trip_circuit_breaker(self) -> None:
         """Trip the circuit breaker if threshold reached.
 
         Used for LOAD_AUTH — session issues that may self-correct.
         """
         if self._auth_failure_streak >= self._threshold:
             self._circuit_open = True
-            self._circuit_trip_status_code = status_code
-            log_event(
-                _logger,
-                AuthCircuitBreakerOpen(
-                    model=self._model,
-                    streak=self._auth_failure_streak,
-                    status_code=status_code,
-                ),
-            )
+            log_event(_logger, AuthCircuitBreakerOpen(model=self._model, streak=self._auth_failure_streak))
