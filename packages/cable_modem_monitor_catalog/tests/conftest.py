@@ -33,6 +33,17 @@ def _discover_modem_yamls() -> list[Path]:
     return sorted(CATALOG_MODEMS_PATH.rglob("modem*.yaml"))
 
 
+def _discover_config_pairs() -> list[tuple[Path, Path]]:
+    """Pair every modem*.yaml with the parser.yaml in its directory.
+
+    Variants share one parser.yaml, so each variant yields its own pair.
+    Entries with no parser.yaml (``status: unsupported``) have nothing
+    cross-file to check and are omitted.
+    """
+    pairs = [(p, p.parent / "parser.yaml") for p in _discover_modem_yamls()]
+    return [(modem, parser) for modem, parser in pairs if parser.is_file()]
+
+
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Parametrize tests from modem directory discovery."""
     if "modem_test_case" in metafunc.fixturenames:
@@ -41,6 +52,9 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "modem_yaml_path" in metafunc.fixturenames:
         paths = _discover_modem_yamls()
         metafunc.parametrize("modem_yaml_path", paths, ids=lambda p: str(p.relative_to(CATALOG_MODEMS_PATH)))
+    if "config_pair" in metafunc.fixturenames:
+        pairs = _discover_config_pairs()
+        metafunc.parametrize("config_pair", pairs, ids=lambda p: str(p[0].relative_to(CATALOG_MODEMS_PATH)))
     if "restart_test_case" in metafunc.fixturenames:
         cases = discover_restart_tests(CATALOG_MODEMS_PATH)
         metafunc.parametrize("restart_test_case", cases, ids=lambda c: c.name)
