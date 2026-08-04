@@ -531,8 +531,8 @@ totals, error rates. Elevation criteria:
 
 Currently Tier 2: software_version, system_uptime, channel counts,
 error totals, error rates (`rate_corrected`, `rate_uncorrected`,
-errors/min, MEASUREMENT), provisioned_speed_down/up (Mbit/s,
-DATA_RATE), provisioned_burst_down/up (B, DATA_SIZE).
+errors/min, MEASUREMENT), provisioned_speed_down/up (bit/s, displayed
+as Mbit/s, DATA_RATE), provisioned_burst_down/up (B, DATA_SIZE).
 
 **Source of value.** Most Tier 2 fields are populated by the parser
 coordinator (native mapping, aggregate, or computed). Error rates are

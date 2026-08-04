@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Provisioned speed reads in Mbit/s instead of raw bits per second.**
+  The sensor declared bit/s and relied on Home Assistant to scale it for
+  display, which it does not do for data rates, so a 110 Mbit/s downstream
+  plan showed as "110100480 bit/s". The sensor now suggests Mbit/s while
+  still storing bit/s, so history keeps a single unit. Home Assistant
+  applies a suggested unit when it first creates an entity, so speed
+  sensors that already exist keep bit/s until changed in their settings.
+  (Related to #129)
+
 ## [3.14.0-beta.18] - 2026-08-03
 
 ### Added

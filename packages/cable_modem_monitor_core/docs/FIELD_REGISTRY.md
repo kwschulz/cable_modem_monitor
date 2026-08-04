@@ -157,12 +157,12 @@ registered_fields:
       unit: "°C"
       description: "Modem internal temperature"
     provisioned_speed_down:
-      type: float
-      unit: "Mbit/s"
+      type: integer
+      unit: "bit/s"
       description: "ISP-provisioned downstream speed (max service flow rate)"
     provisioned_speed_up:
-      type: float
-      unit: "Mbit/s"
+      type: integer
+      unit: "bit/s"
       description: "ISP-provisioned upstream speed (max service flow rate)"
     provisioned_burst_down:
       type: integer
@@ -218,5 +218,8 @@ for the full mapping rules.
   (`snr`, `fft`, `ofdm`)
 - Units are always the base SI unit in the value — `frequency` is Hz,
   `power` is dBmV, `channel_width` is Hz — never scaled (no MHz, no kHz)
+- The `unit` above is the stored unit. A consumer may display a scaled
+  one (HA shows `provisioned_speed_*` in Mbit/s); that is a presentation
+  choice and never changes what the field carries
 - Boolean fields use `is_` prefix: `is_bonded`, `is_primary`
 - Status fields use `_status` suffix: `lock_status`, `ranging_status`
