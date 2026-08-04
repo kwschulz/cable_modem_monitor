@@ -1,0 +1,56 @@
+{
+  "_modem": {
+    "manufacturer": "Solent Labs", "model": "T400", "transport": "http",
+    "default_host": "192.168.100.1",
+    "auth": {"strategy": "none"},
+    "hardware": {"docsis_version": "3.1"},
+    "status": "awaiting_verification",
+    "attribution": {"contributors": [{"github": "tester", "contribution": "Test"}]},
+    "isps": ["Various"]
+  },
+  "_parser": {
+    "downstream": {
+      "format": "json",
+      "resource": "/rest/v1/cablemodem/downstream",
+      "array_path": "downstream.channels",
+      "fields": [
+        {"key": "channelId", "field": "channel_id", "type": "integer"},
+        {"key": "frequency", "field": "frequency", "type": "frequency"}
+      ],
+      "channel_type": {"fixed": "qam"}
+    },
+    "system_info": {
+      "sources": [{
+        "format": "json",
+        "resource": "/rest/v1/cablemodem/serviceflows",
+        "fields": [],
+        "child_aggregates": [
+          {
+            "array_path": "serviceFlows",
+            "item_path": "serviceFlow",
+            "filter": {"direction": "downstream"},
+            "max": "maxTrafficRate",
+            "field": "provisioned_speed_down",
+            "type": "integer"
+          },
+          {
+            "array_path": "serviceFlows",
+            "item_path": "serviceFlow",
+            "filter": {"direction": "upstream"},
+            "max": "maxTrafficRate",
+            "field": "provisioned_speed_up",
+            "type": "integer"
+          },
+          {
+            "array_path": "serviceFlows",
+            "item_path": "serviceFlow",
+            "filter": {"direction": "downstream"},
+            "max": "maxTrafficBurst",
+            "field": "provisioned_burst_down",
+            "type": "integer"
+          }
+        ]
+      }]
+    }
+  }
+}

@@ -18,6 +18,7 @@ from ..models.parser_config import ParserConfig
 from ..models.parser_config.config import ALL_FORMAT_MODELS
 from ..models.parser_config.format_registry import format_tags_for_transport
 from ..models.parser_config.system_info import (
+    JSONSystemInfoSource,
     JSSystemInfoSource,
     SystemInfoSection,
     XMLSystemInfoSource,
@@ -121,13 +122,19 @@ def _collect_system_info_fields(section: SystemInfoSection) -> set[str]:
 
 
 class _DocsisDirection(StrEnum):
-    """DOCSIS MULPI service flow direction values."""
+    """Canonical service flow direction vocabulary.
 
-    DOWNSTREAM = "1"
-    UPSTREAM = "2"
+    DOCS-IF3-MIB's ``IfDirection`` textual convention defines both the
+    words and the numeric codes ``downstream(1)``/``upstream(2)``. The
+    words are canonical here because a swap is visible on the page;
+    a swap of ``"1"`` and ``"2"`` is not.
+    """
+
+    DOWNSTREAM = "downstream"
+    UPSTREAM = "upstream"
 
 
-# Provisioned speed/burst field names and their expected DOCSIS direction.
+# Provisioned speed/burst field names and their expected direction.
 _DIRECTION_FIELDS: dict[str, _DocsisDirection] = {
     "provisioned_speed_down": _DocsisDirection.DOWNSTREAM,
     "provisioned_speed_up": _DocsisDirection.UPSTREAM,
@@ -137,26 +144,30 @@ _DIRECTION_FIELDS: dict[str, _DocsisDirection] = {
 
 
 def _check_provisioned_speed_direction(parser: ParserConfig, errors: list[str]) -> None:
-    """Validate that provisioned speed child_aggregates use correct DOCSIS directions.
+    """Validate that provisioned speed child_aggregates filter on the right direction.
 
-    DOCSIS MULPI defines service flow direction 1 = downstream,
-    2 = upstream. A swap produces plausible-looking but inverted
-    speed values that are easy to miss in review.
+    Filters compare against the canonical vocabulary from DOCS-IF3-MIB's
+    ``IfDirection`` textual convention; other wire spellings (the
+    numeric codes, mixed case) are normalized in the aggregate's
+    ``map``. A swap produces plausible-looking but inverted speed
+    values that are easy to miss in review.
     """
     if parser.system_info is None:
         return
 
     for source in parser.system_info.sources:
-        if not isinstance(source, XMLSystemInfoSource):
+        if not isinstance(source, JSONSystemInfoSource | XMLSystemInfoSource):
             continue
         for agg in source.child_aggregates:
             expected = _DIRECTION_FIELDS.get(agg.field)
             if expected is None:
                 continue
             actual = agg.filter.get("direction")
-            if actual is not None and actual != expected:
+            # JSON filters also allow {"not": ...} rules; only a plain
+            # equality filter carries a direction to check.
+            if isinstance(actual, str) and actual != expected:
                 errors.append(
                     f"child_aggregate '{agg.field}' filters on direction "
-                    f"'{actual}' but DOCSIS direction for {expected.name.lower()} "
-                    f"is '{expected}' — values will be swapped"
+                    f"'{actual}' but must filter on '{expected}' — values "
+                    f"will be swapped. Normalize other wire spellings in 'map'."
                 )

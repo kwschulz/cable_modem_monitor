@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Tag, model_validator
 
-from .common import _check_field_type
+from .common import FilterValue, _check_field_type
 from .format_registry import DecodeKind, FormatModel
 
 
@@ -153,6 +153,39 @@ class JSONSystemInfoFieldMapping(BaseModel):
         return self
 
 
+class JSONChildAggregate(BaseModel):
+    """Aggregate a value across repeated items in a JSON array.
+
+    Navigates ``array_path`` to a list, unwraps each item's
+    ``item_path`` wrapper object when the firmware nests one, keeps
+    items matching ``filter``, and takes the ``max`` of the named key.
+    Produces a single system_info field.
+
+    Used for DOCSIS service flow extraction (e.g., max provisioned
+    speed per direction from a service flow array).
+
+    ``map`` normalizes the raw values of the ``filter`` keys before
+    comparison, so wire spellings stay in parser.yaml rather than
+    becoming per-modem behaviour in Core.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    array_path: str
+    item_path: str = ""
+    filter: dict[str, FilterValue]
+    map: dict[str, str] | None = None
+    max: str
+    field: str
+    type: str
+    scale: int | float | None = None
+
+    @model_validator(mode="after")
+    def validate_field_type(self) -> JSONChildAggregate:
+        """Ensure type is a valid FIELD_TYPES value."""
+        _check_field_type(self.type)
+        return self
+
+
 class JSONSystemInfoSource(BaseModel):
     """JSON API source for system_info.
 
@@ -173,6 +206,7 @@ class JSONSystemInfoSource(BaseModel):
     encoding: str = ""
     array_path: str = ""
     fields: list[JSONSystemInfoFieldMapping]
+    child_aggregates: list[JSONChildAggregate] = []
 
 
 class JSVarsFieldMapping(BaseModel):
@@ -243,11 +277,16 @@ class XMLChildAggregate(BaseModel):
 
     Used for DOCSIS service flow extraction (e.g., max provisioned
     speed per direction from ``<serviceflow>`` elements).
+
+    ``map`` normalizes the raw text of the ``filter`` keys before
+    comparison, so wire spellings stay in parser.yaml rather than
+    becoming per-modem behaviour in Core.
     """
 
     model_config = ConfigDict(extra="forbid")
     child_element: str
     filter: dict[str, str]
+    map: dict[str, str] | None = None
     max: str
     field: str
     type: str

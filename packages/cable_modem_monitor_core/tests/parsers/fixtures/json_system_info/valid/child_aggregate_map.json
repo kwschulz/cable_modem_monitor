@@ -1,0 +1,39 @@
+{
+  "_description": "Child aggregate map normalizes wire direction codes before the filter compares them; flat array needs no item_path",
+  "_json": {
+    "flows": [
+      {"dir": 1, "rate": 400},
+      {"dir": 1, "rate": 900},
+      {"dir": 2, "rate": 75},
+      {"rate": 99999}
+    ]
+  },
+  "_resource": "/api/flows",
+  "_config": {
+    "format": "json",
+    "resource": "/api/flows",
+    "fields": [],
+    "child_aggregates": [
+      {
+        "array_path": "flows",
+        "filter": {"dir": "downstream"},
+        "map": {"1": "downstream", "2": "upstream"},
+        "max": "rate",
+        "field": "provisioned_speed_down",
+        "type": "integer"
+      },
+      {
+        "array_path": "flows",
+        "filter": {"dir": "upstream"},
+        "map": {"1": "downstream", "2": "upstream"},
+        "max": "rate",
+        "field": "provisioned_speed_up",
+        "type": "integer"
+      }
+    ]
+  },
+  "_expected": {
+    "provisioned_speed_down": "900",
+    "provisioned_speed_up": "75"
+  }
+}

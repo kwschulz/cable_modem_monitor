@@ -512,8 +512,8 @@ suggested unit and HA scales the state for display: provisioned speed
 is stored in bit/s and shown in Mbit/s. HA stamps a suggested unit into
 the entity registry the first time it sees an entity and never revisits
 it, so changing this table moves only newly created entities. Existing
-ones follow the § Discontinued entities paths — the entity's own
-settings, Reset Entities, or remove and re-add.
+ones follow the **Discontinued entities** paths above — the entity's
+own settings, Reset Entities, or remove and re-add.
 
 **Graduation:** When a dynamic field gets a dedicated sensor class, add
 it to `_CONSUMED_SYSTEM_INFO_FIELDS`. The dynamic sensor for that field

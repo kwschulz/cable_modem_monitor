@@ -109,12 +109,14 @@ def _child_aggregate_max(container: Element, agg: XMLChildAggregate) -> Any:
     Iterates all ``agg.child_element`` children of ``container``,
     keeps those matching ``agg.filter`` key-value pairs, and returns
     the max of ``agg.max`` sub-element values after type conversion.
+    Filter text runs through ``agg.map`` first, so filters compare
+    normalized values rather than wire spellings.
     """
     best: int | float | None = None
 
     for child in container.findall(agg.child_element):
         # Apply filter: all key-value pairs must match
-        if not all(child.findtext(key, "").strip() == value for key, value in agg.filter.items()):
+        if not all(_apply_map(child.findtext(key, "").strip(), agg.map) == value for key, value in agg.filter.items()):
             continue
 
         raw = child.findtext(agg.max, "")
@@ -126,3 +128,10 @@ def _child_aggregate_max(container: Element, agg: XMLChildAggregate) -> Any:
             best = converted
 
     return best
+
+
+def _apply_map(value: str, map_config: dict[str, str] | None) -> str:
+    """Normalize a raw filter value, same exact-match semantics as convert_value."""
+    if map_config is None:
+        return value
+    return map_config.get(value, value)

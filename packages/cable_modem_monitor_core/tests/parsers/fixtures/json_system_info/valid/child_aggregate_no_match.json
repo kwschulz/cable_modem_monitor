@@ -1,0 +1,34 @@
+{
+  "_description": "Aggregate yields no field when array_path misses, no item matches, or the max key is absent; scalar items are skipped",
+  "_json": {
+    "flows": [
+      {"direction": "upstream", "maxTrafficRate": 50},
+      {"direction": "downstream"},
+      "not-an-object"
+    ],
+    "notAnArray": {"direction": "downstream", "maxTrafficRate": 900}
+  },
+  "_resource": "/api/flows",
+  "_config": {
+    "format": "json",
+    "resource": "/api/flows",
+    "fields": [],
+    "child_aggregates": [
+      {
+        "array_path": "flows",
+        "filter": {"direction": "downstream"},
+        "max": "maxTrafficRate",
+        "field": "provisioned_speed_down",
+        "type": "integer"
+      },
+      {
+        "array_path": "notAnArray",
+        "filter": {"direction": "upstream"},
+        "max": "maxTrafficRate",
+        "field": "provisioned_speed_up",
+        "type": "integer"
+      }
+    ]
+  },
+  "_expected": {}
+}
