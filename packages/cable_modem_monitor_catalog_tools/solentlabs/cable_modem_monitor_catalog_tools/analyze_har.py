@@ -8,6 +8,9 @@ Orchestrates Phases 1-6 of the ONBOARDING_SPEC decision tree:
 5. Format detection (table, table_transposed, javascript, json, hnap)
 6. Field mapping extraction (header-to-field, column/offset/key mappings)
 
+Then the post-analysis passes: JS endpoint discovery, request
+requirements, and unread-resource reporting.
+
 Per ONBOARDING_SPEC.md ``analyze_har`` tool contract.
 """
 
@@ -28,6 +31,7 @@ from .analysis.request_requirements import detect_request_requirements
 from .analysis.session import SessionDetail
 from .analysis.transport import TransportResult
 from .analysis.types import CoreGap, FleetPatterns
+from .analysis.unread_resources import UnreadResource, detect_unread_resources
 
 
 @dataclass
@@ -42,6 +46,7 @@ class AnalysisResult:
     warnings: list[str] = field(default_factory=list)
     hard_stops: list[str] = field(default_factory=list)
     core_gaps: list[CoreGap] = field(default_factory=list)
+    unread_resources: list[UnreadResource] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict matching the MCP tool output contract."""
@@ -54,6 +59,8 @@ class AnalysisResult:
             "sections": self.sections,
             "warnings": self.warnings,
             "hard_stops": self.hard_stops,
+            # Informational, never a gate — every HAR has unread endpoints.
+            "unread_resources": [resource.to_dict() for resource in self.unread_resources],
         }
         if self.core_gaps:
             result["core_gaps"] = [gap.to_dict() for gap in self.core_gaps]
@@ -113,6 +120,15 @@ def analyze_har(
     # Post-analysis: Request requirements detection
     detect_request_requirements(entries, transport_result.transport, session_result, warnings)
 
+    # Post-analysis: Unread resource reporting
+    unread = detect_unread_resources(
+        entries,
+        sections,
+        auth_result,
+        actions_result,
+        transport_result.transport,
+    )
+
     return AnalysisResult(
         transport=transport_result,
         auth=auth_result,
@@ -122,6 +138,7 @@ def analyze_har(
         warnings=warnings,
         hard_stops=hard_stops,
         core_gaps=core_gaps,
+        unread_resources=unread,
     )
 
 

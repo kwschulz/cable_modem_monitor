@@ -40,6 +40,7 @@ analyze_har(fleet) ◄───┘ transport, auth, session, actions, format, fi
     │
     ├── hard_stops? → stop, report to user
     ├── core_gaps? → stop, report what Core needs (see below)
+    ├── unread_resources → key skeletons of the endpoints nothing read
     │
     ▼
 enrich_metadata ─ infer defaults, detect missing fields
@@ -85,6 +86,7 @@ The pipeline separates deterministic logic (repeatable, testable Python code) fr
 | Auth detection | Pattern matching against `auth_patterns.json` | Ambiguous cases presented to user |
 | Format detection | HNAP: deterministic. HTTP: candidate list | HTTP: LLM reads response bodies, picks format |
 | Field mapping | Column/field extraction from HAR content, service flow aggregate detection, fleet patterns augment direction and system_info label detection | — |
+| Unread resources | Subtract every endpoint the config reads from the HAR's 2xx JSON endpoints; reduce each remainder to its key skeleton | Read the skeletons and decide whether anything there is worth mapping |
 | Metadata enrichment | Inference from analysis + defaults | Web search for missing fields (chipset, ISPs) |
 | Config generation | Pydantic validation, constraint checking | Fix validation errors and retry |
 | Golden file generation | Parse HAR through config | Sanity-check channel counts |
@@ -114,9 +116,33 @@ is how the service flow resource behind issue #185 was captured in the HAR,
 fetched successfully, and left unread without anything flagging it. Detection
 coverage for data endpoints is measured by intake accuracy, not gated by a
 gap category, so a field the pipeline cannot generate shows up as a lower
-percentage rather than a stop.
+percentage rather than a stop. The unread-resource report below is what makes
+such an endpoint visible; it does not make it a gap.
 
 When the pipeline stops on a gap, the report contains enough detail (phase, category, summary, wire evidence) to file a GitHub issue for the development work.
+
+---
+
+## Unread Resources: What Nothing Looked At
+
+`analyze_har` also reports `unread_resources` — every 2xx JSON endpoint in
+the HAR that no part of the generated config consumes. Endpoints reached as
+a parser resource, as the auth login endpoint, or as an action are
+subtracted; what remains is what nothing asked about.
+
+Each entry carries the path, status, content type, and the response body's
+**key skeleton with value types** — never values. Keys are what make the
+judgment possible: an LLM recognizes `maxTrafficRate` as a provisioned rate
+where `856000000` on its own says nothing. Values are where MAC addresses,
+serial numbers, and boot filenames live, and this report flows into an LLM
+context and often into a GitHub issue.
+
+**This is not a gate.** Every HAR has unread endpoints — UI preferences,
+language lists, LED settings — so a gate here would fail every intake. It
+rides alongside `warnings`: always present, informational, never failing.
+The pipeline does not classify what the endpoints contain or suggest
+mappings; producing the shape is the whole job, and the judgment belongs to
+the LLM reading it.
 
 ---
 

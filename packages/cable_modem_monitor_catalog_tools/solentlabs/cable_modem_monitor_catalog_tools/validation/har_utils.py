@@ -68,6 +68,14 @@ def has_content(response: dict[str, Any]) -> bool:
     return size > 0 or bool(text)
 
 
+def content_type_of(response: dict[str, Any]) -> str:
+    """Extract a response's Content-Type, lowercased and stripped of parameters."""
+    ct = lower_headers(response).get("content-type", "")
+    if not ct:
+        ct = response.get("content", {}).get("mimeType", "")
+    return ct.lower().split(";")[0].strip()
+
+
 def is_static_resource(url: str) -> bool:
     """Check if a URL is a static resource (CSS, JS, image, font)."""
     path = url.split("?", maxsplit=1)[0].split("#", maxsplit=1)[0]

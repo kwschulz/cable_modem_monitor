@@ -1085,6 +1085,76 @@ detected parameters for maintainer review.
 **HNAP:** Skipped. HNAP uses SOAP-over-HTTP; query parameters are
 not part of the session contract.
 
+### Post-Analysis: Unread Resources
+
+After request requirements, the pipeline lists the HAR's 2xx JSON
+endpoints that no part of the generated config reads, each reduced to
+its key skeleton. The result is `unread_resources` in the analysis
+output.
+
+**Why:** gap categories are endpoint-level and cover auth and actions
+only (see `analyze_har` below). A data endpoint the generator never maps
+produces no gap and no warning — intake writes a `parser.yaml` that
+omits it and every gate stays green. Issue #185's HAR carried
+`/rest/v1/cablemodem/serviceflows` at 200 with four registered Tier-2
+fields on it, and nothing asked what had never been looked at.
+
+**Candidates:** responses with a 2xx status whose body parses as a JSON
+object or array. Non-2xx responses are excluded, as are CSS, JavaScript,
+font, and image content types. Candidates are keyed by path, not
+path-plus-query: a cache-busting nonce (the TG3442DE's per-request `_n`)
+would otherwise give every request its own identity and match no
+configured resource. Where one path answers more than once, the largest
+body wins, since it yields the fuller skeleton.
+
+**Subtraction.** An endpoint is read when it appears as:
+
+- any `resource` value anywhere in the analysis sections,
+- an auth endpoint (`login_endpoint`, `login_page`, `action`), or
+- an action `endpoint` or `pre_fetch_url`.
+
+Action endpoints containing `{...}` placeholders are resolved at runtime
+and never equal the captured path, so they match segment-wise with each
+placeholder as a wildcard. On HNAP transport the `/HNAP1/` endpoint
+carries every call, data and action alike, and is never reported.
+
+**Keys and types only, never values.** Keys are what make the judgment
+possible: an LLM recognizes `maxTrafficRate` as a provisioned rate where
+`856000000` on its own tells it nothing. Values are where MAC addresses,
+serial numbers and boot filenames live — the same #185 HAR answers
+`/rest/v1/system/gateway/provisioning` with a `macAddress` and fills its
+event log with `CM-MAC=` strings. Nested shape is preserved, and a
+heterogeneous array (QAM beside OFDM) merges to the union of its
+variants' keys, so a key only one variant carries still reaches the LLM:
+
+```json
+{
+  "path": "/rest/v1/cablemodem/eventlog",
+  "status": 200,
+  "content_type": "application/json",
+  "shape": { "eventlog": [{ "priority": "str", "time": "str", "message": "str" }] }
+}
+```
+
+Leaves are `str`, `int`, `float`, `bool`, `null`, or a `|`-joined union
+where an array's items disagree.
+
+**Not a gate.** Every HAR has unread endpoints, so a gate here would fail
+every intake. This rides alongside `warnings`: always present,
+informational, never failing. The pipeline does not classify what the
+endpoints contain and does not suggest mappings — producing the shape is
+the whole job, and the judgment belongs to the LLM reading it.
+
+**Where it is computed.** In `analyze_har`, not `generate_config`. The
+skeleton needs the HAR response bodies, which `generate_config` does not
+have — it receives only the analysis dict and metadata. The cost is that
+the subtraction is approximate: it uses what the analysis intends to map
+rather than what was emitted. The approximation runs one way only. Every
+resource in a generated `parser.yaml` comes from a sections `resource`;
+`generate_config` never invents one, it can only drop a section whose
+format it does not recognize. So the report can at worst omit a line, and
+can never call an endpoint unread that the config in fact reads.
+
 ### Phase 7: Metadata Enrichment
 
 Hardware metadata, branding, and ISP information are not present in the
@@ -1355,6 +1425,14 @@ detection, format detection, and field mapping extraction.
   },
   "warnings": [],
   "hard_stops": [],
+  "unread_resources": [
+    {
+      "path": "/rest/v1/cablemodem/eventlog",
+      "status": 200,
+      "content_type": "application/json",
+      "shape": { "eventlog": [{ "priority": "str", "time": "str", "message": "str" }] }
+    }
+  ],
   "core_gaps": [
     {
       "phase": "auth",
@@ -1391,6 +1469,11 @@ effort. Categories:
 
 Well-known modems with standard patterns produce zero core gaps.
 Novel modems produce gaps that require development before onboarding.
+
+**Unread resources** are the opposite kind of signal: the JSON endpoints
+the HAR captured that no gap category covers, because nothing read them.
+Always present, never a gate. See
+[Post-Analysis: Unread Resources](#post-analysis-unread-resources).
 
 ### `enrich_metadata`
 
@@ -1547,6 +1630,7 @@ edits.
 | Format detection (HNAP) | `analyze_har` | | |
 | Format detection (HTTP — ambiguous) | `analyze_har` returns candidates | Reads response bodies, picks format | |
 | Field mapping extraction | `analyze_har` | | |
+| Unread resources | `analyze_har` emits path + key skeleton | Judges whether any is worth mapping | |
 | Metadata inference + gap detection | `enrich_metadata` | Reviews inferred/missing | |
 | Metadata gaps (web search) | | Web search for missing fields | Verifies |
 | Config generation | `generate_config` | Provides enriched metadata | |

@@ -13,6 +13,7 @@ Post-analysis:
 
 - ``js_endpoints`` - uncaptured JS endpoint discovery
 - ``request_requirements`` - session-level query param detection
+- ``unread_resources`` - captured JSON endpoints no config section reads
 
 Pipeline-wide types (``CoreGap``, ``FleetPatterns``) live in ``types``.
 Phase-local result types live with their phase (e.g., ``auth/types.py``,
