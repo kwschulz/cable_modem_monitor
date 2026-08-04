@@ -39,14 +39,14 @@ class JSONSystemInfoParser(BaseParser):
         # PARSING_SPEC § Field Outcomes.
         self.failed_fields: dict[str, str] = {}
 
-    def parse(self, resources: dict[str, Any]) -> dict[str, str]:
+    def parse(self, resources: dict[str, Any]) -> dict[str, Any]:
         """Extract system_info fields from the configured JSON resource.
 
         Args:
             resources: Resource dict (path -> parsed JSON dict).
 
         Returns:
-            Dict of system_info field names to string values.
+            Dict of system_info field names to typed values.
         """
         data = resources.get(self._config.resource)
         if data is None:
@@ -69,7 +69,7 @@ class JSONSystemInfoParser(BaseParser):
         for agg in self._config.child_aggregates:
             value = _child_aggregate_max(data, agg)
             if value is not None:
-                result[agg.field] = str(value)
+                result[agg.field] = value
 
         return result
 
@@ -91,9 +91,9 @@ class JSONSystemInfoParser(BaseParser):
             return {}
         return array[0] if isinstance(array[0], dict) else {}
 
-    def _extract_fields(self, data: dict[str, Any]) -> dict[str, str]:
+    def _extract_fields(self, data: dict[str, Any]) -> dict[str, Any]:
         """Extract mapped fields, recording conversion rejections."""
-        result: dict[str, str] = {}
+        result: dict[str, Any] = {}
 
         for field_def in self._config.fields:
             # Navigate optional per-field path before key lookup
@@ -120,7 +120,7 @@ class JSONSystemInfoParser(BaseParser):
                 scale=field_def.scale,
             )
             if converted is not None:
-                result[field_def.field] = str(converted)
+                result[field_def.field] = converted
             else:
                 record_failed_field(self.failed_fields, field_def.field, raw_value)
 

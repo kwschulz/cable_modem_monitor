@@ -594,6 +594,10 @@ expose values like `channel_width`, `active_subcarriers`,
 `temperature`, or `fft_type` without modifying Core or the
 `BaseParser` implementations.
 
+system_info values carry their declared `type` — an `integer` field
+reaches consumers as an `int`, not a stringified one. Parsers return
+what `convert_value` produced; they do not re-stringify it.
+
 The orchestrator tracks the `system_info` field set between polls and
 logs a WARNING (`system_info fields changed`) when fields appear or
 disappear. This surfaces firmware-induced selector failures (e.g., a

@@ -20,11 +20,12 @@ class BaseParser(ABC):
     return ``list[dict[str, Any]]`` — one dict per channel.
 
     System info parsers (HTMLFieldsParser for html_fields sources)
-    return ``dict[str, str]`` — flat key-value pairs.
+    return ``dict[str, Any]`` — flat key-value pairs whose values carry
+    the type declared in parser.yaml.
     """
 
     @abstractmethod
-    def parse(self, resources: dict[str, Any]) -> list[dict[str, Any]] | dict[str, str]:
+    def parse(self, resources: dict[str, Any]) -> list[dict[str, Any]] | dict[str, Any]:
         """Extract data from pre-fetched resources.
 
         Args:

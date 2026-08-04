@@ -1,6 +1,6 @@
 """HTMLFieldsParser — extract system_info from HTML via label, id, or CSS.
 
-Produces a flat ``dict[str, str]`` from named fields in HTML pages.
+Produces a flat ``dict[str, Any]`` from named fields in HTML pages.
 Used for system_info sources with ``format: html_fields``.
 
 See PARSING_SPEC.md System Info / html_fields selector types.
@@ -40,21 +40,21 @@ class HTMLFieldsParser(BaseParser):
         # PARSING_SPEC § Field Outcomes.
         self.failed_fields: dict[str, str] = {}
 
-    def parse(self, resources: dict[str, Any]) -> dict[str, str]:
+    def parse(self, resources: dict[str, Any]) -> dict[str, Any]:
         """Extract named fields from the configured HTML resource.
 
         Args:
             resources: Resource dict (path -> BeautifulSoup).
 
         Returns:
-            Flat dict of field name -> string value.
+            Flat dict of field name -> typed value.
         """
         soup = resources.get(self._resource)
         if soup is None:
             _logger.warning("Resource '%s' not found", self._resource)
             return {}
 
-        result: dict[str, str] = {}
+        result: dict[str, Any] = {}
         self.failed_fields = {}
         for field_cfg in self._fields:
             value = _extract_field(soup, field_cfg)
@@ -67,7 +67,7 @@ class HTMLFieldsParser(BaseParser):
                     scale=field_cfg.scale,
                 )
                 if converted is not None:
-                    result[field_cfg.field] = str(converted)
+                    result[field_cfg.field] = converted
                 else:
                     record_failed_field(self.failed_fields, field_cfg.field, value)
 

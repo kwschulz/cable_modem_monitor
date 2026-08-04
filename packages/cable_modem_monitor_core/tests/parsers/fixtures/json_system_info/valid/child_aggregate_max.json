@@ -34,7 +34,7 @@
     ]
   },
   "_expected": {
-    "provisioned_speed_down": "856",
-    "provisioned_speed_up": "74"
+    "provisioned_speed_down": 856,
+    "provisioned_speed_up": 74
   }
 }

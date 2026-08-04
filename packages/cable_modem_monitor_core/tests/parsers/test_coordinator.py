@@ -401,10 +401,10 @@ class TestDerivedFieldEnrichment:
         coordinator = ModemParserCoordinator(config)
         result, _ = coordinator.parse(resources)
 
-        # Native value ("99") wins over computed (1)
-        # html_fields parser returns the raw string; type conversion
-        # happens downstream. The setdefault precedence rule still applies.
-        assert result["system_info"]["downstream_channel_count"] == "99"
+        # Native value (99) wins over computed (1). The field declares
+        # type: integer, so it arrives as an int, same as the computed
+        # path. See PARSING_SPEC § Output Contract.
+        assert result["system_info"]["downstream_channel_count"] == 99
 
     def test_aggregate_sum(self) -> None:
         """Aggregate sum computed from channel data."""
@@ -467,9 +467,9 @@ class TestDerivedFieldEnrichment:
         coordinator = ModemParserCoordinator(config)
         result, _ = coordinator.parse(resources)
 
-        # Native value ("999") wins over computed (300)
-        # html_fields returns raw string; the precedence rule still applies
-        assert result["system_info"]["total_corrected"] == "999"
+        # Native value (999) wins over computed (300). The field declares
+        # type: integer, so it arrives as an int, same as the computed path.
+        assert result["system_info"]["total_corrected"] == 999
 
     def test_aggregate_type_qualified_scope(self) -> None:
         """Type-qualified scope filters channels by channel_type."""
