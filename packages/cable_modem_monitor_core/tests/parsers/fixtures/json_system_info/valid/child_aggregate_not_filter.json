@@ -1,0 +1,28 @@
+{
+  "_description": "Child aggregate honours a {not: value} filter rule, same as a channel filter",
+  "_json": {
+    "flows": [
+      {"state": "inactive", "rate": 900},
+      {"state": "active", "rate": 500},
+      {"state": "active", "rate": 300}
+    ]
+  },
+  "_resource": "/api/flows",
+  "_config": {
+    "format": "json",
+    "resource": "/api/flows",
+    "fields": [],
+    "child_aggregates": [
+      {
+        "array_path": "flows",
+        "filter": {"state": {"not": "inactive"}},
+        "max": "rate",
+        "field": "provisioned_speed_down",
+        "type": "integer"
+      }
+    ]
+  },
+  "_expected": {
+    "provisioned_speed_down": 500
+  }
+}

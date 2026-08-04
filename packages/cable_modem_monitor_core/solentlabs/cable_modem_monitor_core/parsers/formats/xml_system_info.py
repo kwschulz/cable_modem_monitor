@@ -13,6 +13,7 @@ from typing import Any
 from xml.etree.ElementTree import Element
 
 from ...models.parser_config.system_info import XMLChildAggregate, XMLSystemInfoSource
+from ..child_aggregate import aggregate_max
 from ..diagnostics import record_failed_field
 from ..type_conversion import convert_value
 
@@ -104,34 +105,15 @@ class XMLSystemInfoParser:
 
 
 def _child_aggregate_max(container: Element, agg: XMLChildAggregate) -> Any:
-    """Compute max of a sub-element value across filtered child elements.
+    """Compute max of a sub-element value across filtered child elements."""
+    return aggregate_max(container.findall(agg.child_element), agg, _read_sub_element)
 
-    Iterates all ``agg.child_element`` children of ``container``,
-    keeps those matching ``agg.filter`` key-value pairs, and returns
-    the max of ``agg.max`` sub-element values after type conversion.
-    Filter text runs through ``agg.map`` first, so filters compare
-    normalized values rather than wire spellings.
+
+def _read_sub_element(child: Element, key: str) -> str | None:
+    """Read a sub-element's text, treating missing and blank alike.
+
+    Blank collapses to ``None`` so an empty ``<direction/>`` is absent
+    rather than a value that could match an empty filter string.
     """
-    best: int | float | None = None
-
-    for child in container.findall(agg.child_element):
-        # Apply filter: all key-value pairs must match
-        if not all(_apply_map(child.findtext(key, "").strip(), agg.map) == value for key, value in agg.filter.items()):
-            continue
-
-        raw = child.findtext(agg.max, "")
-        if not raw or not raw.strip():
-            continue
-
-        converted = convert_value(raw.strip(), agg.type, scale=agg.scale)
-        if converted is not None and isinstance(converted, int | float) and (best is None or converted > best):
-            best = converted
-
-    return best
-
-
-def _apply_map(value: str, map_config: dict[str, str] | None) -> str:
-    """Normalize a raw filter value, same exact-match semantics as convert_value."""
-    if map_config is None:
-        return value
-    return map_config.get(value, value)
+    text = child.findtext(key, "").strip()
+    return text or None

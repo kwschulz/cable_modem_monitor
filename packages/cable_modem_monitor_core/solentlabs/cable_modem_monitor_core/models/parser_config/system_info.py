@@ -153,6 +153,28 @@ class JSONSystemInfoFieldMapping(BaseModel):
         return self
 
 
+def _check_child_aggregate_filter(rules: dict[str, FilterValue]) -> None:
+    """Reject non-string values inside a child_aggregate filter rule.
+
+    These filters normalize every key to text before comparing, so a
+    numeric rule silently never matches. A channel filter compares after
+    type conversion and is unaffected — this constraint is specific to
+    the child_aggregate shape. Bare numeric values are already rejected
+    by the ``FilterValue`` annotation; only the ``{not: ...}`` rule body
+    reaches here untyped.
+    """
+    for key, rule in rules.items():
+        if not isinstance(rule, dict):
+            continue
+        for operator, value in rule.items():
+            if not isinstance(value, str):
+                raise ValueError(
+                    f"child_aggregate filter '{key}.{operator}' must be a string — "
+                    f"got {type(value).__name__} {value!r}. These filters compare as "
+                    f"text; quote the value."
+                )
+
+
 class JSONChildAggregate(BaseModel):
     """Aggregate a value across repeated items in a JSON array.
 
@@ -183,6 +205,12 @@ class JSONChildAggregate(BaseModel):
     def validate_field_type(self) -> JSONChildAggregate:
         """Ensure type is a valid FIELD_TYPES value."""
         _check_field_type(self.type)
+        return self
+
+    @model_validator(mode="after")
+    def validate_filter_values(self) -> JSONChildAggregate:
+        """Ensure filter rule values are strings — these filters compare as text."""
+        _check_child_aggregate_filter(self.filter)
         return self
 
 
@@ -285,7 +313,7 @@ class XMLChildAggregate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     child_element: str
-    filter: dict[str, str]
+    filter: dict[str, FilterValue]
     map: dict[str, str] | None = None
     max: str
     field: str
@@ -296,6 +324,12 @@ class XMLChildAggregate(BaseModel):
     def validate_field_type(self) -> XMLChildAggregate:
         """Ensure type is a valid FIELD_TYPES value."""
         _check_field_type(self.type)
+        return self
+
+    @model_validator(mode="after")
+    def validate_filter_values(self) -> XMLChildAggregate:
+        """Ensure filter rule values are strings — these filters compare as text."""
+        _check_child_aggregate_filter(self.filter)
         return self
 
 

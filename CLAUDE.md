@@ -400,9 +400,19 @@ reply, where a skipped one is visible without re-running the work.
   enums, `model_validate` over `Model(**data)`, `lru_cache` over
   module-global caches, etc.): `docs/CODE_REVIEW.md` § Type Hints.
 - **Use existing pipelines.** Never hand-build artifacts when a
-  pipeline tool exists. `generate_golden_file()` runs the real
-  parser coordinator. Serialize with
+  pipeline tool exists. Serialize with
   `json.dumps(..., indent=2, sort_keys=True, ensure_ascii=False) + "\n"`.
+  For goldens, the pipeline is the test harness: run
+  `run_modem_test_orchestrated()` and promote the `modem.actual.json`
+  it writes beside the HAR. That is the full orchestrator cycle, and
+  it is what `test_modem_har_replay` compares against.
+  `generate_golden_file()` is **not** the golden writer — it is the
+  intake-accuracy instrument that `intake_pipeline_regression.py`
+  scores the catalog with. It runs the parser coordinator alone, so it
+  omits post-processor fields (`rate_corrected`, `rate_uncorrected`)
+  and cannot resolve CBN resources at all (`build_resource_dict`
+  branches HNAP or HTTP only). Using it to write a golden silently
+  drops fields, and on a CBN modem writes an empty one.
 - **Docstring placeholders.** In docstring examples, use template
   placeholders (`{manufacturer}/{model}/`), not specific fake names
   (`acme/a100/`). Tests still use concrete strings; docstrings

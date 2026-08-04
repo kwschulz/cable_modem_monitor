@@ -375,13 +375,22 @@ field.
 Iterates the items of a JSON array, filters by key values, and
 computes the `max` of a numeric key. Produces a single system_info
 field per entry — the JSON counterpart of the
-[`xml` source's child_aggregates](#xml-system-info).
+[`xml` source's child_aggregates](#xml-system-info). Both run the same
+reducer, so filter rules, `map` normalization, and evaluation order are
+identical; the formats differ only in how an item is located.
+
+**Filter values compare as text.** Unlike a channel `filter`, which
+compares after type conversion, a child_aggregate normalizes every
+filter key to a string first — `type` describes the `max` field, not the
+filter keys, so there is nothing to convert them against. Write
+`{ not: "0" }`, not `{ not: 0 }`. A non-string rule value is rejected at
+config load rather than silently matching nothing.
 
 | Property | Type | Required | Description |
 |----------|------|:--------:|-------------|
 | `array_path` | string | yes | Dot-notation path to the array, resolved from the whole response |
 | `item_path` | string | no | Dot-notation path within each item, for firmware that nests the object inside a wrapper key |
-| `filter` | dict | yes | Key-value pairs that must all match. Same rules as a channel `filter`, including `{ not: value }` |
+| `filter` | dict | yes | Key-value pairs that must all match, including `{ not: "value" }`. Values compare as text — see below |
 | `map` | dict | no | Value mapping (exact match) applied to the `filter` values before comparison |
 | `max` | string | yes | Key whose value is maximized |
 | `field` | string | yes | Output system_info field name |
@@ -526,7 +535,7 @@ elements).
 | Property | Type | Required | Description |
 |----------|------|:--------:|-------------|
 | `child_element` | string | yes | Tag name of the repeated child element |
-| `filter` | dict | yes | Key-value pairs that must all match (sub-element tag → text value) |
+| `filter` | dict | yes | Key-value pairs that must all match (sub-element tag → text value), including `{ not: "value" }`. Values compare as text — see below |
 | `map` | dict | no | Value mapping (exact match) applied to the `filter` values before comparison |
 | `max` | string | yes | Sub-element tag name whose value is maximized |
 | `field` | string | yes | Output system_info field name |

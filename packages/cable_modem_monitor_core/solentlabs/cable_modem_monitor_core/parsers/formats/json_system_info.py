@@ -15,8 +15,8 @@ from typing import Any
 
 from ...models.parser_config.system_info import JSONChildAggregate, JSONSystemInfoSource
 from ..base import BaseParser
+from ..child_aggregate import aggregate_max
 from ..diagnostics import record_failed_field
-from ..filter import passes_filter
 from ..type_conversion import convert_value
 from .json_parser import _navigate_path
 
@@ -128,12 +128,7 @@ class JSONSystemInfoParser(BaseParser):
 
 
 def _child_aggregate_max(data: dict[str, Any], agg: JSONChildAggregate) -> int | float | None:
-    """Compute max of a key across filtered items of a JSON array.
-
-    Same order as ``_extract_from_array``: extract, convert (``map``
-    applies inside ``convert_value``), filter, then aggregate. Filters
-    therefore see normalized values, not wire spellings.
-    """
+    """Compute max of a key across filtered items of a JSON array."""
     array = _navigate_path(data, agg.array_path)
     if not isinstance(array, list):
         _logger.warning(
@@ -143,37 +138,11 @@ def _child_aggregate_max(data: dict[str, Any], agg: JSONChildAggregate) -> int |
         )
         return None
 
-    best: int | float | None = None
-
+    items: list[dict[str, Any]] = []
     for entry in array:
+        # item_path unwraps the per-item wrapper object some firmware nests.
         item = _navigate_path(entry, agg.item_path) if agg.item_path else entry
-        if not isinstance(item, dict):
-            continue
+        if isinstance(item, dict):
+            items.append(item)
 
-        if not passes_filter(_filter_values(item, agg), agg.filter):
-            continue
-
-        raw = item.get(agg.max)
-        if raw is None:
-            continue
-
-        converted = convert_value(raw, agg.type, scale=agg.scale)
-        if converted is not None and isinstance(converted, int | float) and (best is None or converted > best):
-            best = converted
-
-    return best
-
-
-def _filter_values(item: dict[str, Any], agg: JSONChildAggregate) -> dict[str, Any]:
-    """Extract and normalize the filter keys of one array item.
-
-    Absent keys are left out so ``passes_filter`` sees ``None`` and
-    rejects the item, rather than matching a stringified ``None``.
-    """
-    values: dict[str, Any] = {}
-    for key in agg.filter:
-        raw = item.get(key)
-        if raw is None:
-            continue
-        values[key] = convert_value(raw, "string", map_config=agg.map)
-    return values
+    return aggregate_max(items, agg, lambda item, key: item.get(key))

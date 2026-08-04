@@ -163,7 +163,7 @@ def _check_provisioned_speed_direction(parser: ParserConfig, errors: list[str]) 
             if expected is None:
                 continue
             actual = agg.filter.get("direction")
-            # JSON filters also allow {"not": ...} rules; only a plain
+            # Filters also allow {"not": ...} rules; only a plain
             # equality filter carries a direction to check.
             if isinstance(actual, str) and actual != expected:
                 errors.append(
