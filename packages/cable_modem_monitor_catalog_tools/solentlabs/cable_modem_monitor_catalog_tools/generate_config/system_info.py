@@ -81,7 +81,19 @@ def _transform_json_system_info(source: dict[str, Any]) -> dict[str, Any]:
         }
         if f.get("path"):
             tf["path"] = f["path"]
+        if f.get("format"):
+            tf["format"] = f["format"]
+        if f.get("map"):
+            tf["map"] = f["map"]
         transformed_fields.append(tf)
 
     result["fields"] = transformed_fields
+
+    # The analysis layer already emits the model's key names for these,
+    # so only the type needs normalizing.
+    if source.get("child_aggregates"):
+        result["child_aggregates"] = [
+            {**agg, "type": normalize_type(agg.get("type", "integer"))} for agg in source["child_aggregates"]
+        ]
+
     return result

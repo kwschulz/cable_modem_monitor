@@ -84,7 +84,7 @@ The pipeline separates deterministic logic (repeatable, testable Python code) fr
 | Transport detection | HNAP marker scan, URL pattern matching | — |
 | Auth detection | Pattern matching against `auth_patterns.json` | Ambiguous cases presented to user |
 | Format detection | HNAP: deterministic. HTTP: candidate list | HTTP: LLM reads response bodies, picks format |
-| Field mapping | Column/field extraction from HAR content, fleet patterns augment direction and system_info label detection | — |
+| Field mapping | Column/field extraction from HAR content, service flow aggregate detection, fleet patterns augment direction and system_info label detection | — |
 | Metadata enrichment | Inference from analysis + defaults | Web search for missing fields (chipset, ISPs) |
 | Config generation | Pydantic validation, constraint checking | Fix validation errors and retry |
 | Golden file generation | Parse HAR through config | Sanity-check channel counts |
@@ -107,6 +107,15 @@ A **CoreGap** means the modem uses a pattern that Core doesn't support yet. The 
 
 Well-known modems with standard patterns produce zero gaps. Novel modems produce gaps that require a development effort before onboarding can proceed.
 
+**Gap categories are endpoint-level, and cover auth and actions only.** A
+data endpoint the generator does not read produces no gap: intake writes a
+`parser.yaml` that simply omits it, and the pipeline reports success. That
+is how the service flow resource behind issue #185 was captured in the HAR,
+fetched successfully, and left unread without anything flagging it. Detection
+coverage for data endpoints is measured by intake accuracy, not gated by a
+gap category, so a field the pipeline cannot generate shows up as a lower
+percentage rather than a stop.
+
 When the pipeline stops on a gap, the report contains enough detail (phase, category, summary, wire evidence) to file a GitHub issue for the development work.
 
 ---
@@ -119,7 +128,7 @@ The pipeline uses a three-layer detection model:
 2. **Fleet patterns** — proven patterns extracted from existing catalog entries
 3. **LLM gap-fill** — judgment calls for ambiguous cases
 
-`scan_fleet()` reads all `parser.yaml` files in the catalog and builds a `FleetPatterns` instance containing selector-to-direction mappings, system_info label/ID/JSON-key mappings, delimiters, channel type values, and aggregate field patterns. This is passed to both `analyze_har(fleet=...)` and `generate_config(fleet=...)`.
+`scan_fleet()` reads all `parser.yaml` files in the catalog and builds a `FleetPatterns` instance containing selector-to-direction mappings, system_info label/ID/JSON-key mappings, delimiters, channel type values, aggregate field patterns, and uptime formats. This is passed to both `analyze_har(fleet=...)` and `generate_config(fleet=...)`.
 
 Fleet patterns grow automatically as new modems are onboarded — each new parser.yaml enriches detection for future modems that share similar patterns.
 
@@ -127,13 +136,19 @@ Fleet patterns grow automatically as new modems are onboarded — each new parse
 
 ## Data-Driven Extension Points
 
-Two JSON pattern files control what the pipeline recognizes. Adding support for a new login URL or action endpoint is a data change, not a code change:
+Three JSON pattern files control what the pipeline recognizes. Adding support for a new login URL, action endpoint, or service flow spelling is a data change, not a code change:
 
 - **`auth_patterns.json`** — known login URL patterns and credential field names. When `analyze_har` sees a POST to a URL matching a pattern here, it classifies the auth strategy.
 
 - **`action_patterns.json`** — known action URLs (logout, restart, reboot). When `analyze_har` sees POST requests matching patterns here, it maps them to modem actions.
 
-Both files live in Catalog Tools (`solentlabs/cable_modem_monitor_catalog_tools/analysis/`). Extending them is the first step when a CoreGap is reported for an unmatched endpoint.
+- **`service_flow_patterns.json`** — the wire vocabulary of a service flow resource: which item keys name a direction, which name a provisioned maximum, and which direction spellings are not the canonical words. All are matched case-insensitively.
+
+The files live in Catalog Tools (`solentlabs/cable_modem_monitor_catalog_tools/analysis/`). Extending them is the first step when a CoreGap is reported for an unmatched endpoint.
+
+What stays in code is the output contract, not the wire vocabulary: the canonical direction words and the field names they produce (`provisioned_speed_down` and siblings) define registered fields, so they are not an extension point.
+
+Two more vocabularies are not files at all. Uptime `format` strings and the `docsis_status` spellings meaning "Operational" are harvested from the fleet's committed configs by `scan_fleet()`, so onboarding a modem with a new uptime shape or a new vendor status word extends the candidate list for every modem after it.
 
 ---
 
@@ -143,6 +158,7 @@ Both files live in Catalog Tools (`solentlabs/cable_modem_monitor_catalog_tools/
 | ---------- | ---------- |
 | Pipeline tools (validate, analyze, enrich, generate, test) | `packages/cable_modem_monitor_catalog_tools/solentlabs/cable_modem_monitor_catalog_tools/` |
 | Pattern files (auth, actions) | `.../catalog_tools/analysis/auth/` and `.../catalog_tools/analysis/actions/` |
+| Pattern file (service flows) | `.../catalog_tools/analysis/mapping/service_flow_patterns.json` |
 | Fleet scanner | `packages/cable_modem_monitor_catalog_tools/solentlabs/cable_modem_monitor_catalog_tools/fleet_scanner.py` |
 | Intake pipeline regression (accuracy tracking + auth audit) | `packages/cable_modem_monitor_catalog_tools/scripts/intake_pipeline_regression.py` |
 | Test harness (HAR replay, golden file comparison) | `packages/cable_modem_monitor_core/solentlabs/cable_modem_monitor_core/test_harness/` |

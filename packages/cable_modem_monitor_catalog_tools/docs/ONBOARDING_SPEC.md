@@ -751,10 +751,39 @@ names/positions to canonical output fields.
 
 | Canonical field | Type | Common |
 |----------------|------|:------:|
-| `system_uptime` | string | yes |
+| `system_uptime` | uptime | yes |
 | `software_version` | string | yes |
 | `hardware_version` | string | yes |
 | `docsis_status` | string | sometimes |
+
+`docsis_status` is normalized through a `map`. It has one canonical
+value, `"Operational"`, which downstream consumers depend on, and
+vendors spell success many ways (`Allowed`, `Connected`, `operational`).
+Emit `map: {<observed spelling>: "Operational"}` when the observed value
+is a spelling the fleet has proven means operational, keeping the wire
+casing as the key.
+
+Map **only** success spellings. Per
+[SYSTEM_INFO_SPEC § Canonical values](../../cable_modem_monitor_core/docs/SYSTEM_INFO_SPEC.md#canonical-values),
+in-progress and error states (`Ranging`, `Scanning`, `Access Denied`)
+pass through as raw diagnostic strings so the status sensor shows what
+the modem actually reported.
+
+`system_uptime` is normalized, not passed through. It takes `type:
+uptime` plus a `format` naming the raw shape, per
+[PARSING_SPEC § Uptime Normalization](../../cable_modem_monitor_core/docs/PARSING_SPEC.md#uptime-normalization):
+`seconds` for a raw integer, otherwise a `{days}`/`{hours}`/`{minutes}`/
+`{seconds}` pattern. Pick the format by testing candidates against the
+value in the capture and keeping the one that parses; the fleet's
+committed formats are the candidate list. Emit `type: string` only when
+no candidate parses, since a format that matches nothing yields no value
+and no error.
+
+Both rules apply wherever the detector can see the field's value, which
+is the `html_fields`, `json`, and `hnap` sources. `javascript` sources
+are the exception: their values are positional, with no value bound to a
+field at detection time, so they still emit `type: string` and need the
+type and map filled in by hand.
 
 **System info (Tier 2 registered — see FIELD_REGISTRY):**
 
@@ -762,6 +791,10 @@ names/positions to canonical output fields.
 |-----------------|------|:------:|
 | `boot_status` | string | sometimes |
 | `docsis_version` | string | sometimes |
+| `provisioned_speed_down` | integer | service flow modems |
+| `provisioned_speed_up` | integer | service flow modems |
+| `provisioned_burst_down` | integer | service flow modems |
+| `provisioned_burst_up` | integer | service flow modems |
 
 System info fields are open-ended — extract whatever the modem provides,
 **except identity PII**: `serial_number` and `mac_address` are deliberately
@@ -837,6 +870,43 @@ section output for config generation.
 - `array_path` (dot-notation path to channel array)
 - JSON key names → canonical field names
 - `fallback_key` if the modem uses non-standard key names
+
+For `system_info` fields, emit the container and the key **separately** —
+`path` for the dot-notation container, `key` for the leaf. Core navigates
+`path`, then looks `key` up literally inside it, so a nested field emitted
+as a single dotted key matches nothing and produces no value and no error.
+
+#### Service flow detection
+
+A service flow resource lists one entry per flow, each carrying the flow's
+direction and its provisioned maxima. These reduce to `system_info` fields
+through `child_aggregates` (SYSTEM_INFO_SPEC), one per (metric, direction)
+pair actually observed:
+
+| Emitted key | Source |
+|-------------|--------|
+| `array_path` | Dot-notation path to the flow array |
+| `item_path` | Uniform single-key wrapper object, when each entry nests one |
+| `filter` | The direction key, set to a canonical direction word |
+| `map` | Wire spellings of the filter key, when they are not the canonical words |
+| `max` | The provisioned-maximum key, in its observed casing |
+| `field` | `provisioned_{speed,burst}_{down,up}` |
+
+Three constraints bind what may be emitted:
+
+1. **Filter values are strings.** Core normalizes these rules to text
+   before comparing, so a numeric rule reads correctly and matches
+   nothing. Core rejects one at config load.
+2. **Direction filters use the canonical words** `downstream` and
+   `upstream`. When firmware spells direction differently, normalize it in
+   the aggregate's `map`, never in Core. An unrecognized spelling is
+   skipped rather than guessed. **Casing counts:** Core compares filter
+   rules byte for byte, so a wire value of `Downstream` against a
+   `downstream` rule matches no items and yields no value without
+   erroring. Any spelling that is not already the canonical word needs a
+   `map` entry, capitalization included.
+3. **Provisioned values carry no scale** — raw bit/s and bytes. The
+   display unit is the consumer's choice.
 
 #### Table-to-section association
 
@@ -1276,7 +1346,8 @@ detection, format detection, and field mapping extraction.
           "format": "html_fields",
           "resource": "/info.html",
           "fields": [
-            { "label": "System Up Time", "field": "system_uptime", "type": "string" }
+            { "label": "System Up Time", "field": "system_uptime", "type": "uptime",
+              "format": "{days} days {hours}h:{minutes}m:{seconds}s" }
           ]
         }
       ]
@@ -1855,7 +1926,8 @@ system_info:
       fields:
         - label: "System Up Time"
           field: system_uptime
-          type: string
+          type: uptime
+          format: "{days} days {hours}h:{minutes}m:{seconds}s"
 ```
 
 ### Example 2: HNAP modem
@@ -1940,7 +2012,8 @@ system_info:
     - format: hnap
       response_key: "GetCustomerStatusConnectionInfoResponse"
       fields:
-        - { source: CustomerConnSystemUpTime, field: system_uptime, type: string }
+        - { source: CustomerConnSystemUpTime, field: system_uptime, type: uptime,
+            format: "{days} days {hours}h:{minutes}m:{seconds}s" }
         - { source: StatusSoftwareModelName, field: model_name, type: string }
     - format: hnap
       response_key: "GetArrisDeviceStatusResponse"
