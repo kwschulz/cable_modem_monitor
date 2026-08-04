@@ -426,6 +426,32 @@ filter, then aggregate — so filters see normalized values.
 `{"serviceFlows": [{"serviceFlow": {...}}, ...]}`. Omit it when the
 array holds the objects directly.
 
+#### Why `max` is the only operation
+
+A modem registers several service flows per direction, and only one of
+them is the subscriber's tier. A capture of the Compal CH7465MT carries
+three flows per direction: the tier itself, a secondary flow around
+5 Mbit/s, and a small management flow at 128 kbit/s carrying a
+`pMinReservedRate`. The provisioned tier is the largest of the set, so
+`max` selects it.
+
+Position cannot. Flow counts vary per modem — the Sagemcom F3896LG
+publishes one flow per direction where the Compal publishes three — and
+element order is not fixed, that same Compal capture emitting its
+upstream flows first.
+
+This is why the operation set here differs from the top-level
+[`aggregate:` section](PARSING_SPEC.md#aggregate-fields-declared-in-parseryaml),
+which supports only `sum`. That section totals a homogeneous set, the
+per-channel error counters. This one selects among competing
+declarations of the same quantity. Totalling service flows would report
+a speed no one is provisioned for. The operations are not
+interchangeable, and neither section's set implies the other's; a
+proposal to add an operation to either still has to clear the
+schema-boundary test in
+[ARCHITECTURE_DECISIONS.md § Core's schema tracks fleet-observed
+metrics](ARCHITECTURE_DECISIONS.md#cores-schema-tracks-fleet-observed-metrics-not-user-analytics).
+
 #### Service flow direction
 
 `provisioned_speed_down`/`_up` and `provisioned_burst_down`/`_up`
