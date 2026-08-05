@@ -321,7 +321,7 @@ class TestModemTestCaseImmutable:
 
 
 class TestConfigResolutionTier3:
-    """_resolve_modem_config Tier 3: stems with no dashes fall through to modem.yaml."""
+    """resolve_modem_config Tier 3: stems with no dashes fall through to modem.yaml."""
 
     def test_no_dash_stem_falls_back_to_modem_yaml(self, tmp_path: Path) -> None:
         """A stem with no dashes that has no exact yaml falls through to modem.yaml."""

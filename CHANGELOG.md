@@ -28,6 +28,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sensors that already exist keep bit/s until changed in their settings.
   (Related to #129)
 
+- **Catalog tools: the intake regression grades each capture against the
+  config that describes it.** A modem directory can hold several HARs,
+  each capturing a different auth variant alongside its own
+  `modem-<variant>.yaml`, but every HAR was graded against the base
+  `modem.yaml`. Five auth strategies were reported as pipeline defects
+  in which the detector and the catalog in fact agreed. Grading now
+  resolves the config from the HAR stem, the rule the golden replay
+  tests already use. Fleet accuracy also stopped dropping the captures
+  it cannot process: a HAR that fails validation or analysis now scores
+  zero against its full field count instead of leaving the denominator,
+  which had been overstating the reported percentage.
+
+- **Catalog tools: intake reads a URL login token from the query string
+  rather than from anywhere in the URL.** The detector matched `login_`
+  at any position, so `/cgi-bin/login_cgi` and `/Admin_Login_Lock.txt`
+  registered as token logins. One modem was classified `url_token` when
+  it uses a plain form, and another was given a login page pointing at a
+  status file. The token must now follow the marker in the query string.
+  A login that sends its credential as both a bare query parameter and a
+  Basic header is recognized by that shape, which survives the capture
+  sanitizer replacing the credential itself.
+
 ## [3.14.0-beta.18] - 2026-08-03
 
 ### Added

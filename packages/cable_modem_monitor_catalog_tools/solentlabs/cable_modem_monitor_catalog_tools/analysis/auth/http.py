@@ -13,7 +13,7 @@ import base64
 import re
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from ...validation.har_utils import (
     HARD_STOP_PREFIX,
@@ -47,8 +47,13 @@ _PBKDF2_SALT_TRIGGERS: tuple[str, ...] = get_pbkdf2_salt_triggers()
 _SJCL_PAGE_VARS: tuple[str, ...] = get_sjcl_page_variables()
 _SJCL_POST_FIELDS: tuple[str, ...] = get_sjcl_post_fields()
 
-# Base64 pattern: login_<base64> or login%5f<base64> in URL
-_URL_TOKEN_PATTERN = re.compile(r"login[_\-%]", re.IGNORECASE)
+# A url_token credential rides in the query string as login_<base64(user:pass)>.
+# The marker must be followed by an actual token and must not be matched
+# anywhere in the URL: /cgi-bin/login_cgi is a script name and
+# /Admin_Login_Lock.txt is a status file, and both used to register as
+# url_token auth, outranking the correct strategy and emitting a bogus
+# login_page.
+_URL_TOKEN_QUERY = re.compile(r"(login(?:_|%5f))([A-Za-z0-9+/=%]{4,})", re.IGNORECASE)
 _BASE64_CHARS = re.compile(r"^[A-Za-z0-9+/=]{4,}$")
 # Bare base64 credential: base64(user:pass) as a query param name with empty value
 _BARE_BASE64_CREDENTIAL = re.compile(r"^[A-Za-z0-9+/]{8,}={0,2}$")
@@ -277,16 +282,17 @@ def _check_url_token_signals(
     signals: _HttpAuthSignals,
 ) -> None:
     """Check for URL token auth: login_<base64> prefix or bare base64 credential."""
-    if _URL_TOKEN_PATTERN.search(url):
-        token_match = _extract_url_token_parts(url)
-        if token_match is not None:
-            signals.url_token_entry = entry
-            signals.url_token_login_prefix = token_match[0]
-            signals.url_token_login_page = token_match[1]
-            signals.has_any_auth_signal = True
+    token_match = _extract_url_token_parts(url)
+    if token_match is not None:
+        signals.url_token_entry = entry
+        signals.url_token_login_prefix = token_match[0]
+        signals.url_token_login_page = token_match[1]
+        signals.has_any_auth_signal = True
     elif signals.url_token_entry is None:
         # Bare base64 fallback: query param name is base64(user:pass)
         bare = _detect_bare_base64_credential(req)
+        if bare is None:
+            bare = _detect_basic_credential_in_query(req)
         if bare is not None:
             signals.url_token_entry = entry
             signals.url_token_login_prefix = ""
@@ -978,22 +984,18 @@ def _extract_url_token_parts(url: str) -> tuple[str, str] | None:
     Returns:
         Tuple of (login_prefix, login_page) or None if not a token URL.
     """
-    path = path_from_url(url)
-
-    # Look for login_<token> pattern in query string
-    full_lower = url.lower()
-    for marker in ("login_", "login%5f"):
-        idx = full_lower.find(marker)
-        if idx < 0:
-            continue
-        # The prefix is everything up to and including the marker
-        prefix = url[idx : idx + len(marker)]
-        # Normalize: login%5f -> login_
-        prefix = prefix.replace("%5f", "_").replace("%5F", "_")
-        # The login page is the path without query string
-        return prefix, path
-
-    return None
+    # Query only: the token is a credential passed as a query parameter, so a
+    # path segment that merely contains the word "login" is not one.
+    query = urlsplit(url).query
+    if not query:
+        return None
+    match = _URL_TOKEN_QUERY.search(query)
+    if match is None:
+        return None
+    # Normalize: login%5f -> login_
+    prefix = match.group(1).replace("%5f", "_").replace("%5F", "_")
+    # The login page is the path without query string
+    return prefix, path_from_url(url)
 
 
 def _detect_bare_base64_credential(req: dict[str, Any]) -> str | None:
@@ -1017,6 +1019,34 @@ def _detect_bare_base64_credential(req: dict[str, Any]) -> str | None:
             continue
         # Credential format: user:pass (must have exactly one colon)
         if ":" in decoded and decoded.count(":") == 1:
+            return path_from_url(req.get("url", ""))
+    return None
+
+
+def _detect_basic_credential_in_query(req: dict[str, Any]) -> str | None:
+    """Detect a url_token login whose credential also rides in an Authorization header.
+
+    Returns:
+        The login page path if header and query carry the same credential, else None.
+    """
+    # The credential is sent twice, as a bare query parameter and as the Basic
+    # header value, so _detect_bare_base64_credential's decode test is the
+    # natural check. It cannot fire on a sanitized capture: har-capture
+    # replaces the credential with an opaque placeholder, and it assigns the
+    # URL and the header *different* placeholders, so the two copies cannot be
+    # compared either. What survives sanitizing is the shape. Pairing a Basic
+    # header with a valueless query parameter occurs once in the whole
+    # catalog, on this login, so the shape alone identifies it.
+    has_basic = any(
+        header["name"].lower() == "authorization" and header.get("value", "").strip().lower().startswith("basic")
+        for header in req.get("headers", [])
+    )
+    if not has_basic:
+        return None
+
+    for param in req.get("queryString", []):
+        # Bare credential: the whole parameter is the token, with no value.
+        if param.get("name") and not param.get("value"):
             return path_from_url(req.get("url", ""))
     return None
 

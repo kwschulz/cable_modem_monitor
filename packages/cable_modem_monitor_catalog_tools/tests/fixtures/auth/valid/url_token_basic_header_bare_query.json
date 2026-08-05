@@ -1,0 +1,27 @@
+{
+  "_description": "URL token auth where the sanitizer left the credential undecodable: the login sends it as a bare query parameter and as a Basic header, with a different placeholder in each",
+  "_entries": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://192.168.100.1/cmconnectionstatus.html?AUTH_1f9d0f92",
+        "headers": [{"name": "Authorization", "value": "Basic AUTH_33eec042"}],
+        "cookies": [],
+        "queryString": [{"name": "AUTH_1f9d0f92", "value": ""}]
+      },
+      "response": {
+        "status": 200,
+        "headers": [],
+        "cookies": [],
+        "content": {"size": 31, "text": "ddgFdG7bqJDDJIBXNfyMSPfDdgjG8PC"}
+      }
+    }
+  ],
+  "_transport": "http",
+  "_expected_strategy": "url_token",
+  "_expected_confidence": "high",
+  "_expected_fields": {
+    "login_page": "/cmconnectionstatus.html",
+    "login_prefix": ""
+  }
+}

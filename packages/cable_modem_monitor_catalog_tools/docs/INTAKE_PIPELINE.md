@@ -166,7 +166,7 @@ Three JSON pattern files control what the pipeline recognizes. Adding support fo
 
 - **`auth_patterns.json`** — known login URL patterns and credential field names. When `analyze_har` sees a POST to a URL matching a pattern here, it classifies the auth strategy.
 
-- **`action_patterns.json`** — known action URLs (logout, restart, reboot). When `analyze_har` sees POST requests matching patterns here, it maps them to modem actions.
+- **`action_patterns.json`** — known action URLs (logout, restart, reboot). When `analyze_har` sees POST requests matching patterns here, it maps them to modem actions. **URLs only**, which is the limit of this extension point rather than a gap in its data: a firmware that names the action anywhere else is invisible to it no matter what is added to the file. Three families do exactly that — HNAP in the `SOAPAction` header, CBN in the setter's `fun=` code, and form modems in a body parameter such as `todo=reboot`, all of them POSTing to one endpoint that serves every action. HNAP is the one with a code-side substitute: `detect_hnap_actions()` matches action names containing `logout`, `reboot`, `restart` or `reset`, so a vendor spelling like `SetArrisConfigurationInfo` is missed and no data change can reach it. Reading these is a detector capability question, not a pattern-file entry.
 
 - **`service_flow_patterns.json`** — the wire vocabulary of a service flow resource: which item keys name a direction, which name a provisioned maximum, and which direction spellings are not the canonical words. All are matched case-insensitively.
 
@@ -227,8 +227,26 @@ Fleet-wide **field accuracy** is reported as a percentage of committed
 golden file fields correctly reproduced by the pipeline. This tracks
 improvement over time as the pipeline gains new pattern recognition.
 
+A HAR the pipeline cannot process scores **zero against its full field
+count**, never dropping out of the denominator: a modem the pipeline
+fails outright is its worst result, not an absent one, and excluding it
+would raise the percentage. Only the `INCOMPLETE HARS` list is excluded,
+because a capture that never recorded the flow measures the capture
+rather than the pipeline.
+
+**Which config a HAR is graded against.** A modem directory may hold
+several HARs, each capturing a different auth variant alongside its own
+`modem-<variant>.yaml`. Both grades resolve the committed config from
+the HAR stem via Core's `resolve_modem_config()` — exact match, then
+stem walk, then `modem.yaml` — the same rule the golden replay tests
+use. Grading every HAR against the base `modem.yaml` instead compares a
+capture to a config that does not describe it, and reports the
+disagreement as a pipeline defect: before this was fixed, the four
+SB8200 variants and the SB6190 nonce capture produced five auth
+`mismatch` lines in which the detector and the catalog in fact agreed.
+
 **Actions grading** compares pipeline-detected logout/restart actions
-against the committed modem.yaml per HAR
+against the committed config per HAR
 (`analysis/actions/grading.py`):
 
 | Grade | Meaning |
@@ -243,8 +261,34 @@ Human-authored fields a HAR cannot show (`pre_fetch_action`,
 `action_auth`, `requires_session`, response keys) are out of grading
 scope.
 
+**A detected action is a candidate, not a finding.** `pipeline_only` is
+the expected grade for most of them, and adopting one is a runtime
+decision the capture cannot make. `actions.logout` is the clear case:
+declaring it makes logout fire after every successful poll and before a
+same-poll auth retry ([MODEM_YAML_SPEC.md § Single-session
+modems](../../cable_modem_monitor_core/docs/MODEM_YAML_SPEC.md)). It is
+the remedy for single-session firmware, evidenced by a second login
+failing while one is active — which a capture of one session cannot
+show. Seeing `GET /Logout.htm` means the user clicked logout while
+capturing; that the endpoint exists is not a reason to call it every
+poll. Restart is likewise gated by hardware confirmation, since the
+catalog does not ship a reboot button nobody has pressed. Read the
+`pipeline_only` list as a shortlist for a human, never as a diff to
+apply.
+
+**`committed_only` separates into two causes**, and which one applies is
+decided by checking the HAR for the committed action rather than
+assumed. Either the action never fired while capturing — the common
+case, and nothing to fix in the pipeline — or it fired and was still not
+produced, which means its intent was expressed outside the URL and
+`action_patterns.json` could not see it (see [Data-Driven Extension
+Points](#data-driven-extension-points)). A third, narrower case is a
+committed endpoint no capture can yield: `sagemcom/f3896lg-zg` declares
+its logout as `/rest/v1/user/{auth:user_id}/token/{auth:token}`, and the
+generator has no template vocabulary to produce placeholders with.
+
 **Auth grading** compares the pipeline-generated auth block against the
-committed modem.yaml (`analysis/auth/grading.py`), using the same grade
+committed config (`analysis/auth/grading.py`), using the same grade
 taxonomy on two items: `strategy` (the detected auth strategy — the
 headline capability) and `fields` (everything else in the block —
 endpoints, field names, cookie names, nested success criteria). Fields
@@ -252,6 +296,24 @@ are only graded when the strategy matches; comparing field layouts of
 two different strategies is meaningless. Unlike actions (graded from
 analysis output), auth is graded from the generated config, so it
 requires generation to succeed.
+
+**Auth strategy mismatches that are correct by design.** A `strategy:
+mismatch` normally means one side is wrong, but eight standing lines are
+none of them a catalog error. They are reported, never suppressed — the
+report states what the pipeline can do, and hiding a known limit would
+make it read as capability. Four causes:
+
+| Cause | Modems |
+|-------|--------|
+| **No branch for the strategy.** The HTTP tree walks none → basic → url_token → form_sjcl → form_pbkdf2 → form_nonce → form. `form_cbn` and `bearer` are not in it, so it cannot emit them | `arris/sb8200-cbn`, `compal/ch7465mt` (`form_cbn`); `sagemcom/f3896lg-zg` (`bearer`) |
+| **Capture carries no evidence.** The committed strategy is right about the hardware; the HAR cannot show it | `netgear/c7000v2`, `technicolor/tc4400` — committed `basic`, but zero 401 challenges and zero `Authorization` headers. `arris/tg3442de` — committed `form_sjcl`, but both login POST bodies are `{}`, so the SJCL fields the branch keys on are gone and the login URL falls through to the PBKDF2 bucket |
+| **Action-scoped auth read as primary.** `auth: none` plus `actions.restart.action_auth: bearer` — the only login in the capture fired for the restart action, and the data path really is unauthenticated | `sagemcom/f3896lg-vmb` |
+| **Credential shape the detector cannot name.** The login posts `arguments=<base64 of user:pass>`; the credential test is field-name based, so a generic `arguments` parameter reads as carrying no credentials | `arris/sb6190` (b64 variant) |
+
+Three of the four are detector capability, not catalog defects, and each
+would be closed by teaching the detector a shape it does not know. That
+is the subject of the dynamic-detection design question, not a catalog
+edit: no entry above should be changed to make a line turn green.
 
 **Auth fixture audit** runs at the end of every sweep. For each form-auth
 modem with `login_page` configured, it verifies that the committed HAR

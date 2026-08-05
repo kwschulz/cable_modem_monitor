@@ -125,6 +125,32 @@ class TestAuthUtilityEdgeCases:
         assert _extract_url_token_parts("/status.html?session=abc") is None
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("http://h/cmconnectionstatus.html?login_YWRtaW46cGFzcw==", ("login_", "/cmconnectionstatus.html")),
+        ("http://h/status.html?login%5fYWRtaW46cGFzcw==", ("login_", "/status.html")),
+        # The marker must carry a token, and must sit in the query string. A
+        # path segment that merely spells "login_" is a script or file name.
+        ("https://h/cgi-bin/login_cgi", None),
+        ("https://h/Admin_Login_Lock.txt?_=1779637456025", None),
+        ("https://h/login_page.html?x=1", None),
+        ("http://h/status.html?login_", None),
+    ],
+    ids=[
+        "query_token",
+        "query_token_percent_encoded",
+        "path_segment_login_cgi",
+        "path_segment_admin_login_lock",
+        "path_segment_with_query",
+        "marker_without_token",
+    ],
+)
+def test_url_token_parts_requires_token_in_query(url: str, expected: tuple[str, str] | None) -> None:
+    """Only a query-string marker followed by a token is url_token auth."""
+    assert _extract_url_token_parts(url) == expected
+
+
 # =====================================================================
 # Serialization - inline behavioral
 # =====================================================================
