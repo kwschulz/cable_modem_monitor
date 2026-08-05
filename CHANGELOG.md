@@ -50,6 +50,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Basic header is recognized by that shape, which survives the capture
   sanitizer replacing the credential itself.
 
+- **Auth failure logs no longer keep part of the password.** The 401/403
+  and auth-failure lines trim the modem's response body to a fixed length
+  before redacting the password, so a password falling across that
+  boundary left its leading characters behind. Redaction now covers the
+  whole body and the trim happens afterwards. This matters because these
+  are the log lines the integration asks you to share when reporting a
+  problem. Only firmware that echoes the submitted password back in an
+  error page was affected.
+
 ## [3.14.0-beta.18] - 2026-08-03
 
 ### Added
