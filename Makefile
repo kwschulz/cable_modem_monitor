@@ -1,4 +1,4 @@
-.PHONY: help setup test test-quick test-simple clean lint lint-fix fix-imports lint-all type-check format format-check check validate validate-ci validate-host intake-regression pii-check spell-check catalog-readme-check suppression-check ha-compat-check install-hooks docker-start docker-stop docker-restart docker-logs docker-status docker-clean docker-shell
+.PHONY: help setup test test-quick test-simple clean lint lint-fix fix-imports lint-all type-check format format-check check validate validate-ci validate-host intake-regression catalog-field-sweep pii-check spell-check catalog-readme-check suppression-check ha-compat-check install-hooks docker-start docker-stop docker-restart docker-logs docker-status docker-clean docker-shell
 
 # Pin tool invocations to the project venv so that subprocesses
 # without venv on PATH (release.py shelling out, fresh clones, CI
@@ -33,6 +33,10 @@ help:
 	@echo "  make validate-ci   - Full CI-like validation (lint + tests + ha-compat)"
 	@echo "  make spell-check   - Spell check catalog modem YAML files (requires Node.js)"
 	@echo "  make install-hooks - Install optional pre-push hook (runs validate-ci)"
+	@echo ""
+	@echo "Catalog Reports (informational, never gates):"
+	@echo "  make intake-regression    - How well intake reproduces committed configs"
+	@echo "  make catalog-field-sweep  - Captured registry fields no entry maps"
 	@echo ""
 	@echo "Docker Development:"
 	@echo "  make docker-start   - Start Home Assistant dev environment"
@@ -137,6 +141,15 @@ validate-ci: check test intake-regression pii-check spell-check catalog-readme-c
 intake-regression:
 	@echo "🔍 Running intake pipeline accuracy report..."
 	@$(VENV_BIN)/python packages/cable_modem_monitor_catalog_tools/scripts/intake_pipeline_regression.py
+
+# Catalog field sweep — registry fields a committed HAR carries that the
+# entry never maps. Deliberately NOT a validate-ci dependency and not
+# mirrored in CI: the finding set only moves when a HAR, a parser.yaml,
+# or the registry vocabulary changes, and every hit needs a human
+# decision. Run it on catalog change and before a release cut.
+catalog-field-sweep:
+	@echo "🔍 Sweeping the catalog for captured-but-unmapped registry fields..."
+	@$(VENV_BIN)/python packages/cable_modem_monitor_catalog_tools/scripts/catalog_field_sweep.py
 
 # Fixture PII / credential scan — mirrors CI pii-check job.
 pii-check:

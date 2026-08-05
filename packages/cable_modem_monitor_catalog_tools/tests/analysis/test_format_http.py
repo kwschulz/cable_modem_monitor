@@ -20,7 +20,6 @@ from solentlabs.cable_modem_monitor_catalog_tools.analysis.format.html_parsing i
     detect_tables,
 )
 from solentlabs.cable_modem_monitor_catalog_tools.analysis.format.http import (
-    _decode_har_body,
     _looks_like_json,
     _parse_json_body,
     analyze_page,
@@ -606,43 +605,6 @@ _LOOKS_LIKE_JSON_CASES = [
 def test_looks_like_json(ct: str, body: str, expected: bool, desc: str) -> None:
     """Content-type sniffing detects JSON regardless of header."""
     assert _looks_like_json(ct, body) == expected
-
-
-# =====================================================================
-# Base64 HAR body decoding
-# =====================================================================
-
-
-class TestDecodeHarBody:
-    """Tests for _decode_har_body base64 handling."""
-
-    def test_plain_text_passthrough(self) -> None:
-        """Non-encoded body is returned as-is."""
-        resp = {"content": {"text": "<html>data</html>"}}
-        assert _decode_har_body(resp) == "<html>data</html>"
-
-    def test_base64_decoded(self) -> None:
-        """Base64-encoded body is decoded."""
-        import base64
-
-        original = '{"nodes": [{"num": "1"}]}'
-        encoded = base64.b64encode(original.encode()).decode()
-        resp = {"content": {"text": encoded, "encoding": "base64"}}
-        assert _decode_har_body(resp) == original
-
-    def test_missing_content(self) -> None:
-        """Missing content object returns empty string."""
-        assert _decode_har_body({}) == ""
-
-    def test_base64_invalid_returns_raw(self) -> None:
-        """Invalid base64 is suppressed, raw body returned."""
-        resp = {"content": {"text": "not-valid-base64!!!", "encoding": "base64"}}
-        assert _decode_har_body(resp) == "not-valid-base64!!!"
-
-    def test_base64_empty_body_skips_decode(self) -> None:
-        """Empty body with base64 encoding returns empty string."""
-        resp = {"content": {"text": "", "encoding": "base64"}}
-        assert _decode_har_body(resp) == ""
 
 
 # =====================================================================

@@ -276,6 +276,64 @@ pipeline stages, and printing. The shared grade taxonomy is
 
 ---
 
+## Catalog Field Sweep
+
+`scripts/catalog_field_sweep.py` reads every committed entry's HAR for
+keys that resolve to a registry field, and reports the ones that
+entry's own `parser.yaml` and golden file never populate. Like the
+regression above it is a **report, not a gate**, and nothing it finds
+is wired automatically — each hit is a candidate a human decides on.
+
+```bash
+python packages/cable_modem_monitor_catalog_tools/scripts/catalog_field_sweep.py
+python packages/cable_modem_monitor_catalog_tools/scripts/catalog_field_sweep.py --modem arris/sb8200
+python packages/cable_modem_monitor_catalog_tools/scripts/catalog_field_sweep.py --json
+```
+
+**Against unread resources.** That report is endpoint-granular, has no
+registry knowledge, and runs at intake on a HAR with no committed
+config yet. It cannot see an endpoint that is read but read
+incompletely: the SB8200's `/cmconnectionstatus.html` is a parser
+resource, so it is never unread, and its `Boot State` row goes unmapped
+in silence. This sweep is field-granular, registry-aware, and runs over
+the already-committed catalog.
+
+**Against the intake regression.** That compares a *generated* config
+against the committed one — pipeline capability. This compares a
+*capture* against the committed config — catalog coverage. A field the
+generator misses but the committed config already has belongs to the
+regression, not here.
+
+**What counts as extracted** is the committed `parser.yaml` plus the
+committed golden. A field reaches the output without a `field:` line
+through `channel_type: {fixed: …}`, `fixed_fields`, the XML
+`lock_status: {all_of: […]}` derivation, an `aggregate:` total, or a
+`parser.py` post-processor. Reading the golden alongside the config
+covers the last of those, which no static read of the YAML can see.
+
+**Scope.** Only fields with a canonical home surface, and the
+vocabulary is the shipped alias maps (`field_registry.json`,
+`mapping.system_info`, `mapping.service_flows`). Serial numbers, MAC
+addresses, boot filenames, event logs and MTA lines have no registry
+field — they are new-schema questions gated by
+[ARCHITECTURE_DECISIONS.md § Core Schema Model](../../cable_modem_monitor_core/docs/ARCHITECTURE_DECISIONS.md),
+and several are PII-adjacent. Keys are printed, never values, for the
+same reason as unread resources.
+
+**Known blind spots**, all consequences of reading names off the wire:
+
+| Blind spot | Why |
+|------------|-----|
+| HNAP and JS-embedded modems | Channel fields arrive positionally inside a delimited string; there are no keys to read |
+| Direction | A channel key carries no direction, so a field counts as extracted when *either* downstream or upstream populates it |
+| Unregistered spellings | A firmware key no alias map lists resolves to nothing, so the field it carries cannot be named |
+
+The reusable logic lives in the unit-tested
+`solentlabs/cable_modem_monitor_catalog_tools/analysis/field_sweep.py`;
+the script supplies discovery and printing.
+
+---
+
 ## Further Reading
 
 - [ONBOARDING_SPEC.md](ONBOARDING_SPEC.md) — full tool contracts, decision tree (7 phases), validation rules, worked examples, error handling
