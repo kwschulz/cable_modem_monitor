@@ -1328,7 +1328,7 @@ mappings that produce the inputs.
 |-------|------|--------------|
 | parser.yaml load | Read + parse one YAML file | Once at startup |
 | `BaseParser` instantiation | In-memory, no I/O | Once at startup |
-| `parse_resources()` | CPU-bound HTML/JSON parsing | Per poll cycle |
+| `ModemParserCoordinator.parse()` | CPU-bound HTML/JSON parsing | Per poll cycle |
 | Field extraction | String splits, type casts | O(channels × fields) |
 
 Parsing is CPU-bound and fast (< 100ms for the largest modems with 32+

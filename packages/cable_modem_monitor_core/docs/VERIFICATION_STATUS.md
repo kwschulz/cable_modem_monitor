@@ -1,17 +1,23 @@
-# Modem Parser Verification Status
+# Modem Verification Status
 
-## Parser Status Model
+## Modem Status Model
 
-Parsers use a `ParserStatus` enum to track their verification state:
+Verification state belongs to the modem config, not to the parser. It is
+typed by the `ModemStatus` enum in
+`models/modem_config/config.py`:
 
 ```python
-from enum import StrEnum
-
-class ParserStatus(StrEnum):
-    AWAITING_VERIFICATION = "awaiting_verification"  # Released, needs user confirmation
+class ModemStatus(StrEnum):
     CONFIRMED = "confirmed"                          # Confirmed working by real user
+    AWAITING_VERIFICATION = "awaiting_verification"  # Released, needs user confirmation
     UNSUPPORTED = "unsupported"                      # Modem locked down, kept for documentation
 ```
+
+`ModemConfig.status` is typed to it, so an unknown value fails validation
+before it ships. The status also sets how complete an entry must be:
+`validate_required_fields_by_status()` requires `auth`, `hardware`,
+`attribution` and `isps` on a `confirmed` or `awaiting_verification` entry,
+while `unsupported` needs only the identity fields.
 
 ### Status Definitions
 

@@ -103,7 +103,7 @@ Each poll:
     a. Auth Manager: session valid? → reuse. Expired? → login.
     b. Resource Loader: fetch all pages using authenticated session.
        Build resource dict.
-    c. Parser: parse_resources(resources) → channels + system info.
+    c. Parser: ModemParserCoordinator.parse(resources) → channels + system info.
     d. Auth Manager: logout if single-session modem.
  5. Orchestrator: check ModemDataCollector result.
     Success → reset auth failure streak, reset connectivity state, derive status.

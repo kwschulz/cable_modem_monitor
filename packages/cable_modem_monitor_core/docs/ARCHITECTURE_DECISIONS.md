@@ -1790,7 +1790,7 @@ chose.
 | `RUNTIME_POLLING_SPEC.md` | Poll cycle, session lifecycle, error recovery |
 | `../../cable_modem_monitor_catalog_tools/docs/ONBOARDING_SPEC.md` | Catalog Tools modem onboarding |
 | `FIELD_REGISTRY.md` | Field naming authority |
-| `VERIFICATION_STATUS.md` | Parser status lifecycle |
+| `VERIFICATION_STATUS.md` | Modem status lifecycle |
 | `../../../custom_components/cable_modem_monitor/docs/CONFIG_FLOW_SPEC.md` | Setup wizard |
 | `../../../custom_components/cable_modem_monitor/docs/ENTITY_MODEL_SPEC.md` | Core output → HA entities |
 | `../../../custom_components/cable_modem_monitor/docs/HA_ADAPTER_SPEC.md` | HA wiring — runtime data, coordinators, polling modes |
