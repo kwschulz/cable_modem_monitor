@@ -55,12 +55,13 @@ class ModemData(TypedDict, total=False):
     """Parser output shape.
 
     downstream and upstream are lists of channel dicts with canonical fields
-    plus arbitrary pass-through fields. system_info is a flat dict.
+    plus arbitrary pass-through fields. system_info is a flat dict whose
+    values carry their declared type, per PARSING_SPEC Output Contract.
     """
 
     downstream: Required[list[DownstreamChannel]]
     upstream: Required[list[UpstreamChannel]]
-    system_info: dict[str, str]
+    system_info: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------

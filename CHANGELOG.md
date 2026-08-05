@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Ziggo Sagemcom F3896LG-ZG reports provisioned speed and burst.** The
+  original capture carried a service flow endpoint the catalog entry never
+  read. It supplies the ISP-provisioned downstream and upstream speed and
+  maximum burst size, which now appear as four sensors, along with the
+  modem's reported model name. These five values are read from the capture
+  and have not been confirmed against the modem's own status page yet.
+  (Related to #185)
+
 ### Fixed
 
 - **Provisioned speed reads in Mbit/s instead of raw bits per second.**
