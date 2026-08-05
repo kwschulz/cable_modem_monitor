@@ -149,13 +149,15 @@ it from downstream channel `lock_status` fields and writes it into
 stays absent — same sparse-dict rule as other system_info fields.
 No sensor is created when the field is absent.
 
+Rows are evaluated top to bottom; the first match wins.
+
 | Condition | Value |
 |-----------|-------|
-| All DS `lock_status == "locked"` AND upstream present | `"Operational"` |
-| Some DS `lock_status == "locked"` | `"partial_lock"` |
-| No DS channels locked | `"not_locked"` |
 | No DS channels | *(absent — cannot derive)* |
 | Channels lack `lock_status` | *(absent — cannot derive)* |
+| No DS channel locked | `"not_locked"` |
+| All DS locked AND upstream present | `"Operational"` |
+| Anything else locked-but-incomplete — some DS locked, or all DS locked with no upstream | `"partial_lock"` |
 
 The platform adapter composes `connection_status`, `docsis_status`,
 and `health_status` (from the health pipeline) into a display state

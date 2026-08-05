@@ -2015,7 +2015,7 @@ UC-49).
 | N    | Normal poll — counters = (500, 50), docsis = Operational | False | user-configured (e.g., 15 min) |
 | N+1  | Successful poll: counters = (0, 0), docsis = Denied. Reboot-signal check matches (counter reset + transitional docsis = 2 of 3); recovery opens a window with reason `reboot_signals:counter_reset+transitional_docsis`. Observer fires. | **True** | Switches to recovery cadence (e.g., 30 s) |
 | N+2..k | Polls run at recovery cadence. Snapshots reflect actual modem state (ranging → operational). Window is NOT closed by operational snapshot — it runs its full duration. | True | recovery cadence |
-| N+k+1 | `_RECOVERY_WINDOW_SECONDS` elapsed; window closes. Observer fires. | False | Restored to user-configured |
+| N+k+1 | `Recovery.WINDOW_SECONDS` elapsed; window closes. Observer fires. | False | Restored to user-configured |
 
 **Core behavior:** The reboot-signal check runs inside
 `Recovery.evaluate_snapshot()` on every successful poll. It's a
@@ -2040,7 +2040,7 @@ from recovery state.
 
 **False positives are bounded-harm.** If the reboot-signal check
 misfires on a firmware stats-clear or signal anomaly, the only
-consequence is polling faster for `_RECOVERY_WINDOW_SECONDS`.
+consequence is polling faster for `Recovery.WINDOW_SECONDS`.
 Dashboard state is unaffected (it always reflects truth). No stalls,
 no timeouts, no misleading UX.
 

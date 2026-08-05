@@ -89,7 +89,7 @@ flag. The two answer different questions:
   seconds-to-minutes during a reset.)
 - `orchestrator.recovery_active` — is the *modem* currently in a
   recovery window? (True for the duration of
-  `_RECOVERY_WINDOW_SECONDS` after any recovery trigger.)
+  `Recovery.WINDOW_SECONDS` after any recovery trigger.)
 
 Only `active_operation` gates the buttons: a press while it is set
 is refused (logged, no dispatch). `recovery_active` never gates
