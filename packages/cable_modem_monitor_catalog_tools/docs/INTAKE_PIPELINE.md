@@ -83,7 +83,7 @@ The pipeline separates deterministic logic (repeatable, testable Python code) fr
 | HAR validation | Structural checks, auth flow detection — fail-fast gate | — |
 | Fleet scan | `scan_fleet()` builds patterns from catalog parser.yaml files | — |
 | Transport detection | HNAP marker scan, URL pattern matching | — |
-| Auth detection | Pattern matching against `auth_patterns.json` | Ambiguous cases presented to user |
+| Auth detection | Pattern matching against `auth_patterns.json` | Intended: ambiguous cases presented for a decision. Today the detector returns one strategy and no alternatives — see [Detection Owes the LLM Evidence](#detection-owes-the-llm-evidence-not-a-verdict) |
 | Format detection | HNAP: deterministic. HTTP: candidate list | HTTP: LLM reads response bodies, picks format |
 | Field mapping | Column/field extraction from HAR content, service flow aggregate detection, fleet patterns augment direction and system_info label detection | — |
 | Unread resources | Subtract every endpoint the config reads from the HAR's 2xx JSON endpoints; reduce each remainder to its key skeleton | Read the skeletons and decide whether anything there is worth mapping |
@@ -93,6 +93,54 @@ The pipeline separates deterministic logic (repeatable, testable Python code) fr
 | Testing | HAR replay, golden file diff | Diagnose failures, fix config |
 
 See [ONBOARDING_SPEC.md § Tool boundaries](ONBOARDING_SPEC.md#tool-boundaries) for the full responsibility matrix.
+
+---
+
+## Detection Owes the LLM Evidence, Not a Verdict
+
+Intake never aimed to detect every config deterministically. The goal is a
+near-perfect config with the remaining gaps named, and the LLM is the layer
+that gets there. A tool returning one answer with no alternatives does not
+serve that judgment step, it removes it.
+
+Two steps already work the intended way. HTTP format detection emits a
+candidate list and the LLM picks by reading response bodies. Unread
+resources emit key skeletons and the LLM decides what is worth mapping.
+Neither gates, and both hand over evidence rather than a conclusion.
+
+Auth and action detection do not. Both return a single answer,
+`AuthDetail.confidence` is serialized and read by nothing, and a failure is
+a hard stop rather than a shortlist. The cost is not missed capability, it
+is **silent wrong confidence**: `sagemcom/f3896lg-zg` is reported
+`form_pbkdf2` with no sign that its login response carries `created.token`,
+the one fact that makes it `bearer`. Nothing downstream learns a decision
+existed.
+
+**The rule.** Where a detection is ambiguous, report the alternatives and
+the wire evidence for each, not the winner alone. Where the capture cannot
+settle it, say so and name what a better capture would show. Both are
+successes: the first yields a config, the second yields a gap report, and
+the mission counts them equally.
+
+**The catalog is the strongest hint.** Committed configs already hold the
+discriminating strings — `token_path: created.token`, `action_name:
+SetArrisConfigurationInfo`, `todo: reboot`, `fun: 8`. Reporting "N committed
+modems declare this shape, here they are" alongside the wire evidence gives
+the LLM precedent it can read.
+
+This supersedes an earlier proposal to derive *detection itself* from
+committed configs. That required deciding which `modem.yaml` fields are
+recognition signal and which are runtime behaviour — `action_name` is the
+former, `cookie_name` the latter — a judgment no scan can make and the LLM
+makes for free. As a hint source the distinction stops mattering. Note that
+`scan_fleet()` reads only `parser.yaml`; auth and actions live in
+`modem.yaml`, which pattern extraction never opens.
+
+**What this measures.** Exact-match grading answers a question the mission
+never asked. The fitting measure is whether the correct answer was among the
+candidates offered, and whether un-inferable cases were flagged as gaps.
+Until detection emits candidates there is nothing to score that way, so the
+grades below stand as the interim proxy.
 
 ---
 
@@ -166,7 +214,7 @@ Three JSON pattern files control what the pipeline recognizes. Adding support fo
 
 - **`auth_patterns.json`** — known login URL patterns and credential field names. When `analyze_har` sees a POST to a URL matching a pattern here, it classifies the auth strategy.
 
-- **`action_patterns.json`** — known action URLs (logout, restart, reboot). When `analyze_har` sees POST requests matching patterns here, it maps them to modem actions. **URLs only**, which is the limit of this extension point rather than a gap in its data: a firmware that names the action anywhere else is invisible to it no matter what is added to the file. Three families do exactly that — HNAP in the `SOAPAction` header, CBN in the setter's `fun=` code, and form modems in a body parameter such as `todo=reboot`, all of them POSTing to one endpoint that serves every action. HNAP is the one with a code-side substitute: `detect_hnap_actions()` matches action names containing `logout`, `reboot`, `restart` or `reset`, so a vendor spelling like `SetArrisConfigurationInfo` is missed and no data change can reach it. Reading these is a detector capability question, not a pattern-file entry.
+- **`action_patterns.json`** — known action URLs (logout, restart, reboot). When `analyze_har` sees POST requests matching patterns here, it maps them to modem actions. **URLs only**, which is the limit of this extension point rather than a gap in its data: a firmware that names the action anywhere else is invisible to it no matter what is added to the file. Three families do exactly that — HNAP in the `SOAPAction` header, CBN in the setter's `fun=` code, and form modems in a body parameter such as `todo=reboot`, all of them POSTing to one endpoint that serves every action. HNAP is the one with a code-side substitute: `detect_hnap_actions()` matches action names containing `logout`, `reboot`, `restart` or `reset`, so a vendor spelling like `SetArrisConfigurationInfo` is missed and no data change can reach it. Reading these is a detector capability question, not a pattern-file entry — and the cheaper answer is to report the `SOAPAction` names, `fun=` codes and body parameters a capture contains, with the committed configs that declare the same strings, rather than to encode every vendor spelling. See [Detection Owes the LLM Evidence](#detection-owes-the-llm-evidence-not-a-verdict).
 
 - **`service_flow_patterns.json`** — the wire vocabulary of a service flow resource: which item keys name a direction, which name a provisioned maximum, and which direction spellings are not the canonical words. All are matched case-insensitively.
 
@@ -310,10 +358,15 @@ make it read as capability. Four causes:
 | **Action-scoped auth read as primary.** `auth: none` plus `actions.restart.action_auth: bearer` — the only login in the capture fired for the restart action, and the data path really is unauthenticated | `sagemcom/f3896lg-vmb` |
 | **Credential shape the detector cannot name.** The login posts `arguments=<base64 of user:pass>`; the credential test is field-name based, so a generic `arguments` parameter reads as carrying no credentials | `arris/sb6190` (b64 variant) |
 
-Three of the four are detector capability, not catalog defects, and each
-would be closed by teaching the detector a shape it does not know. That
-is the subject of the dynamic-detection design question, not a catalog
-edit: no entry above should be changed to make a line turn green.
+None of these is a catalog defect, and no entry above should be changed to
+make a line turn green. Nor does closing them require teaching the detector
+every shape: each one has wire evidence that would let a reader settle it —
+`created.token` in a login response, `fun=` codes on a setter endpoint, a
+login POST that precedes only a reboot. Reporting that evidence and the
+matching catalog precedent is the fix, per [Detection Owes the LLM
+Evidence](#detection-owes-the-llm-evidence-not-a-verdict). The two `basic`
+lines have no evidence in the capture at all, and their correct outcome is a
+gap report asking for a clean recapture.
 
 **Auth fixture audit** runs at the end of every sweep. For each form-auth
 modem with `login_page` configured, it verifies that the committed HAR
