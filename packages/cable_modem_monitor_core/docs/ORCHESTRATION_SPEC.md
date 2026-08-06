@@ -1892,7 +1892,7 @@ activity.
 separately when probes run:
 
 ```text
-Health check [MODEL]: responsive (ICMP 1.5ms, TCP 1.8ms, HTTP HEAD 4.3ms, 0 bytes)
+Health check [MODEL]: responsive — ICMP 1.5ms, TCP 1.8ms, HTTP HEAD 4.3ms
 ```
 
 On GET-only modems (`supports_head=False`), the HEAD entry is
@@ -1900,8 +1900,8 @@ omitted (only ICMP and TCP appear). When TCP/HEAD are skipped, the
 log shows the skip reason:
 
 ```text
-Health check [MODEL]: responsive (ICMP 1.5ms, TCP/HEAD skipped (collection active))
-Health check [MODEL]: responsive (ICMP 1.5ms, TCP/HEAD skipped (recent collection))
+Health check [MODEL]: responsive — ICMP 1.5ms, TCP/HEAD skipped (collection active)
+Health check [MODEL]: responsive — ICMP 1.5ms, TCP/HEAD skipped (recent collection)
 ```
 
 `collection active` means the probes were skipped to avoid contention
@@ -1912,7 +1912,7 @@ When the ICMP contradiction override forces the TCP probe, the log
 shows the real TCP result alongside the skip reason:
 
 ```text
-Health check [MODEL]: unresponsive (ICMP timeout, TCP timeout, HEAD skipped (recent collection; TCP forced by ICMP failure))
+Health check [MODEL]: unresponsive — ICMP timeout, TCP timeout, HEAD skipped (recent collection; TCP forced by ICMP failure)
 ```
 
 ### State Ownership
@@ -1960,10 +1960,10 @@ based — the same status at the same level would flood logs every 30s:
 
 | Event | Level | Example |
 |-------|-------|---------|
-| Transition to responsive (recovery) | INFO | `"Health check [MODEL]: responsive (ICMP 3ms, TCP 2ms)"` |
-| Transition to degraded | WARNING | `"Health check [MODEL]: degraded (ICMP 2ms, TCP timeout)"` |
-| Transition to unresponsive | WARNING | `"Health check [MODEL]: unresponsive (ICMP timeout, TCP timeout)"` |
-| TCP/HEAD skipped (collection evidence) | DEBUG | `"Health check [MODEL]: responsive (ICMP 1.5ms, TCP/HEAD skipped (collection active\|recent collection))"` |
+| Transition to responsive (recovery) | INFO | `"Health check [MODEL]: responsive — ICMP 3.0ms, TCP 2.0ms"` |
+| Transition to degraded | WARNING | `"Health check [MODEL]: degraded — ICMP 2.0ms, TCP timeout"` |
+| Transition to unresponsive | WARNING | `"Health check [MODEL]: unresponsive — ICMP timeout, TCP timeout"` |
+| TCP/HEAD skipped (collection evidence) | DEBUG | `"Health check [MODEL]: responsive — ICMP 1.5ms, TCP/HEAD skipped (collection active\|recent collection)"` |
 | First check (UNKNOWN → any) | INFO or WARNING | Depending on the target status |
 | Steady-state (no change) | DEBUG | Same format, but only visible with debug logging enabled |
 

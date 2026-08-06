@@ -89,6 +89,14 @@ jobs:
         run: |
           pytest tests/ -v --tb=short --cov=solentlabs/cable_modem_monitor_catalog_tools --cov-report=term-missing --cov-fail-under=90
 
+      # Runs here rather than as its own job: it needs Core and Catalog
+      # Tools installed, which this job already did, and a new job name
+      # would need adding to the require-status-checks ruleset.
+      # Local mirror: `make import-check`, in validate-ci.
+      - name: Import isolation
+        run: |
+          python scripts/check_import_isolation.py
+
       - name: Intake pipeline accuracy
         run: |
           python packages/cable_modem_monitor_catalog_tools/scripts/intake_pipeline_regression.py -v --scorecard intake-pipeline-scorecard.json

@@ -1,4 +1,4 @@
-.PHONY: help setup test test-quick test-simple clean lint lint-fix fix-imports lint-all type-check format format-check check validate validate-ci validate-host intake-regression catalog-field-sweep pii-check spell-check catalog-readme-check suppression-check ha-compat-check install-hooks docker-start docker-stop docker-restart docker-logs docker-status docker-clean docker-shell
+.PHONY: help setup test test-quick test-simple clean lint lint-fix fix-imports lint-all type-check format format-check check validate validate-ci validate-host intake-regression catalog-field-sweep pii-check spell-check catalog-readme-check suppression-check import-check ha-compat-check install-hooks docker-start docker-stop docker-restart docker-logs docker-status docker-clean docker-shell
 
 # Pin tool invocations to the project venv so that subprocesses
 # without venv on PATH (release.py shelling out, fresh clones, CI
@@ -128,7 +128,7 @@ validate:
 # hacs/action@main, which runs in a GitHub-hosted Docker context with
 # external network checks against home-assistant/brands and HACS APIs;
 # not reasonably reproducible locally — same exception class as hassfest).
-validate-ci: check test intake-regression pii-check spell-check catalog-readme-check suppression-check ha-compat-check autoclose-check link-check
+validate-ci: check test intake-regression pii-check spell-check catalog-readme-check suppression-check import-check ha-compat-check autoclose-check link-check
 	@echo "✅ Full CI validation passed!"
 	@echo "🔍 Checking declared dependencies for available updates..."
 	@$(VENV_BIN)/python scripts/check_owned_deps.py
@@ -172,6 +172,13 @@ spell-check:
 suppression-check:
 	@echo "🔍 Scanning for unjustified suppressions..."
 	@$(VENV_BIN)/python scripts/check_suppression_discipline.py --branch origin/main
+
+# Import isolation. Every published module must import on its own.
+# Catches package-level import cycles that stay invisible while some
+# other module always imports the "safe" side first. The pre-commit
+# hook checks changed files only; this sweeps all of them.
+import-check:
+	@$(VENV_BIN)/python scripts/check_import_isolation.py
 
 # HA dependency compatibility — mirrors CI ha-compat-check job.
 # Validates that Core/Catalog declared dep floors are satisfiable under
