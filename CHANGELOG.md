@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.19] - 2026-08-05
+
 ### Added
 
 - **Ziggo Sagemcom F3896LG-ZG reports provisioned speed and burst.** The
