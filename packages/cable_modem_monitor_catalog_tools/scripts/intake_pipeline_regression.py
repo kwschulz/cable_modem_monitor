@@ -51,8 +51,6 @@ CATALOG_ROOT = (
     Path(__file__).resolve().parents[2] / "cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems"
 )
 
-CONFIG_FILES = ("modem.yaml", "parser.yaml", "parser.py")
-
 
 # ---------------------------------------------------------------------------
 # Discovery
@@ -93,25 +91,6 @@ def _read_har_intake_info(har_path: Path) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 # File backup / restore
 # ---------------------------------------------------------------------------
-
-
-def _backup_files(modem_dir: Path) -> dict[str, bytes | None]:
-    """Save original config files."""
-    backups: dict[str, bytes | None] = {}
-    for name in CONFIG_FILES:
-        path = modem_dir / name
-        backups[name] = path.read_bytes() if path.exists() else None
-    return backups
-
-
-def _restore_files(modem_dir: Path, backups: dict[str, bytes | None]) -> None:
-    """Restore original config files from backup."""
-    for name, content in backups.items():
-        path = modem_dir / name
-        if content is not None:
-            path.write_bytes(content)
-        elif path.exists():
-            path.unlink()
 
 
 # ---------------------------------------------------------------------------
@@ -322,10 +301,9 @@ def _run_generate(
 def _run_golden_comparison(
     har_path: Path,
     parser_yaml: str,
-    modem_dir: Path,
     result: ModemResult,
 ) -> None:
-    """Overwrite configs, generate golden file, compare, restore."""
+    """Generate a golden file from the generated parser config and compare."""
     from solentlabs.cable_modem_monitor_catalog_tools.generate_golden_file import (
         generate_golden_file,
     )
@@ -401,7 +379,7 @@ def _run_pipeline(
 
     # Golden file comparison
     if parser_yaml:
-        _run_golden_comparison(har_path, parser_yaml, modem_dir, result)
+        _run_golden_comparison(har_path, parser_yaml, result)
     else:
         result.stage_failed = "generate_golden_file"
         result.error = "no parser.yaml generated"
