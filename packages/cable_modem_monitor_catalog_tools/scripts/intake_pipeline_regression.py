@@ -45,12 +45,11 @@ from solentlabs.cable_modem_monitor_catalog_tools.regression import (
     fleet_accuracy,
     result_status,
 )
+from solentlabs.cable_modem_monitor_core.test_harness import resolve_modem_config
 
 CATALOG_ROOT = (
     Path(__file__).resolve().parents[2] / "cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems"
 )
-
-CONFIG_FILES = ("modem.yaml", "parser.yaml", "parser.py")
 
 
 # ---------------------------------------------------------------------------
@@ -92,25 +91,6 @@ def _read_har_intake_info(har_path: Path) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 # File backup / restore
 # ---------------------------------------------------------------------------
-
-
-def _backup_files(modem_dir: Path) -> dict[str, bytes | None]:
-    """Save original config files."""
-    backups: dict[str, bytes | None] = {}
-    for name in CONFIG_FILES:
-        path = modem_dir / name
-        backups[name] = path.read_bytes() if path.exists() else None
-    return backups
-
-
-def _restore_files(modem_dir: Path, backups: dict[str, bytes | None]) -> None:
-    """Restore original config files from backup."""
-    for name, content in backups.items():
-        path = modem_dir / name
-        if content is not None:
-            path.write_bytes(content)
-        elif path.exists():
-            path.unlink()
 
 
 # ---------------------------------------------------------------------------
@@ -321,10 +301,9 @@ def _run_generate(
 def _run_golden_comparison(
     har_path: Path,
     parser_yaml: str,
-    modem_dir: Path,
     result: ModemResult,
 ) -> None:
-    """Overwrite configs, generate golden file, compare, restore."""
+    """Generate a golden file from the generated parser config and compare."""
     from solentlabs.cable_modem_monitor_catalog_tools.generate_golden_file import (
         generate_golden_file,
     )
@@ -370,6 +349,42 @@ def _extract_metadata(modem_dir: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _run_pipeline(
+    har_path: Path,
+    modem_dir: Path,
+    committed_path: Path | None,
+    result: ModemResult,
+    fleet: FleetPatterns | None,
+) -> None:
+    """Run the pipeline stages, stopping at the first one that fails."""
+    if not _run_validate(har_path, result):
+        return
+
+    analysis_data = _run_analyze(har_path, result, fleet=fleet)
+    if analysis_data is None:
+        return
+
+    committed = _grade_actions_stage(result, analysis_data, committed_path)
+
+    modem_yaml, parser_yaml = _run_generate(analysis_data, modem_dir, result, fleet=fleet)
+    if modem_yaml is None:
+        return
+
+    _grade_auth_stage(result, modem_yaml, committed)
+
+    # Config diffs (informational)
+    if committed_path is not None:
+        result.config_diffs.extend(_diff_config_files(modem_yaml, committed_path, committed_path.name))
+    result.config_diffs.extend(_diff_config_files(parser_yaml, modem_dir / "parser.yaml", "parser.yaml"))
+
+    # Golden file comparison
+    if parser_yaml:
+        _run_golden_comparison(har_path, parser_yaml, result)
+    else:
+        result.stage_failed = "generate_golden_file"
+        result.error = "no parser.yaml generated"
+
+
 def run_modem(
     modem_id: str,
     har_path: Path,
@@ -380,38 +395,24 @@ def run_modem(
     """Run the full pipeline regression for one modem HAR."""
     result = ModemResult(modem=modem_id, har_file=har_path.name)
 
+    # A modem directory may hold several HARs, each capturing a different
+    # auth variant with its own modem-<variant>.yaml. Grading every HAR
+    # against the base modem.yaml compares a capture to a config that does
+    # not describe it. Core's test harness already owns this pairing rule.
+    committed_path = resolve_modem_config(har_path.stem, modem_dir)
+
     try:
-        if not _run_validate(har_path, result):
-            return result
-
-        analysis_data = _run_analyze(har_path, result, fleet=fleet)
-        if analysis_data is None:
-            return result
-
-        committed = _grade_actions_stage(result, analysis_data, modem_dir)
-
-        modem_yaml, parser_yaml = _run_generate(analysis_data, modem_dir, result, fleet=fleet)
-        if modem_yaml is None:
-            return result
-
-        _grade_auth_stage(result, modem_yaml, committed)
-
-        # Config diffs (informational)
-        result.config_diffs.extend(_diff_config_files(modem_yaml, modem_dir / "modem.yaml", "modem.yaml"))
-        result.config_diffs.extend(_diff_config_files(parser_yaml, modem_dir / "parser.yaml", "parser.yaml"))
-
-        # Golden file comparison
-        if parser_yaml:
-            _run_golden_comparison(har_path, parser_yaml, modem_dir, result)
-        else:
-            result.stage_failed = "generate_golden_file"
-            result.error = "no parser.yaml generated"
-
+        _run_pipeline(har_path, modem_dir, committed_path, result, fleet)
     except Exception as e:
         result.stage_failed = result.stage_failed or "unknown"
         result.error = str(e)
 
-    # Pipeline failures: count committed golden file fields for accuracy
+    # Pipeline failures: count committed golden file fields for accuracy.
+    # The stages live in a helper so an early return there cannot skip this.
+    # It used to sit after a try block the stages returned out of directly,
+    # so a HAR failing at validate_har or analyze_har contributed no
+    # denominator at all and left the accuracy pool instead of scoring zero,
+    # which quietly inflated the fleet percentage.
     if result.total_fields == 0 and result.stage_failed:
         stem = har_path.stem
         expected_path = har_path.parent / f"{stem}.expected.json"
@@ -427,17 +428,16 @@ def run_modem(
 def _grade_actions_stage(
     result: ModemResult,
     analysis_data: dict[str, Any],
-    modem_dir: Path,
+    committed_path: Path | None,
 ) -> dict[str, Any]:
     """Grade detected actions against the committed config; returns it.
 
     Runs right after analysis so actions are graded even when a later
     stage fails.
     """
-    committed_yaml_path = modem_dir / "modem.yaml"
-    if not committed_yaml_path.exists():
+    if committed_path is None or not committed_path.exists():
         return {}
-    committed: dict[str, Any] = yaml.safe_load(committed_yaml_path.read_text()) or {}
+    committed: dict[str, Any] = yaml.safe_load(committed_path.read_text()) or {}
     result.grades["actions"] = grade_actions(analysis_data.get("actions"), committed.get("actions"))
     return committed
 

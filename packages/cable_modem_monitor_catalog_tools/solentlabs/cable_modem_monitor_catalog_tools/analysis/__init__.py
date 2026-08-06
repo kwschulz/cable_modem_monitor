@@ -13,6 +13,12 @@ Post-analysis:
 
 - ``js_endpoints`` - uncaptured JS endpoint discovery
 - ``request_requirements`` - session-level query param detection
+- ``unread_resources`` - captured JSON endpoints no config section reads
+
+Catalog audit (runs over committed entries, not over an intake HAR):
+
+- ``field_sweep`` - registry fields a committed HAR carries that the
+  entry's own parser.yaml and golden never populate
 
 Pipeline-wide types (``CoreGap``, ``FleetPatterns``) live in ``types``.
 Phase-local result types live with their phase (e.g., ``auth/types.py``,

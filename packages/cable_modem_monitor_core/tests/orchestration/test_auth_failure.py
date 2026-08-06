@@ -30,6 +30,8 @@ from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
     get_auth_strategy_rows,
 )
 from solentlabs.cable_modem_monitor_core.orchestration.auth_failure import (
+    _FAILURE_BODY_SNIPPET_MAX,
+    _build_http_status_error_event,
     _should_detect_login_pages,
 )
 
@@ -114,3 +116,61 @@ def test_should_detect_login_pages(strategy: str, expected: bool) -> None:
 def test_should_detect_login_pages_without_auth_config() -> None:
     """An unauthenticated config has no strategy to ask, so detection stays off."""
     assert _should_detect_login_pages(_config_with(None)) is False
+
+
+# ---------------------------------------------------------------------------
+# Password scrubbing vs. the snippet budget
+# ---------------------------------------------------------------------------
+
+_PASSWORD = "hunter2-swordfish"
+
+
+def _body_with_password_at(offset: int) -> str:
+    """A response body carrying the password starting at `offset`."""
+    return "x" * offset + _PASSWORD + "y" * 200
+
+
+@pytest.mark.parametrize(
+    "offset",
+    [
+        0,
+        _FAILURE_BODY_SNIPPET_MAX // 2,
+        # Straddles the budget: truncating before scrubbing keeps a prefix
+        # that no longer matches the password, so the replace misses it.
+        _FAILURE_BODY_SNIPPET_MAX - len(_PASSWORD) // 2,
+        _FAILURE_BODY_SNIPPET_MAX - 1,
+    ],
+    ids=["at_start", "mid_body", "straddling_budget", "one_char_before_budget"],
+)
+def test_password_never_survives_in_snippet(offset: int) -> None:
+    """No fragment of the password reaches the event, wherever it sits."""
+    event = _build_http_status_error_event(
+        model="T100",
+        path="/status",
+        status_code=401,
+        reason="Unauthorized",
+        request_line="GET /status HTTP/1.1",
+        content_type="text/html",
+        response_body=_body_with_password_at(offset),
+        password=_PASSWORD,
+    )
+    # Any prefix long enough to be identifiable must be absent, not just
+    # the whole password: a straddled password leaks its leading characters.
+    for length in range(4, len(_PASSWORD) + 1):
+        assert _PASSWORD[:length] not in event.response_body
+
+
+def test_snippet_still_truncated_to_budget() -> None:
+    """Scrubbing first must not let an oversized body through."""
+    event = _build_http_status_error_event(
+        model="T100",
+        path="/status",
+        status_code=401,
+        reason="Unauthorized",
+        request_line="GET /status HTTP/1.1",
+        content_type="text/html",
+        response_body="z" * (_FAILURE_BODY_SNIPPET_MAX * 3),
+        password=_PASSWORD,
+    )
+    assert event.response_body.endswith("... (truncated)")
+    assert len(event.response_body) <= _FAILURE_BODY_SNIPPET_MAX + len("... (truncated)")

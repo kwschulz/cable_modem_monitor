@@ -161,6 +161,45 @@ def test_json_system_info_detection(fixture_path: Path) -> None:
 
 
 # =====================================================================
+# JSON nested key emission - table-driven
+# =====================================================================
+
+# Core navigates path, then looks the key up literally inside it. A
+# nested field emitted as one dotted key matches nothing and fails
+# silently, which is how a whole endpoint's fields go missing.
+# fmt: off
+NESTED_KEY_CASES = [
+    # (json_data,                                          key,          path,           desc)
+    ({"softwareVersion": "1.0"},                           "softwareVersion", "",         "top level — no path"),
+    ({"info": {"softwareVersion": "1.0"}},                 "softwareVersion", "info",     "one container deep"),
+    ({"a": {"b": {"softwareVersion": "1.0"}}},             "softwareVersion", "a.b",      "two containers deep"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize("json_data,key,path,desc", NESTED_KEY_CASES, ids=[c[3] for c in NESTED_KEY_CASES])
+def test_nested_json_key_splits_into_key_and_path(
+    json_data: dict[str, object],
+    key: str,
+    path: str,
+    desc: str,
+) -> None:
+    """A nested JSON field emits key and path separately, never one dotted string."""
+    page = PageAnalysis(resource="/api/info", content_type="application/json", json_data=json_data)
+
+    result = detect_system_info([page], [])
+    assert result is not None, desc
+
+    field = result.sources[0].fields[0]
+    assert field.source == key, desc
+    assert field.path == path, desc
+
+    emitted = field.to_dict()
+    assert emitted.get("source") == key, desc
+    assert emitted.get("path", "") == path, desc
+
+
+# =====================================================================
 # Multi-source detection
 # =====================================================================
 

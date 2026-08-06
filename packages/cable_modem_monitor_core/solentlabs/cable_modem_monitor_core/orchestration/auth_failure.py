@@ -41,7 +41,9 @@ def _build_http_status_error_event(
     password: str,
 ) -> HttpStatusError:
     """Build a sanitized HttpStatusError carrying 401/403 wire detail."""
-    body = _scrub_password(response_body[:_FAILURE_BODY_SNIPPET_MAX], password)
+    # Scrub before truncating. Cutting first can split the password across the
+    # budget, leaving a prefix that no longer matches and so survives the replace.
+    body = _scrub_password(response_body, password)[:_FAILURE_BODY_SNIPPET_MAX]
     if len(response_body) > _FAILURE_BODY_SNIPPET_MAX:
         body = body + "... (truncated)"
 
@@ -99,7 +101,8 @@ def _build_auth_failed_event(
     url = _strip_url_query(response.url)
     status = response.status_code
     content_type = response.headers.get("Content-Type", "")
-    body_snippet = _scrub_password(response.text[:_FAILURE_BODY_SNIPPET_MAX], password)
+    # Scrub before truncating; see _build_http_status_error_event.
+    body_snippet = _scrub_password(response.text, password)[:_FAILURE_BODY_SNIPPET_MAX]
     if len(response.text) > _FAILURE_BODY_SNIPPET_MAX:
         body_snippet = body_snippet + "... (truncated)"
 

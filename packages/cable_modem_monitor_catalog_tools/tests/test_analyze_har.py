@@ -223,6 +223,7 @@ class TestAnalysisResultSerialization:
         assert "sections" in d
         assert "warnings" in d
         assert "hard_stops" in d
+        assert "unread_resources" in d
 
     def test_to_dict_types(self, tmp_path: Path) -> None:
         """Serialized values have correct types."""
@@ -240,6 +241,7 @@ class TestAnalysisResultSerialization:
         assert d["sections"] is None or isinstance(d["sections"], dict)
         assert isinstance(d["warnings"], list)
         assert isinstance(d["hard_stops"], list)
+        assert isinstance(d["unread_resources"], list)
 
 
 # =====================================================================

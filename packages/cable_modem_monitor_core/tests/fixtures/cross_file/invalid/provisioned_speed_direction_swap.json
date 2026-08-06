@@ -1,5 +1,5 @@
 {
-  "_expected_error": "child_aggregate 'provisioned_speed_down' filters on direction '2' but DOCSIS direction for downstream is '1'",
+  "_expected_error": "child_aggregate 'provisioned_speed_down' filters on direction 'upstream' but must filter on 'downstream'",
   "_modem": {
     "manufacturer": "Solent Labs", "model": "T300", "transport": "cbn",
     "default_host": "192.168.100.1",
@@ -34,19 +34,19 @@
         "child_aggregates": [
           {
             "child_element": "serviceflow",
-            "filter": {"direction": "2"},
+            "filter": {"direction": "upstream"},
+            "map": {"1": "downstream", "2": "upstream"},
             "max": "pMaxTrafficRate",
             "field": "provisioned_speed_down",
-            "type": "float",
-            "scale": 0.000001
+            "type": "integer"
           },
           {
             "child_element": "serviceflow",
-            "filter": {"direction": "1"},
+            "filter": {"direction": "downstream"},
+            "map": {"1": "downstream", "2": "upstream"},
             "max": "pMaxTrafficRate",
             "field": "provisioned_speed_up",
-            "type": "float",
-            "scale": 0.000001
+            "type": "integer"
           }
         ]
       }]

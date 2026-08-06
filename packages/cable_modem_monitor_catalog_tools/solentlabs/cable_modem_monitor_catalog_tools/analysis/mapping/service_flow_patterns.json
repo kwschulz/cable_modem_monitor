@@ -1,0 +1,15 @@
+{
+  "direction_aliases": {
+    "1": "downstream",
+    "2": "upstream"
+  },
+  "direction_keys": [
+    "direction"
+  ],
+  "metric_keys": {
+    "maxtrafficburst": "provisioned_burst",
+    "maxtrafficrate": "provisioned_speed",
+    "pmaxtrafficburst": "provisioned_burst",
+    "pmaxtrafficrate": "provisioned_speed"
+  }
+}

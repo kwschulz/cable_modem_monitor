@@ -7,6 +7,8 @@ live in the modules that use them (auth_flow.py, protocol_signals.py).
 
 from __future__ import annotations
 
+import base64
+import contextlib
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -66,6 +68,28 @@ def has_content(response: dict[str, Any]) -> bool:
     size = content.get("size", 0)
     text = content.get("text", "")
     return size > 0 or bool(text)
+
+
+def decode_body(response: dict[str, Any]) -> str:
+    """Extract and decode a response body from its HAR content object.
+
+    Handles base64-encoded bodies (``content.encoding == "base64"``),
+    which some modems produce (e.g., dm1000).
+    """
+    content = response.get("content", {})
+    body: str = content.get("text", "")
+    if content.get("encoding") == "base64" and body:
+        with contextlib.suppress(Exception):
+            body = base64.b64decode(body).decode("utf-8", errors="replace")
+    return body
+
+
+def content_type_of(response: dict[str, Any]) -> str:
+    """Extract a response's Content-Type, lowercased and stripped of parameters."""
+    ct = lower_headers(response).get("content-type", "")
+    if not ct:
+        ct = response.get("content", {}).get("mimeType", "")
+    return ct.lower().split(";")[0].strip()
 
 
 def is_static_resource(url: str) -> bool:

@@ -122,10 +122,21 @@ class SystemInfoFieldDetail:
     selector_value: str = ""
     source: str = ""  # HNAP/JSON source key
     pattern: str = ""
+    # Container to navigate before the key lookup. Core resolves key
+    # and path separately, so a nested field must split them rather
+    # than carry one dotted string.
+    path: str = ""
+    # Raw input shape for types that require one, e.g. uptime.
+    format: str = ""
+    # Value normalization, e.g. a vendor docsis_status spelling to the
+    # canonical "Operational".
+    map: dict[str, str] = dataclass_field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to the sections output format."""
         result: dict[str, Any] = {"field": self.field, "type": self.type}
+        if self.format:
+            result["format"] = self.format
         if self.selector_type == "label":
             result["label"] = self.selector_value
         elif self.selector_type == "id":
@@ -134,8 +145,44 @@ class SystemInfoFieldDetail:
             result["css"] = self.selector_value
         elif self.source:
             result["source"] = self.source
+        if self.path:
+            result["path"] = self.path
         if self.pattern:
             result["pattern"] = self.pattern
+        if self.map:
+            result["map"] = self.map
+        return result
+
+
+@dataclass
+class ChildAggregateDetail:
+    """A detected reduction over repeated items in a JSON array.
+
+    ``filter`` values are strings by contract: Core normalizes these
+    rules to text before comparing, so a numeric rule reads correctly
+    and matches nothing. ``map`` carries wire spellings of the filter
+    keys, keeping firmware vocabulary out of Core.
+    """
+
+    array_path: str
+    filter: dict[str, str]
+    max: str
+    field: str
+    type: str
+    item_path: str = ""
+    map: dict[str, str] = dataclass_field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to the sections output format."""
+        result: dict[str, Any] = {"array_path": self.array_path}
+        if self.item_path:
+            result["item_path"] = self.item_path
+        result["filter"] = self.filter
+        if self.map:
+            result["map"] = self.map
+        result["max"] = self.max
+        result["field"] = self.field
+        result["type"] = self.type
         return result
 
 
@@ -147,6 +194,7 @@ class SystemInfoSourceDetail:
     resource: str
     fields: list[SystemInfoFieldDetail]
     response_key: str = ""
+    child_aggregates: list[ChildAggregateDetail] = dataclass_field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to the sections output format."""
@@ -157,6 +205,8 @@ class SystemInfoSourceDetail:
         }
         if self.response_key:
             result["response_key"] = self.response_key
+        if self.child_aggregates:
+            result["child_aggregates"] = [a.to_dict() for a in self.child_aggregates]
         return result
 
 

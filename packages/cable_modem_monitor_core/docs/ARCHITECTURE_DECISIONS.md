@@ -1064,6 +1064,32 @@ falls inside the parser is the implementer's call per modem (see
 
 ---
 
+### `child_aggregates` keeps its name in both formats
+
+**Decision:** The `child_aggregates` key stays as-is in the `xml` and
+`json` system_info sources. Not renamed to something format-neutral.
+
+**Rationale:** In the `xml` source the name is accurate — it pairs with
+`child_element`, the key that locates the items it reduces. The mismatch
+is confined to the `json` source, which locates items with `array_path`
+and `item_path` and has no children; there the name is inherited
+vocabulary.
+
+That mismatch is real but small, and both available fixes cost more than
+it does. A rename breaks the parser.yaml schema of a published package,
+and an alias accepting both spellings would outlive the confusion it
+removes. The name a reader actually wants would describe neither
+format's locator but the operation — this selects one value from several
+competing declarations rather than totalling a homogeneous set — and
+that distinction is documented where someone tripping on the name will
+be reading anyway, in
+[SYSTEM_INFO_SPEC.md § Why `max` is the only operation](SYSTEM_INFO_SPEC.md#why-max-is-the-only-operation).
+
+Revisit only if a third format adopts the shape, which would make the
+XML reading the minority one.
+
+---
+
 ### `modem-{variant}.yaml` per firmware variant
 
 **Decision:** Each firmware variant gets its own file carrying its own
@@ -1764,7 +1790,7 @@ chose.
 | `RUNTIME_POLLING_SPEC.md` | Poll cycle, session lifecycle, error recovery |
 | `../../cable_modem_monitor_catalog_tools/docs/ONBOARDING_SPEC.md` | Catalog Tools modem onboarding |
 | `FIELD_REGISTRY.md` | Field naming authority |
-| `VERIFICATION_STATUS.md` | Parser status lifecycle |
+| `VERIFICATION_STATUS.md` | Modem status lifecycle |
 | `../../../custom_components/cable_modem_monitor/docs/CONFIG_FLOW_SPEC.md` | Setup wizard |
 | `../../../custom_components/cable_modem_monitor/docs/ENTITY_MODEL_SPEC.md` | Core output → HA entities |
 | `../../../custom_components/cable_modem_monitor/docs/HA_ADAPTER_SPEC.md` | HA wiring — runtime data, coordinators, polling modes |

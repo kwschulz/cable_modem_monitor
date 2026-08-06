@@ -35,7 +35,7 @@ class HNAPFieldsParser(BaseParser):
         # PARSING_SPEC § Field Outcomes.
         self.failed_fields: dict[str, str] = {}
 
-    def parse(self, resources: dict[str, Any]) -> dict[str, str]:
+    def parse(self, resources: dict[str, Any]) -> dict[str, Any]:
         """Extract system_info fields from the HNAP response.
 
         Args:
@@ -43,7 +43,7 @@ class HNAPFieldsParser(BaseParser):
                 containing the ``GetMultipleHNAPsResponse`` dict.
 
         Returns:
-            Flat dict of field name → string value.
+            Flat dict of field name → typed value.
         """
         hnap_response = resources.get("hnap_response")
         if not isinstance(hnap_response, dict):
@@ -58,7 +58,7 @@ class HNAPFieldsParser(BaseParser):
             )
             return {}
 
-        result: dict[str, str] = {}
+        result: dict[str, Any] = {}
         self.failed_fields = {}
         for field_mapping in self._config.fields:
             value = action_response.get(field_mapping.source, "")
@@ -71,7 +71,7 @@ class HNAPFieldsParser(BaseParser):
                     scale=field_mapping.scale,
                 )
                 if converted is not None:
-                    result[field_mapping.field] = str(converted)
+                    result[field_mapping.field] = converted
                 else:
                     record_failed_field(self.failed_fields, field_mapping.field, value)
 

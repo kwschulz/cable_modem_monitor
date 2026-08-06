@@ -352,6 +352,7 @@ JSON system_info sources extract fields from REST/JSON API responses.
 | `resource` | string | yes | URL path key in the resource dict |
 | `encoding` | string | no | Response encoding (e.g., `base64`) |
 | `array_path` | string | no | Dot-notation path to a JSON array. Navigates to the array and uses its first element as the source object for field lookups. Same concept as the channel parser's `array_path`. |
+| `child_aggregates` | list | no | Aggregate values across repeated array items (see below) |
 
 **Field schema:**
 
@@ -368,6 +369,99 @@ When a response is a root-level JSON array, the resource loader wraps
 it as `{"_raw": [...]}`. Use source-level `array_path: "_raw"` to
 unwrap it — this is cleaner than repeating `path: "_raw.0"` on every
 field.
+
+#### child_aggregates
+
+Iterates the items of a JSON array, filters by key values, and
+computes the `max` of a numeric key. Produces a single system_info
+field per entry — the JSON counterpart of the
+[`xml` source's child_aggregates](#xml-system-info). Both run the same
+reducer, so filter rules, `map` normalization, and evaluation order are
+identical; the formats differ only in how an item is located.
+
+**Filter values compare as text.** Unlike a channel `filter`, which
+compares after type conversion, a child_aggregate normalizes every
+filter key to a string first — `type` describes the `max` field, not the
+filter keys, so there is nothing to convert them against. Write
+`{ not: "0" }`, not `{ not: 0 }`. A non-string rule value is rejected at
+config load rather than silently matching nothing.
+
+| Property | Type | Required | Description |
+|----------|------|:--------:|-------------|
+| `array_path` | string | yes | Dot-notation path to the array, resolved from the whole response |
+| `item_path` | string | no | Dot-notation path within each item, for firmware that nests the object inside a wrapper key |
+| `filter` | dict | yes | Key-value pairs that must all match, including `{ not: "value" }`. Values compare as text — see below |
+| `map` | dict | no | Value mapping (exact match) applied to the `filter` values before comparison |
+| `max` | string | yes | Key whose value is maximized |
+| `field` | string | yes | Output system_info field name |
+| `type` | string | yes | Field type for the aggregated value |
+| `scale` | number | no | Multiplier applied after type conversion |
+
+`array_path` resolves from the whole response, not from the
+source-level `array_path` element that `fields` read. Evaluation order
+matches the channel parser: extract, convert (which applies `map`),
+filter, then aggregate — so filters see normalized values.
+
+```yaml
+# Extract max provisioned speed per direction from DOCSIS service flows
+- format: json
+  resource: "/rest/v1/cablemodem/serviceflows"
+  fields: []
+  child_aggregates:
+    - array_path: serviceFlows
+      item_path: serviceFlow
+      filter: { direction: downstream }
+      max: maxTrafficRate
+      field: provisioned_speed_down
+      type: integer
+    - array_path: serviceFlows
+      item_path: serviceFlow
+      filter: { direction: upstream }
+      max: maxTrafficRate
+      field: provisioned_speed_up
+      type: integer
+```
+
+`item_path` handles the wrapper-per-item shape
+`{"serviceFlows": [{"serviceFlow": {...}}, ...]}`. Omit it when the
+array holds the objects directly.
+
+#### Why `max` is the only operation
+
+A modem registers several service flows per direction, and only one of
+them is the subscriber's tier. A capture of the Compal CH7465MT carries
+three flows per direction: the tier itself, a secondary flow around
+5 Mbit/s, and a small management flow at 128 kbit/s carrying a
+`pMinReservedRate`. The provisioned tier is the largest of the set, so
+`max` selects it.
+
+Position cannot. Flow counts vary per modem — the Sagemcom F3896LG
+publishes one flow per direction where the Compal publishes three — and
+element order is not fixed, that same Compal capture emitting its
+upstream flows first.
+
+This is why the operation set here differs from the top-level
+[`aggregate:` section](PARSING_SPEC.md#aggregate-fields-declared-in-parseryaml),
+which supports only `sum`. That section totals a homogeneous set, the
+per-channel error counters. This one selects among competing
+declarations of the same quantity. Totalling service flows would report
+a speed no one is provisioned for. The operations are not
+interchangeable, and neither section's set implies the other's; a
+proposal to add an operation to either still has to clear the
+schema-boundary test in
+[ARCHITECTURE_DECISIONS.md § Core's schema tracks fleet-observed
+metrics](ARCHITECTURE_DECISIONS.md#cores-schema-tracks-fleet-observed-metrics-not-user-analytics).
+
+#### Service flow direction
+
+`provisioned_speed_down`/`_up` and `provisioned_burst_down`/`_up`
+filter on the canonical direction words `downstream` and `upstream`,
+in both `xml` and `json` sources. DOCS-IF3-MIB's `IfDirection` textual
+convention defines both these words and the numeric codes
+`downstream(1)`/`upstream(2)`; firmware that emits the numerics — or
+any other spelling — normalizes them in the aggregate's `map`. Cross-file
+validation rejects an aggregate that filters on the wrong direction,
+because a swap produces plausible-looking but inverted speeds.
 
 ### `html_fields` selector types
 
@@ -467,7 +561,8 @@ elements).
 | Property | Type | Required | Description |
 |----------|------|:--------:|-------------|
 | `child_element` | string | yes | Tag name of the repeated child element |
-| `filter` | dict | yes | Key-value pairs that must all match (sub-element tag → text value) |
+| `filter` | dict | yes | Key-value pairs that must all match (sub-element tag → text value), including `{ not: "value" }`. Values compare as text — see below |
+| `map` | dict | no | Value mapping (exact match) applied to the `filter` values before comparison |
 | `max` | string | yes | Sub-element tag name whose value is maximized |
 | `field` | string | yes | Output system_info field name |
 | `type` | string | yes | Field type for the aggregated value |
@@ -484,18 +579,22 @@ elements).
       type: string
   child_aggregates:
     - child_element: serviceflow
-      filter: { direction: "2" }
+      filter: { direction: downstream }
+      map: { "1": downstream, "2": upstream }
       max: pMaxTrafficRate
       field: provisioned_speed_down
-      type: float
-      scale: 0.000001
+      type: integer
     - child_element: serviceflow
-      filter: { direction: "1" }
+      filter: { direction: upstream }
+      map: { "1": downstream, "2": upstream }
       max: pMaxTrafficRate
       field: provisioned_speed_up
-      type: float
-      scale: 0.000001
+      type: integer
 ```
+
+This firmware emits the numeric direction codes, so `map` normalizes
+them to the canonical words before the filter compares them. See
+[Service flow direction](#service-flow-direction).
 
 ### Common field property: `scale`
 
@@ -504,8 +603,7 @@ property. When present, the numeric result of type conversion is
 multiplied by `scale`. Whole-number float results are cast to int.
 
 This is the same mechanism used by channel column mappings. Common
-use: converting raw bps to Mbit/s (`scale: 0.000001`) or raw kHz to
-Hz (`scale: 1000`).
+use: converting raw kHz to Hz (`scale: 1000`).
 
 ---
 
@@ -531,8 +629,8 @@ totals, error rates. Elevation criteria:
 
 Currently Tier 2: software_version, system_uptime, channel counts,
 error totals, error rates (`rate_corrected`, `rate_uncorrected`,
-errors/min, MEASUREMENT), provisioned_speed_down/up (Mbit/s,
-DATA_RATE), provisioned_burst_down/up (B, DATA_SIZE).
+errors/min, MEASUREMENT), provisioned_speed_down/up (bit/s, displayed
+as Mbit/s, DATA_RATE), provisioned_burst_down/up (B, DATA_SIZE).
 
 **Source of value.** Most Tier 2 fields are populated by the parser
 coordinator (native mapping, aggregate, or computed). Error rates are

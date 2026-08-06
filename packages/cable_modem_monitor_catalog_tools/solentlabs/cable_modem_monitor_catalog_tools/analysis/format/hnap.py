@@ -14,6 +14,7 @@ from typing import Any
 from solentlabs.cable_modem_monitor_core.har import merge_hnap_har_responses
 
 from ...validation.har_utils import WARNING_PREFIX
+from ..mapping.field_shape import FieldShapeVocabulary, field_shape
 from ..types import FleetPatterns
 
 # HNAP response keys that indicate downstream/upstream channel data.
@@ -89,6 +90,7 @@ def detect_hnap_sections(
 
     sections: dict[str, Any] = {}
     system_info_sources: list[dict[str, Any]] = []
+    vocabulary = FieldShapeVocabulary.from_fleet(fleet)
 
     for response_key, response_data in hnap_responses.items():
         if not isinstance(response_data, dict):
@@ -110,6 +112,7 @@ def detect_hnap_sections(
             si_source = _detect_system_info_source(
                 response_key,
                 response_data,
+                vocabulary,
             )
             if si_source is not None:
                 system_info_sources.append(si_source)
@@ -640,29 +643,41 @@ def _detect_filter(
 def _detect_system_info_source(
     response_key: str,
     response_data: dict[str, Any],
+    vocabulary: FieldShapeVocabulary,
 ) -> dict[str, Any] | None:
     """Detect system_info fields in an HNAP action response.
 
     Looks for flat key-value responses with string values that
     contain useful system information (firmware, model, uptime).
     """
-    field_mappings: dict[str, str] = {}
+    fields: list[dict[str, Any]] = []
 
     for key, value in response_data.items():
         if not isinstance(value, str) or not value:
             continue
 
         canonical = _map_system_info_key(key)
-        if canonical is not None:
-            field_mappings[key] = canonical
+        if canonical is None:
+            continue
 
-    if not field_mappings:
+        # Same normalization the html_fields and json detectors apply:
+        # system_uptime and docsis_status are canonical fields, not
+        # passthrough strings. The response value is the evidence.
+        field_type, field_format, field_map = field_shape(canonical, value, vocabulary)
+        field_def: dict[str, Any] = {"source": key, "field": canonical, "type": field_type}
+        if field_format:
+            field_def["format"] = field_format
+        if field_map:
+            field_def["map"] = field_map
+        fields.append(field_def)
+
+    if not fields:
         return None
 
     return {
         "format": "hnap",
         "response_key": response_key,
-        "fields": field_mappings,
+        "fields": fields,
     }
 
 

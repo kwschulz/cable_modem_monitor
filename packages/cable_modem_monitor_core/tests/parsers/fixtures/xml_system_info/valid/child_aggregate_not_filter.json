@@ -1,0 +1,23 @@
+{
+  "_description": "Child aggregate honours a {not: value} filter rule, same as a channel filter",
+  "_xml": "<root><docsis_info><serviceflow><state>inactive</state><rate>900</rate></serviceflow><serviceflow><state>active</state><rate>500</rate></serviceflow><serviceflow><state>active</state><rate>300</rate></serviceflow></docsis_info></root>",
+  "_resource": "2",
+  "_config": {
+    "format": "xml",
+    "resource": "2",
+    "root_element": "docsis_info",
+    "fields": [],
+    "child_aggregates": [
+      {
+        "child_element": "serviceflow",
+        "filter": {"state": {"not": "inactive"}},
+        "max": "rate",
+        "field": "provisioned_speed_down",
+        "type": "integer"
+      }
+    ]
+  },
+  "_expected": {
+    "provisioned_speed_down": 500
+  }
+}

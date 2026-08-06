@@ -33,21 +33,24 @@
         "child_aggregates": [
           {
             "child_element": "serviceflow",
-            "filter": {"direction": "1"},
+            "filter": {"direction": "downstream"},
+            "map": {"1": "downstream", "2": "upstream"},
             "max": "pMaxTrafficRate",
             "field": "provisioned_speed_down",
             "type": "integer"
           },
           {
             "child_element": "serviceflow",
-            "filter": {"direction": "2"},
+            "filter": {"direction": "upstream"},
+            "map": {"1": "downstream", "2": "upstream"},
             "max": "pMaxTrafficRate",
             "field": "provisioned_speed_up",
             "type": "integer"
           },
           {
             "child_element": "serviceflow",
-            "filter": {"direction": "1"},
+            "filter": {"direction": "downstream"},
+            "map": {"1": "downstream", "2": "upstream"},
             "max": "pMaxConcatBurst",
             "field": "max_concat_burst_down",
             "type": "integer"

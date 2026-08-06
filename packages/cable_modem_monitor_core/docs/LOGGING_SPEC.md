@@ -170,7 +170,14 @@ then `request:` (method, URL, and headers sent, with sensitive values masked
 as `<set, len=N>`), `response:`, and `body:`. A bare status line cannot tell a
 rejected session from a missing header or cookie. The collector constructs the
 event because it is the only layer that knows the password: it scrubs
-`response_body` and truncates it to the log-line budget first.
+`response_body`, then truncates the result to the log-line budget.
+
+**That order is load-bearing, not incidental.** Scrubbing replaces literal
+occurrences of the password, so truncating first can cut the password across
+the budget and leave a prefix the replace no longer matches — a fragment of
+the user's password then ships in the log line. The same applies to
+`AuthFailed`. Both are diagnostics contributors are asked to paste into
+public issues, so the scrubbed text must be whole before anything trims it.
 
 | Event | Level | When |
 |---|---|---|

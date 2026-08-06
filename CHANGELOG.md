@@ -7,6 +7,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.19] - 2026-08-05
+
+### Added
+
+- **Ziggo Sagemcom F3896LG-ZG reports provisioned speed and burst.** The
+  original capture carried a service flow endpoint the catalog entry never
+  read. It supplies the ISP-provisioned downstream and upstream speed and
+  maximum burst size, which now appear as four sensors, along with the
+  modem's reported model name. These five values are read from the capture
+  and have not been confirmed against the modem's own status page yet.
+  (Related to #185)
+
+- **Catalog tools: intake reports the endpoints nothing read.** A data
+  endpoint the generator skipped produced no gap and no warning, which is
+  how the service flow resource behind #185 was captured, fetched, and
+  left unread with the pipeline reporting success. `analyze_har` now lists
+  every 2xx JSON endpoint no part of the generated config consumes, each
+  with its response body's key skeleton and value types. Keys are what
+  make the judgment possible; values are where serial numbers and MAC
+  addresses live, so they are never printed. It rides alongside warnings
+  and never fails an intake. (Related to #185)
+
+- **Catalog tools: a sweep for fields the committed catalog leaves on the
+  wire.** `scripts/catalog_field_sweep.py` reads every committed entry's
+  HAR for keys that resolve to a registry field and reports the ones that
+  entry's own `parser.yaml` and golden never populate. It catches what the
+  unread-resource report cannot: an endpoint that is read but read
+  incompletely, such as the SB8200's `Boot State` row. Report, not gate,
+  and nothing it finds is wired automatically.
+
+### Fixed
+
+- **Catalog tools: intake generates the system_info shapes it was
+  missing.** Nested JSON fields were emitted with key and path joined into
+  one dotted string, which Core looks up literally and never resolves,
+  silently, on every JSON modem. `system_uptime` was emitted as a string,
+  following a spec table that contradicted 33 of the 35 committed configs;
+  it now emits `type: uptime` with the format chosen by testing candidates
+  against the captured value. Vendor spellings of DOCSIS success normalize
+  to `Operational` through a map, with error and in-progress states still
+  passing through raw. Service flow resources now reduce to provisioned
+  speed and burst aggregates. The uptime and status rules reach HNAP too,
+  which had been emitting passthrough strings for all seven HNAP modems.
+  (Related to #185, #129)
+
+- **Provisioned speed reads in Mbit/s instead of raw bits per second.**
+  The sensor declared bit/s and relied on Home Assistant to scale it for
+  display, which it does not do for data rates, so a 110 Mbit/s downstream
+  plan showed as "110100480 bit/s". The sensor now suggests Mbit/s while
+  still storing bit/s, so history keeps a single unit. Home Assistant
+  applies a suggested unit when it first creates an entity, so speed
+  sensors that already exist keep bit/s until changed in their settings.
+  (Related to #129)
+
+- **Catalog tools: the intake regression grades each capture against the
+  config that describes it.** A modem directory can hold several HARs,
+  each capturing a different auth variant alongside its own
+  `modem-<variant>.yaml`, but every HAR was graded against the base
+  `modem.yaml`. Five auth strategies were reported as pipeline defects
+  in which the detector and the catalog in fact agreed. Grading now
+  resolves the config from the HAR stem, the rule the golden replay
+  tests already use. Fleet accuracy also stopped dropping the captures
+  it cannot process: a HAR that fails validation or analysis now scores
+  zero against its full field count instead of leaving the denominator,
+  which had been overstating the reported percentage.
+
+- **Catalog tools: intake reads a URL login token from the query string
+  rather than from anywhere in the URL.** The detector matched `login_`
+  at any position, so `/cgi-bin/login_cgi` and `/Admin_Login_Lock.txt`
+  registered as token logins. One modem was classified `url_token` when
+  it uses a plain form, and another was given a login page pointing at a
+  status file. The token must now follow the marker in the query string.
+  A login that sends its credential as both a bare query parameter and a
+  Basic header is recognized by that shape, which survives the capture
+  sanitizer replacing the credential itself.
+
+- **Auth failure logs no longer keep part of the password.** The 401/403
+  and auth-failure lines trim the modem's response body to a fixed length
+  before redacting the password, so a password falling across that
+  boundary left its leading characters behind. Redaction now covers the
+  whole body and the trim happens afterwards. This matters because these
+  are the log lines the integration asks you to share when reporting a
+  problem. Only firmware that echoes the submitted password back in an
+  error page was affected.
+
 ## [3.14.0-beta.18] - 2026-08-03
 
 ### Added

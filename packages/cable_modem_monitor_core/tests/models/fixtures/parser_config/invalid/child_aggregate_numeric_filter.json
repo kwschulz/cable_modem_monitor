@@ -1,0 +1,23 @@
+{
+  "_expected_error": "must be a string",
+  "_config": {
+    "system_info": {
+      "sources": [
+        {
+          "format": "json",
+          "resource": "/api/flows",
+          "fields": [],
+          "child_aggregates": [
+            {
+              "array_path": "flows",
+              "filter": {"chan": {"not": 0}},
+              "max": "rate",
+              "field": "provisioned_speed_down",
+              "type": "integer"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

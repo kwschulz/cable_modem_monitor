@@ -152,7 +152,9 @@ class ModemSnapshot:
 
     Attributes:
         connection_status: Derived from collector signal and data.
-        docsis_status: Derived from downstream lock_status fields.
+        docsis_status: Read from system_info["docsis_status"] (parser-
+            provided or orchestrator-enriched from lock_status fields).
+            Falls back to "unknown" when the field is absent.
         modem_data: Parsed channel and system_info data. None on
             collection failure. Channel counts and aggregate fields
             (e.g., total_corrected) are computed by the parser
@@ -176,7 +178,7 @@ class ModemSnapshot:
     stats_last_reset: datetime | None = None
 
     def to_event_payload(self) -> SnapshotEventPayload:
-        """Build the HA event bus payload from this snapshot."""
+        """Build the consumer event payload from this snapshot."""
         from .event_payload import (
             SCHEMA_VERSION,
             HealthInfoPayload,

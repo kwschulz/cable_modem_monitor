@@ -22,6 +22,7 @@ from solentlabs.cable_modem_monitor_catalog_tools.analysis.format.hnap import (
     _detect_field_delimiter,
     _detect_filter,
     _detect_record_delimiter,
+    _detect_system_info_source,
     _direction_from_response_key,
     _infer_field_mappings,
     _is_row_counter,
@@ -31,6 +32,7 @@ from solentlabs.cable_modem_monitor_catalog_tools.analysis.format.hnap import (
     _resolve_large_integers,
     detect_hnap_sections,
 )
+from solentlabs.cable_modem_monitor_catalog_tools.analysis.mapping.field_shape import FieldShapeVocabulary
 from tests._helpers import collect_fixtures, load_fixture
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "format_hnap"
@@ -583,3 +585,56 @@ def test_detect_channel_data_edge(
     """_detect_channel_data returns None for edge-case inputs."""
     result = _detect_channel_data("GetTestResponse", response_data)
     assert result is expected
+
+
+# =====================================================================
+# system_info field shape - table-driven
+# =====================================================================
+#
+# HNAP detection lives apart from the html_fields and json detectors, so
+# these assert it applies the same normalization rather than emitting
+# passthrough strings.
+
+VOCABULARY = FieldShapeVocabulary(
+    uptime_formats=["{days} days {hours}h:{minutes}m:{seconds}s"],
+    docsis_status_success_values=frozenset({"allowed", "connected"}),
+)
+
+# fmt: off
+SHAPE_CASES = [
+    # (hnap key, raw value, expected field def, desc)
+    ("CustomerConnSystemUpTime", "17 days 00h:51m:30s",
+     {"source": "CustomerConnSystemUpTime", "field": "system_uptime", "type": "uptime",
+      "format": "{days} days {hours}h:{minutes}m:{seconds}s"},
+     "uptime typed and formatted"),
+    ("CustomerConnNetworkAccess", "Allowed",
+     {"source": "CustomerConnNetworkAccess", "field": "docsis_status", "type": "string",
+      "map": {"Allowed": "Operational"}},
+     "docsis_status mapped"),
+    ("InternetConnection", "Ranging",
+     {"source": "InternetConnection", "field": "docsis_status", "type": "string"},
+     "fault state passes through"),
+    ("FirmwareVersion", "2.0.1",
+     {"source": "FirmwareVersion", "field": "software_version", "type": "string"},
+     "ordinary field unchanged"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize("key,value,expected,desc", SHAPE_CASES, ids=[c[3] for c in SHAPE_CASES])
+def test_system_info_field_shape(key: str, value: str, expected: dict[str, Any], desc: str) -> None:
+    """HNAP fields carry the same type, format, and map as the other detectors."""
+    source = _detect_system_info_source("GetDeviceInfoResponse", {key: value}, VOCABULARY)
+    assert source is not None, desc
+    assert source["fields"] == [expected], desc
+
+
+def test_uptime_without_a_matching_format_stays_a_string() -> None:
+    """An unparseable uptime must not ship a format that resolves nothing."""
+    source = _detect_system_info_source(
+        "GetDeviceInfoResponse",
+        {"CustomerConnSystemUpTime": "who knows"},
+        VOCABULARY,
+    )
+    assert source is not None
+    assert source["fields"] == [{"source": "CustomerConnSystemUpTime", "field": "system_uptime", "type": "string"}]

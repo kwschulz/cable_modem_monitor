@@ -23,7 +23,7 @@
 | [ORCHESTRATION_USE_CASES.md](ORCHESTRATION_USE_CASES.md) | 81 scenario-based use cases — normal ops, auth failures, connectivity, restart, health, lifecycle |
 | [RUNTIME_POLLING_SPEC.md](RUNTIME_POLLING_SPEC.md) | Poll cycle, session lifecycle, health pipeline, restart recovery |
 | [FIELD_REGISTRY.md](FIELD_REGISTRY.md) | Three-tier field naming authority |
-| [VERIFICATION_STATUS.md](VERIFICATION_STATUS.md) | Parser status enum and verification lifecycle |
+| [VERIFICATION_STATUS.md](VERIFICATION_STATUS.md) | Modem status enum and verification lifecycle |
 | [SNMP_RESEARCH.md](SNMP_RESEARCH.md) | SNMP on cable modems — research findings, deferred |
 
 Intake / onboarding pipeline specs live in the

@@ -706,7 +706,9 @@ endpoint, so showing a greyed-out reboot button would be misleading.
 
 Schema that defines modem.yaml structure. Pydantic models validate
 during development and CI — an HTTP modem declaring HNAP auth is
-rejected before it ships. Runtime loads into dataclasses.
+rejected before it ships. The same models are the runtime config:
+`load_modem_config()` returns a validated `ModemConfig`, with no
+separate runtime representation to keep in step.
 
 modem.yaml serves two purposes based on `status`:
 
@@ -717,31 +719,34 @@ modem.yaml serves two purposes based on `status`:
 
 #### Auth config is a discriminated union
 
-The `auth.strategy` field selects a **per-strategy dataclass**. Each
-strategy has its own config type with only the fields that strategy uses:
+The `auth.strategy` field is a **Pydantic discriminator**. Each strategy
+is its own model carrying only the fields that strategy uses:
 
 ```python
-@dataclass
-class FormAuthConfig:
+class FormAuth(AuthStrategyBase):
+    model_config = ConfigDict(extra="forbid")
+    strategy: Literal["form"]
     action: str
     username_field: str = "username"
-    password_field: str = "password"
-    encoding: str = "plain"
-    hidden_fields: dict = field(default_factory=dict)
+    password_field: list[str] = Field(default=["password"])
+    encoding: Literal["plain", "base64"] = "plain"
+    hidden_fields: dict[str, str] = Field(default_factory=dict)
     login_page: str = ""
     form_selector: str = ""
-    success_redirect: str = ""
-    success_indicator: str = ""
+    success: FormSuccess | None = None
 
-@dataclass
-class HnapAuthConfig:
-    hmac_algorithm: str   # "md5" or "sha256"
+class HnapAuth(AuthStrategyBase):
+    model_config = ConfigDict(extra="forbid")
+    strategy: Literal["hnap"]
+    hmac_algorithm: Literal["md5", "sha256"]
 ```
 
-`load_modem_config()` reads `auth.strategy`, selects the matching
-dataclass, and populates it from the YAML fields. The result is a
-typed config where invalid fields don't exist — a `FormAuthConfig`
-has no `hmac_algorithm`, an `HnapAuthConfig` has no `encoding`.
+`AuthConfig` unions all ten strategies under `Discriminator("strategy")`,
+so `load_modem_config()` parses straight into the matching model. The
+result is a typed config where invalid fields don't exist — a `FormAuth`
+has no `hmac_algorithm`, an `HnapAuth` has no `encoding` — and
+`extra="forbid"` rejects a field belonging to another strategy instead of
+silently ignoring it.
 
 **Strategies accept only their own config dataclass:**
 
@@ -753,10 +758,15 @@ class HnapAuthManager(BaseAuthManager):
     def __init__(self, config: HnapAuth): ...
 ```
 
-No dict intermediary, no generic `AuthConfig` bag of optional fields,
-no `SessionConfig` — session state is handled by the runner after auth
-completes. The dataclass IS the runtime config — the strategy accepts
-exactly the type the loader produces.
+No dict intermediary, no bag of optional fields shared across
+strategies, no `SessionConfig` — session state is handled by the runner
+after auth completes. The model IS the runtime config — the strategy
+accepts exactly the type the loader produces.
+
+Each model also carries `display_name`, `transport` and `stateless`
+ClassVars, so the transport/auth constraint tables in this document and
+in MODEM_YAML_SPEC.md are generated from `get_auth_strategy_rows()`
+rather than hand-maintained.
 
 ---
 
@@ -1461,7 +1471,7 @@ levels; Core only emits log records.
 | `ORCHESTRATION_USE_CASES.md` | Scenario-based use cases — normal ops, auth failures, connectivity, restart, health, lifecycle |
 | `RUNTIME_POLLING_SPEC.md` | Poll cycle, session lifecycle, health pipeline, restart recovery |
 | `FIELD_REGISTRY.md` | Three-tier field naming authority |
-| `VERIFICATION_STATUS.md` | Parser status lifecycle |
+| `VERIFICATION_STATUS.md` | Modem status lifecycle |
 <!-- Cross-package links: these relative paths work in the monorepo but
      will need updating if packages are published separately to PyPI. -->
 | `../../cable_modem_monitor_catalog_tools/docs/ONBOARDING_SPEC.md` | Catalog Tools modem onboarding workflow |

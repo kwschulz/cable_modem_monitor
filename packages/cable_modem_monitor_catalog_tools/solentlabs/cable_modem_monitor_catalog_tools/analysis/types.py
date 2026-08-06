@@ -61,6 +61,13 @@ class FleetPatterns:
         hnap_response_layouts: HNAP response key mapped to the
             committed field layout (positions, types). First occurrence
             per response key wins.
+        uptime_formats: ``format`` strings observed on the fleet's
+            ``type: uptime`` fields, longest first. Candidates for
+            matching a newly observed raw uptime value.
+        docsis_status_success_values: Lowercased raw spellings the fleet
+            maps to the canonical ``"Operational"``. Error and
+            in-progress states are deliberately excluded, per
+            SYSTEM_INFO_SPEC Diagnostic Pass-Through.
     """
 
     selector_directions: dict[str, str] = field(default_factory=dict)
@@ -72,6 +79,8 @@ class FleetPatterns:
     aggregate_fields: list[tuple[str, str]] = field(default_factory=list)
     js_function_layouts: dict[str, dict[str, Any]] = field(default_factory=dict)
     hnap_response_layouts: dict[str, dict[str, Any]] = field(default_factory=dict)
+    uptime_formats: list[str] = field(default_factory=list)
+    docsis_status_success_values: set[str] = field(default_factory=set)
 
 
 # -----------------------------------------------------------------------

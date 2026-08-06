@@ -165,6 +165,10 @@ system_info:
     - format: json
       resource: "/rest/v1/system/info"
       fields:
+        - key: "modelName"
+          field: model_name
+          type: string
+          path: "info"
         - key: "hardwareVersion"
           field: hardware_version
           type: string
@@ -173,6 +177,39 @@ system_info:
           field: software_version
           type: string
           path: "info"
+    # Service flows carry the provisioned tier. Values are raw bit/s and
+    # bytes; storage stays base SI and the HA layer picks the display
+    # unit. This firmware already spells direction as the canonical
+    # DOCS-IF3-MIB words, so no map is needed. Multiple flows per
+    # direction are possible, hence max rather than positional lookup.
+    - format: json
+      resource: "/rest/v1/cablemodem/serviceflows"
+      fields: []
+      child_aggregates:
+        - array_path: serviceFlows
+          item_path: serviceFlow
+          filter: { direction: downstream }
+          max: maxTrafficRate
+          field: provisioned_speed_down
+          type: integer
+        - array_path: serviceFlows
+          item_path: serviceFlow
+          filter: { direction: upstream }
+          max: maxTrafficRate
+          field: provisioned_speed_up
+          type: integer
+        - array_path: serviceFlows
+          item_path: serviceFlow
+          filter: { direction: downstream }
+          max: maxTrafficBurst
+          field: provisioned_burst_down
+          type: integer
+        - array_path: serviceFlows
+          item_path: serviceFlow
+          filter: { direction: upstream }
+          max: maxTrafficBurst
+          field: provisioned_burst_up
+          type: integer
 
 # DOCSIS 3.1: aggregate QAM-only totals. OFDM LDPC codewords operate
 # at a vastly different scale and are not aggregated.

@@ -1,0 +1,24 @@
+{
+  "_expected_error": "must be a string",
+  "_config": {
+    "system_info": {
+      "sources": [
+        {
+          "format": "xml",
+          "resource": "144",
+          "root_element": "cmstatus",
+          "fields": [],
+          "child_aggregates": [
+            {
+              "child_element": "serviceflow",
+              "filter": {"state": {"not": 0}},
+              "max": "rate",
+              "field": "provisioned_speed_down",
+              "type": "integer"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

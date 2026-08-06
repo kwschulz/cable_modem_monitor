@@ -58,11 +58,12 @@ notes: |
   Captured in bridge mode. 32 SC-QAM downstream + 2 OFDM, 4 ATDMA
   upstream + 2 OFDMA.
 
-  Auth is declared for /rest/v1/system/info, which supplies
+  Auth is declared for /rest/v1/system/info, which supplies model_name,
   hardware_version and software_version and is the one parser resource
-  the capture shows requiring a Bearer token. The three
-  /rest/v1/cablemodem/ resources (state_, downstream, upstream) were
-  served unauthenticated in the capture, as on the sibling VMB entry.
+  the capture shows requiring a Bearer token. The four
+  /rest/v1/cablemodem/ resources (state_, downstream, upstream,
+  serviceflows) were served unauthenticated in the capture, as on the
+  sibling VMB entry.
 
   The firmware ends a session with
   DELETE /rest/v1/user/{userId}/token/{token}, both values coming from

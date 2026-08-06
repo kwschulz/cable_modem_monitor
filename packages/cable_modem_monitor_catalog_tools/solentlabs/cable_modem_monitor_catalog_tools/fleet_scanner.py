@@ -52,6 +52,8 @@ def scan_fleet(catalog_path: Path) -> FleetPatterns:
     seen_aggregates: set[tuple[str, str]] = set()
     js_function_layouts: dict[str, dict[str, Any]] = {}
     hnap_response_layouts: dict[str, dict[str, Any]] = {}
+    uptime_formats: set[str] = set()
+    docsis_status_values: set[str] = set()
 
     for parser_path in sorted(catalog_path.rglob("parser.yaml")):
         try:
@@ -71,6 +73,8 @@ def scan_fleet(catalog_path: Path) -> FleetPatterns:
         _extract_aggregates(data, aggregate_fields, seen_aggregates)
         _extract_js_function_layouts(data, js_function_layouts)
         _extract_hnap_response_layouts(data, hnap_response_layouts)
+        _extract_uptime_formats(data, uptime_formats)
+        _extract_docsis_status_values(data, docsis_status_values)
 
     return FleetPatterns(
         selector_directions=selector_directions,
@@ -82,6 +86,10 @@ def scan_fleet(catalog_path: Path) -> FleetPatterns:
         aggregate_fields=aggregate_fields,
         js_function_layouts=js_function_layouts,
         hnap_response_layouts=hnap_response_layouts,
+        # Longest first: a more specific pattern must be tried before a
+        # shorter one that would also match a prefix of the same value.
+        uptime_formats=sorted(uptime_formats, key=lambda f: (-len(f), f)),
+        docsis_status_success_values=docsis_status_values,
     )
 
 
@@ -219,6 +227,40 @@ def _extract_system_info_labels(
                 result[normalized] = (field_name.strip(), 1)
 
 
+def _extract_uptime_formats(
+    data: dict[str, object],
+    result: set[str],
+) -> None:
+    """Collect ``format`` strings from the fleet's ``type: uptime`` fields."""
+    for field_def in _iter_system_info_fields(data):
+        if field_def.get("type") != "uptime":
+            continue
+        fmt = field_def.get("format")
+        if isinstance(fmt, str) and fmt.strip():
+            result.add(fmt.strip())
+
+
+def _extract_docsis_status_values(
+    data: dict[str, object],
+    result: set[str],
+) -> None:
+    """Collect raw docsis_status spellings the fleet maps to "Operational".
+
+    Only the canonical success target is harvested. Error and
+    in-progress mappings must not teach intake to flatten a real fault
+    into "Operational".
+    """
+    for field_def in _iter_system_info_fields(data):
+        if field_def.get("field") != "docsis_status":
+            continue
+        mapping = field_def.get("map")
+        if not isinstance(mapping, dict):
+            continue
+        for raw, canonical in mapping.items():
+            if isinstance(raw, str) and canonical == "Operational" and raw.strip():
+                result.add(raw.strip().lower())
+
+
 def _extract_system_info_ids(
     data: dict[str, object],
     result: dict[str, tuple[str, int]],
@@ -263,13 +305,19 @@ def _iter_system_info_fields(
     for source in sources:
         if not isinstance(source, dict):
             continue
-        source_fields = source.get("fields")
-        if not isinstance(source_fields, list):
-            continue
-        for field_def in source_fields:
-            if isinstance(field_def, dict):
-                fields.append(field_def)
+        fields.extend(_dict_items(source.get("fields")))
+        # javascript sources nest their fields one level deeper, under
+        # each function. Skipping them hides every field they declare.
+        for function in _dict_items(source.get("functions")):
+            fields.extend(_dict_items(function.get("fields")))
     return fields
+
+
+def _dict_items(value: object) -> list[dict[str, object]]:
+    """Return the dict entries of a list, or empty when it is not one."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
 # -----------------------------------------------------------------------

@@ -8,16 +8,15 @@ Per docs/ONBOARDING_SPEC.md Phase 5 (HTTP transport).
 
 from __future__ import annotations
 
-import base64
-import contextlib
 import json as json_mod
 import re
 from typing import Any
 
 from ...validation.har_utils import (
+    content_type_of,
+    decode_body,
     has_content,
     is_static_resource,
-    lower_headers,
     path_from_url,
 )
 from .html_parsing import detect_label_pairs, detect_tables
@@ -92,7 +91,7 @@ def identify_data_pages(
         if not has_content(resp):
             continue
 
-        content_type = _extract_content_type(resp)
+        content_type = content_type_of(resp)
         if not any(ct in content_type for ct in _DATA_CONTENT_TYPES):
             continue
 
@@ -131,8 +130,8 @@ def analyze_page(entry: dict[str, Any]) -> PageAnalysis:
     resp = entry.get("response", {})
     url = req.get("url", "")
     resource = path_from_url(url)
-    content_type = _extract_content_type(resp)
-    body = _decode_har_body(resp)
+    content_type = content_type_of(resp)
+    body = decode_body(resp)
 
     page = PageAnalysis(resource=resource, content_type=content_type)
 
@@ -265,20 +264,6 @@ def _detect_delimiter(raw_value: str) -> str:
 # -----------------------------------------------------------------------
 
 
-def _decode_har_body(resp: dict[str, Any]) -> str:
-    """Extract and decode response body from HAR content object.
-
-    Handles base64-encoded bodies (``content.encoding == "base64"``),
-    which some modems produce (e.g., dm1000).
-    """
-    content = resp.get("content", {})
-    body: str = content.get("text", "")
-    if content.get("encoding") == "base64" and body:
-        with contextlib.suppress(Exception):
-            body = base64.b64decode(body).decode("utf-8", errors="replace")
-    return body
-
-
 def _looks_like_json(content_type: str, body: str) -> bool:
     """Check if a response is JSON, even when Content-Type lies.
 
@@ -309,18 +294,3 @@ def _parse_json_body(body: str) -> dict[str, Any] | None:
         return None
     except (json_mod.JSONDecodeError, TypeError):
         return None
-
-
-# -----------------------------------------------------------------------
-# Content type extraction
-# -----------------------------------------------------------------------
-
-
-def _extract_content_type(resp: dict[str, Any]) -> str:
-    """Extract Content-Type from response, lowercase."""
-    resp_hdrs = lower_headers(resp)
-    ct = resp_hdrs.get("content-type", "")
-    # Also check content object
-    if not ct:
-        ct = resp.get("content", {}).get("mimeType", "")
-    return ct.lower().split(";")[0].strip()

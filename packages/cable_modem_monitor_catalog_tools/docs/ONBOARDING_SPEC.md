@@ -751,10 +751,39 @@ names/positions to canonical output fields.
 
 | Canonical field | Type | Common |
 |----------------|------|:------:|
-| `system_uptime` | string | yes |
+| `system_uptime` | uptime | yes |
 | `software_version` | string | yes |
 | `hardware_version` | string | yes |
 | `docsis_status` | string | sometimes |
+
+`docsis_status` is normalized through a `map`. It has one canonical
+value, `"Operational"`, which downstream consumers depend on, and
+vendors spell success many ways (`Allowed`, `Connected`, `operational`).
+Emit `map: {<observed spelling>: "Operational"}` when the observed value
+is a spelling the fleet has proven means operational, keeping the wire
+casing as the key.
+
+Map **only** success spellings. Per
+[SYSTEM_INFO_SPEC § Canonical values](../../cable_modem_monitor_core/docs/SYSTEM_INFO_SPEC.md#canonical-values),
+in-progress and error states (`Ranging`, `Scanning`, `Access Denied`)
+pass through as raw diagnostic strings so the status sensor shows what
+the modem actually reported.
+
+`system_uptime` is normalized, not passed through. It takes `type:
+uptime` plus a `format` naming the raw shape, per
+[PARSING_SPEC § Uptime Normalization](../../cable_modem_monitor_core/docs/PARSING_SPEC.md#uptime-normalization):
+`seconds` for a raw integer, otherwise a `{days}`/`{hours}`/`{minutes}`/
+`{seconds}` pattern. Pick the format by testing candidates against the
+value in the capture and keeping the one that parses; the fleet's
+committed formats are the candidate list. Emit `type: string` only when
+no candidate parses, since a format that matches nothing yields no value
+and no error.
+
+Both rules apply wherever the detector can see the field's value, which
+is the `html_fields`, `json`, and `hnap` sources. `javascript` sources
+are the exception: their values are positional, with no value bound to a
+field at detection time, so they still emit `type: string` and need the
+type and map filled in by hand.
 
 **System info (Tier 2 registered — see FIELD_REGISTRY):**
 
@@ -762,6 +791,10 @@ names/positions to canonical output fields.
 |-----------------|------|:------:|
 | `boot_status` | string | sometimes |
 | `docsis_version` | string | sometimes |
+| `provisioned_speed_down` | integer | service flow modems |
+| `provisioned_speed_up` | integer | service flow modems |
+| `provisioned_burst_down` | integer | service flow modems |
+| `provisioned_burst_up` | integer | service flow modems |
 
 System info fields are open-ended — extract whatever the modem provides,
 **except identity PII**: `serial_number` and `mac_address` are deliberately
@@ -837,6 +870,43 @@ section output for config generation.
 - `array_path` (dot-notation path to channel array)
 - JSON key names → canonical field names
 - `fallback_key` if the modem uses non-standard key names
+
+For `system_info` fields, emit the container and the key **separately** —
+`path` for the dot-notation container, `key` for the leaf. Core navigates
+`path`, then looks `key` up literally inside it, so a nested field emitted
+as a single dotted key matches nothing and produces no value and no error.
+
+#### Service flow detection
+
+A service flow resource lists one entry per flow, each carrying the flow's
+direction and its provisioned maxima. These reduce to `system_info` fields
+through `child_aggregates` (SYSTEM_INFO_SPEC), one per (metric, direction)
+pair actually observed:
+
+| Emitted key | Source |
+|-------------|--------|
+| `array_path` | Dot-notation path to the flow array |
+| `item_path` | Uniform single-key wrapper object, when each entry nests one |
+| `filter` | The direction key, set to a canonical direction word |
+| `map` | Wire spellings of the filter key, when they are not the canonical words |
+| `max` | The provisioned-maximum key, in its observed casing |
+| `field` | `provisioned_{speed,burst}_{down,up}` |
+
+Three constraints bind what may be emitted:
+
+1. **Filter values are strings.** Core normalizes these rules to text
+   before comparing, so a numeric rule reads correctly and matches
+   nothing. Core rejects one at config load.
+2. **Direction filters use the canonical words** `downstream` and
+   `upstream`. When firmware spells direction differently, normalize it in
+   the aggregate's `map`, never in Core. An unrecognized spelling is
+   skipped rather than guessed. **Casing counts:** Core compares filter
+   rules byte for byte, so a wire value of `Downstream` against a
+   `downstream` rule matches no items and yields no value without
+   erroring. Any spelling that is not already the canonical word needs a
+   `map` entry, capitalization included.
+3. **Provisioned values carry no scale** — raw bit/s and bytes. The
+   display unit is the consumer's choice.
 
 #### Table-to-section association
 
@@ -1014,6 +1084,76 @@ detected parameters for maintainer review.
 
 **HNAP:** Skipped. HNAP uses SOAP-over-HTTP; query parameters are
 not part of the session contract.
+
+### Post-Analysis: Unread Resources
+
+After request requirements, the pipeline lists the HAR's 2xx JSON
+endpoints that no part of the generated config reads, each reduced to
+its key skeleton. The result is `unread_resources` in the analysis
+output.
+
+**Why:** gap categories are endpoint-level and cover auth and actions
+only (see `analyze_har` below). A data endpoint the generator never maps
+produces no gap and no warning — intake writes a `parser.yaml` that
+omits it and every gate stays green. Issue #185's HAR carried
+`/rest/v1/cablemodem/serviceflows` at 200 with four registered Tier-2
+fields on it, and nothing asked what had never been looked at.
+
+**Candidates:** responses with a 2xx status whose body parses as a JSON
+object or array. Non-2xx responses are excluded, as are CSS, JavaScript,
+font, and image content types. Candidates are keyed by path, not
+path-plus-query: a cache-busting nonce (the TG3442DE's per-request `_n`)
+would otherwise give every request its own identity and match no
+configured resource. Where one path answers more than once, the largest
+body wins, since it yields the fuller skeleton.
+
+**Subtraction.** An endpoint is read when it appears as:
+
+- any `resource` value anywhere in the analysis sections,
+- an auth endpoint (`login_endpoint`, `login_page`, `action`), or
+- an action `endpoint` or `pre_fetch_url`.
+
+Action endpoints containing `{...}` placeholders are resolved at runtime
+and never equal the captured path, so they match segment-wise with each
+placeholder as a wildcard. On HNAP transport the `/HNAP1/` endpoint
+carries every call, data and action alike, and is never reported.
+
+**Keys and types only, never values.** Keys are what make the judgment
+possible: an LLM recognizes `maxTrafficRate` as a provisioned rate where
+`856000000` on its own tells it nothing. Values are where MAC addresses,
+serial numbers and boot filenames live — the same #185 HAR answers
+`/rest/v1/system/gateway/provisioning` with a `macAddress` and fills its
+event log with `CM-MAC=` strings. Nested shape is preserved, and a
+heterogeneous array (QAM beside OFDM) merges to the union of its
+variants' keys, so a key only one variant carries still reaches the LLM:
+
+```json
+{
+  "path": "/rest/v1/cablemodem/eventlog",
+  "status": 200,
+  "content_type": "application/json",
+  "shape": { "eventlog": [{ "priority": "str", "time": "str", "message": "str" }] }
+}
+```
+
+Leaves are `str`, `int`, `float`, `bool`, `null`, or a `|`-joined union
+where an array's items disagree.
+
+**Not a gate.** Every HAR has unread endpoints, so a gate here would fail
+every intake. This rides alongside `warnings`: always present,
+informational, never failing. The pipeline does not classify what the
+endpoints contain and does not suggest mappings — producing the shape is
+the whole job, and the judgment belongs to the LLM reading it.
+
+**Where it is computed.** In `analyze_har`, not `generate_config`. The
+skeleton needs the HAR response bodies, which `generate_config` does not
+have — it receives only the analysis dict and metadata. The cost is that
+the subtraction is approximate: it uses what the analysis intends to map
+rather than what was emitted. The approximation runs one way only. Every
+resource in a generated `parser.yaml` comes from a sections `resource`;
+`generate_config` never invents one, it can only drop a section whose
+format it does not recognize. So the report can at worst omit a line, and
+can never call an endpoint unread that the config in fact reads.
 
 ### Phase 7: Metadata Enrichment
 
@@ -1276,7 +1416,8 @@ detection, format detection, and field mapping extraction.
           "format": "html_fields",
           "resource": "/info.html",
           "fields": [
-            { "label": "System Up Time", "field": "system_uptime", "type": "string" }
+            { "label": "System Up Time", "field": "system_uptime", "type": "uptime",
+              "format": "{days} days {hours}h:{minutes}m:{seconds}s" }
           ]
         }
       ]
@@ -1284,6 +1425,14 @@ detection, format detection, and field mapping extraction.
   },
   "warnings": [],
   "hard_stops": [],
+  "unread_resources": [
+    {
+      "path": "/rest/v1/cablemodem/eventlog",
+      "status": 200,
+      "content_type": "application/json",
+      "shape": { "eventlog": [{ "priority": "str", "time": "str", "message": "str" }] }
+    }
+  ],
   "core_gaps": [
     {
       "phase": "auth",
@@ -1320,6 +1469,11 @@ effort. Categories:
 
 Well-known modems with standard patterns produce zero core gaps.
 Novel modems produce gaps that require development before onboarding.
+
+**Unread resources** are the opposite kind of signal: the JSON endpoints
+the HAR captured that no gap category covers, because nothing read them.
+Always present, never a gate. See
+[Post-Analysis: Unread Resources](#post-analysis-unread-resources).
 
 ### `enrich_metadata`
 
@@ -1476,6 +1630,7 @@ edits.
 | Format detection (HNAP) | `analyze_har` | | |
 | Format detection (HTTP — ambiguous) | `analyze_har` returns candidates | Reads response bodies, picks format | |
 | Field mapping extraction | `analyze_har` | | |
+| Unread resources | `analyze_har` emits path + key skeleton | Judges whether any is worth mapping | |
 | Metadata inference + gap detection | `enrich_metadata` | Reviews inferred/missing | |
 | Metadata gaps (web search) | | Web search for missing fields | Verifies |
 | Config generation | `generate_config` | Provides enriched metadata | |
@@ -1855,7 +2010,8 @@ system_info:
       fields:
         - label: "System Up Time"
           field: system_uptime
-          type: string
+          type: uptime
+          format: "{days} days {hours}h:{minutes}m:{seconds}s"
 ```
 
 ### Example 2: HNAP modem
@@ -1940,7 +2096,8 @@ system_info:
     - format: hnap
       response_key: "GetCustomerStatusConnectionInfoResponse"
       fields:
-        - { source: CustomerConnSystemUpTime, field: system_uptime, type: string }
+        - { source: CustomerConnSystemUpTime, field: system_uptime, type: uptime,
+            format: "{days} days {hours}h:{minutes}m:{seconds}s" }
         - { source: StatusSoftwareModelName, field: model_name, type: string }
     - format: hnap
       response_key: "GetArrisDeviceStatusResponse"

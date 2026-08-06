@@ -24,10 +24,10 @@
         {
           "format": "hnap",
           "response_key": "GetDeviceInfoResponse",
-          "fields": {
-            "FirmwareVersion": "software_version",
-            "ModelName": "model_name"
-          }
+          "fields": [
+            {"source": "FirmwareVersion", "field": "software_version", "type": "string"},
+            {"source": "ModelName", "field": "model_name", "type": "string"}
+          ]
         }
       ]
     }

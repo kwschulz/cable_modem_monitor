@@ -20,7 +20,7 @@ from typing import Any
 from ..config_loader import load_modem_config
 from ..har import load_har_json
 from ..models.modem_config.config import ModemConfig
-from .discovery import _resolve_modem_config
+from .discovery import resolve_modem_config
 
 _logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ def load_server_from_modem_dir(
     har_path = _find_har(test_data_dir, har_name)
 
     # Resolve modem config using same logic as test discovery
-    modem_config_path = _resolve_modem_config(har_path.stem, modem_dir)
+    modem_config_path = resolve_modem_config(har_path.stem, modem_dir)
     if modem_config_path is None:
         raise FileNotFoundError(f"No modem config found for {har_path.name} in {modem_dir}")
 

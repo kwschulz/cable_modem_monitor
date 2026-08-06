@@ -100,24 +100,31 @@ system_info:
         - source: provisioning_st
           field: boot_status
           type: string
+      # This firmware spells direction with the DOCS-IF3-MIB IfDirection
+      # numeric codes; map lifts them to the canonical words so the
+      # filters read the way a swap would be visible.
       child_aggregates:
         - child_element: serviceflow
-          filter: { direction: "1" }
+          filter: { direction: downstream }
+          map: { "1": downstream, "2": upstream }
           max: pMaxTrafficRate
           field: provisioned_speed_down
           type: integer
         - child_element: serviceflow
-          filter: { direction: "2" }
+          filter: { direction: upstream }
+          map: { "1": downstream, "2": upstream }
           max: pMaxTrafficRate
           field: provisioned_speed_up
           type: integer
         - child_element: serviceflow
-          filter: { direction: "1" }
+          filter: { direction: downstream }
+          map: { "1": downstream, "2": upstream }
           max: pMaxTrafficBurst
           field: provisioned_burst_down
           type: integer
         - child_element: serviceflow
-          filter: { direction: "2" }
+          filter: { direction: upstream }
+          map: { "1": downstream, "2": upstream }
           max: pMaxTrafficBurst
           field: provisioned_burst_up
           type: integer

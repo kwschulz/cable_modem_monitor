@@ -42,14 +42,14 @@ class JSVarsParser(BaseParser):
         # PARSING_SPEC § Field Outcomes.
         self.failed_fields: dict[str, str] = {}
 
-    def parse(self, resources: dict[str, Any]) -> dict[str, str]:
+    def parse(self, resources: dict[str, Any]) -> dict[str, Any]:
         """Extract fields from JS variable assignments.
 
         Args:
             resources: Resource dict (path -> BeautifulSoup).
 
         Returns:
-            Dict of field names to string values.
+            Dict of field names to typed values.
         """
         soup = resources.get(self._config.resource)
         if soup is None:
@@ -59,7 +59,7 @@ class JSVarsParser(BaseParser):
         # Build lookup: JS variable name -> field mapping
         var_to_mapping = {f.source: f for f in self._config.fields}
 
-        result: dict[str, str] = {}
+        result: dict[str, Any] = {}
         self.failed_fields = {}
         for script in soup.find_all("script"):
             text = script.string
@@ -78,7 +78,7 @@ class JSVarsParser(BaseParser):
                         scale=field_def.scale,
                     )
                     if converted is not None:
-                        result[field_def.field] = str(converted)
+                        result[field_def.field] = converted
                     elif raw_value:
                         record_failed_field(self.failed_fields, field_def.field, raw_value)
 

@@ -21,7 +21,7 @@ import asyncio
 import functools
 import logging
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, NamedTuple
 
 from homeassistant.components.sensor import (
     RestoreSensor,
@@ -139,6 +139,7 @@ _M = SensorStateClass.MEASUREMENT
 _TI = SensorStateClass.TOTAL_INCREASING
 _FREQ = SensorDeviceClass.FREQUENCY
 _DSIZE = SensorDeviceClass.DATA_SIZE
+_DRATE = SensorDeviceClass.DATA_RATE
 
 # Each tuple: (field, name_suffix, unit, device_class, state_class, icon, value_type)
 # fmt: off
@@ -172,13 +173,25 @@ _LAN_METRICS = [
 _DS_ALWAYS_FIELDS = frozenset(("power", "snr"))
 _US_ALWAYS_FIELDS = frozenset(("power",))
 
+
+class _FieldUnitMeta(NamedTuple):
+    """HA unit metadata for a continuous system_info field."""
+
+    native_unit: str
+    device_class: SensorDeviceClass | None
+    state_class: SensorStateClass | None
+    suggested_unit: str | None = None
+
+
 # Units and device classes for dynamic system_info fields.
 # Fields not listed here display as unitless strings.
-_SYSTEM_INFO_FIELD_UNITS: dict[str, tuple[str, SensorDeviceClass | None, SensorStateClass | None]] = {
-    "provisioned_speed_down": ("bit/s", SensorDeviceClass.DATA_RATE, SensorStateClass.MEASUREMENT),
-    "provisioned_speed_up": ("bit/s", SensorDeviceClass.DATA_RATE, SensorStateClass.MEASUREMENT),
-    "provisioned_burst_down": ("B", SensorDeviceClass.DATA_SIZE, SensorStateClass.MEASUREMENT),
-    "provisioned_burst_up": ("B", SensorDeviceClass.DATA_SIZE, SensorStateClass.MEASUREMENT),
+_SYSTEM_INFO_FIELD_UNITS: dict[str, _FieldUnitMeta] = {
+    # HA applies no default scaling to DATA_RATE, so the raw bit/s these
+    # store renders as "110100480 bit/s" without a suggested unit.
+    "provisioned_speed_down": _FieldUnitMeta("bit/s", _DRATE, _M, suggested_unit="Mbit/s"),
+    "provisioned_speed_up": _FieldUnitMeta("bit/s", _DRATE, _M, suggested_unit="Mbit/s"),
+    "provisioned_burst_down": _FieldUnitMeta("B", _DSIZE, _M),
+    "provisioned_burst_up": _FieldUnitMeta("B", _DSIZE, _M),
 }
 
 # Abbreviations uppercased in humanized field names.
@@ -679,9 +692,10 @@ class SystemInfoFieldSensor(_HoldsLastValueMixin, _SystemInfoSensor):
         unit_meta = _SYSTEM_INFO_FIELD_UNITS.get(field)
         self._continuous = unit_meta is not None
         if unit_meta is not None:
-            self._attr_native_unit_of_measurement = unit_meta[0]
-            self._attr_device_class = unit_meta[1]
-            self._attr_state_class = unit_meta[2]
+            self._attr_native_unit_of_measurement = unit_meta.native_unit
+            self._attr_device_class = unit_meta.device_class
+            self._attr_state_class = unit_meta.state_class
+            self._attr_suggested_unit_of_measurement = unit_meta.suggested_unit
 
     @property
     def available(self) -> bool:

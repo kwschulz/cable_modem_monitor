@@ -141,7 +141,7 @@ def _build_test_case(
     golden_path = har_path.with_suffix("").with_suffix(".expected.json")
 
     # Config resolution per MODEM_DIRECTORY_SPEC
-    modem_config_path = _resolve_modem_config(stem, modem_dir)
+    modem_config_path = resolve_modem_config(stem, modem_dir)
     if modem_config_path is None:
         _logger.debug(
             "Skipping %s: no modem config resolved",
@@ -260,7 +260,7 @@ def _discover_restart_from_modem_dir(
     )
 
 
-def _resolve_modem_config(stem: str, modem_dir: Path) -> Path | None:
+def resolve_modem_config(stem: str, modem_dir: Path) -> Path | None:
     """Resolve the modem config path for a HAR file stem.
 
     Resolution order (most specific wins):

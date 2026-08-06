@@ -1,0 +1,33 @@
+{
+  "_description": "Child aggregate map normalizes wire direction codes before the filter compares them",
+  "_xml": "<root><docsis_info><serviceflow><direction>1</direction><rate>100</rate></serviceflow><serviceflow><direction>1</direction><rate>500</rate></serviceflow><serviceflow><direction>2</direction><rate>80</rate></serviceflow></docsis_info></root>",
+  "_resource": "2",
+  "_config": {
+    "format": "xml",
+    "resource": "2",
+    "root_element": "docsis_info",
+    "fields": [],
+    "child_aggregates": [
+      {
+        "child_element": "serviceflow",
+        "filter": {"direction": "downstream"},
+        "map": {"1": "downstream", "2": "upstream"},
+        "max": "rate",
+        "field": "provisioned_speed_down",
+        "type": "integer"
+      },
+      {
+        "child_element": "serviceflow",
+        "filter": {"direction": "upstream"},
+        "map": {"1": "downstream", "2": "upstream"},
+        "max": "rate",
+        "field": "provisioned_speed_up",
+        "type": "integer"
+      }
+    ]
+  },
+  "_expected": {
+    "provisioned_speed_down": 500,
+    "provisioned_speed_up": 80
+  }
+}

@@ -682,30 +682,48 @@ def test_humanize_field_name(field, expected, desc):
 # SystemInfoFieldSensor — Tier 3 dynamic pass-through
 # -----------------------------------------------------------------------
 
-# ┌──────────────────────────┬───────────────────────┬─────────────────┬──────────┬──────────────┬──────────────┐
-# │ id                       │ field                 │ value           │ expected │ unit         │ device_class │
-# ├──────────────────────────┼───────────────────────┼─────────────────┼──────────┼──────────────┼──────────────┤
-# │ string_value             │ ds_scanning_status    │ "success"       │ success  │ None         │ None         │
-# │ numeric_value            │ temperature           │ 42.5            │ 42.5     │ None         │ None         │
-# │ missing_field            │ nonexistent           │ (absent)        │ None     │ None         │ None         │
-# │ provisioned_speed_down   │ provisioned_speed_down│ 110100480       │ 110…480  │ bit/s        │ DATA_RATE    │
-# │ provisioned_burst_down   │ provisioned_burst_down│ 412876          │ 412876   │ B            │ DATA_SIZE    │
-# └──────────────────────────┴───────────────────────┴─────────────────┴──────────┴──────────────┴──────────────┘
+# ┌────────────────────────┬────────────────────────┬───────────┬──────────┬───────┬────────────┬───────────┐
+# │ id                     │ field                  │ value     │ expected │ unit  │ device_cls │ suggested │
+# ├────────────────────────┼────────────────────────┼───────────┼──────────┼───────┼────────────┼───────────┤
+# │ string_value           │ ds_scanning_status     │ "success" │ success  │ None  │ None       │ None      │
+# │ numeric_value          │ temperature            │ 42.5      │ 42.5     │ None  │ None       │ None      │
+# │ missing_field          │ nonexistent            │ (absent)  │ None     │ None  │ None       │ None      │
+# │ speed_down             │ provisioned_speed_down │ 110100480 │ 110…480  │ bit/s │ DATA_RATE  │ Mbit/s    │
+# │ burst_down             │ provisioned_burst_down │ 412876    │ 412876   │ B     │ DATA_SIZE  │ None      │
+# └────────────────────────┴────────────────────────┴───────────┴──────────┴───────┴────────────┴───────────┘
+# Native unit stays bit/s: that is what Core stores. The suggested unit is
+# display only, applied by HA at first entity registration.
 
 _DATA_RATE = SensorDeviceClass.DATA_RATE
 _DATA_SIZE = SensorDeviceClass.DATA_SIZE
 
 _SYSINFO_FIELD_CASES = [
-    ("string_value", "ds_scanning_status", {"ds_scanning_status": "success"}, "success", None, None),
-    ("numeric_value", "temperature", {"temperature": 42.5}, 42.5, None, None),
-    ("missing_field", "nonexistent", {}, None, None, None),
-    ("speed_down", "provisioned_speed_down", {"provisioned_speed_down": 110100480}, 110100480, "bit/s", _DATA_RATE),
-    ("burst_down", "provisioned_burst_down", {"provisioned_burst_down": 412876}, 412876, "B", _DATA_SIZE),
+    ("string_value", "ds_scanning_status", {"ds_scanning_status": "success"}, "success", None, None, None),
+    ("numeric_value", "temperature", {"temperature": 42.5}, 42.5, None, None, None),
+    ("missing_field", "nonexistent", {}, None, None, None, None),
+    (
+        "speed_down",
+        "provisioned_speed_down",
+        {"provisioned_speed_down": 110100480},
+        110100480,
+        "bit/s",
+        _DATA_RATE,
+        "Mbit/s",
+    ),
+    ("burst_down", "provisioned_burst_down", {"provisioned_burst_down": 412876}, 412876, "B", _DATA_SIZE, None),
 ]
 
 
 @pytest.mark.parametrize(
-    ("case_id", "field", "system_info", "expected_value", "expected_unit", "expected_device_class"),
+    (
+        "case_id",
+        "field",
+        "system_info",
+        "expected_value",
+        "expected_unit",
+        "expected_device_class",
+        "expected_suggested_unit",
+    ),
     _SYSINFO_FIELD_CASES,
     ids=[c[0] for c in _SYSINFO_FIELD_CASES],
 )
@@ -717,6 +735,7 @@ def test_system_info_field_sensor(
     expected_value,
     expected_unit,
     expected_device_class,
+    expected_suggested_unit,
 ):
     """SystemInfoFieldSensor reads value and applies unit metadata when present."""
     modem_data: dict[str, Any] = {
@@ -733,6 +752,7 @@ def test_system_info_field_sensor(
     assert sensor.native_value == expected_value
     assert getattr(sensor, "_attr_native_unit_of_measurement", None) == expected_unit
     assert getattr(sensor, "_attr_device_class", None) == expected_device_class
+    assert getattr(sensor, "_attr_suggested_unit_of_measurement", None) == expected_suggested_unit
 
 
 # -----------------------------------------------------------------------

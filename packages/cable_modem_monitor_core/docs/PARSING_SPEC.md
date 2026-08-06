@@ -594,6 +594,10 @@ expose values like `channel_width`, `active_subcarriers`,
 `temperature`, or `fft_type` without modifying Core or the
 `BaseParser` implementations.
 
+system_info values carry their declared `type` — an `integer` field
+reaches consumers as an `int`, not a stringified one. Parsers return
+what `convert_value` produced; they do not re-stringify it.
+
 The orchestrator tracks the `system_info` field set between polls and
 logs a WARNING (`system_info fields changed`) when fields appear or
 disappear. This surfaces firmware-induced selector failures (e.g., a
@@ -1324,7 +1328,7 @@ mappings that produce the inputs.
 |-------|------|--------------|
 | parser.yaml load | Read + parse one YAML file | Once at startup |
 | `BaseParser` instantiation | In-memory, no I/O | Once at startup |
-| `parse_resources()` | CPU-bound HTML/JSON parsing | Per poll cycle |
+| `ModemParserCoordinator.parse()` | CPU-bound HTML/JSON parsing | Per poll cycle |
 | Field extraction | String splits, type casts | O(channels × fields) |
 
 Parsing is CPU-bound and fast (< 100ms for the largest modems with 32+

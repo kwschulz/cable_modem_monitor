@@ -1,0 +1,40 @@
+{
+  "_description": "Child aggregate unwraps item_path, filters by direction and returns max rate per direction",
+  "_json": {
+    "serviceFlows": [
+      {"serviceFlow": {"direction": "downstream", "maxTrafficRate": 100, "maxTrafficBurst": 42600}},
+      {"serviceFlow": {"direction": "downstream", "maxTrafficRate": 856, "maxTrafficBurst": 42600}},
+      {"serviceFlow": {"direction": "downstream", "maxTrafficRate": 250, "maxTrafficBurst": 42600}},
+      {"serviceFlow": {"direction": "upstream", "maxTrafficRate": 50, "maxTrafficBurst": 42600}},
+      {"serviceFlow": {"direction": "upstream", "maxTrafficRate": 74, "maxTrafficBurst": 42600}}
+    ]
+  },
+  "_resource": "/api/serviceflows",
+  "_config": {
+    "format": "json",
+    "resource": "/api/serviceflows",
+    "fields": [],
+    "child_aggregates": [
+      {
+        "array_path": "serviceFlows",
+        "item_path": "serviceFlow",
+        "filter": {"direction": "downstream"},
+        "max": "maxTrafficRate",
+        "field": "provisioned_speed_down",
+        "type": "integer"
+      },
+      {
+        "array_path": "serviceFlows",
+        "item_path": "serviceFlow",
+        "filter": {"direction": "upstream"},
+        "max": "maxTrafficRate",
+        "field": "provisioned_speed_up",
+        "type": "integer"
+      }
+    ]
+  },
+  "_expected": {
+    "provisioned_speed_down": 856,
+    "provisioned_speed_up": 74
+  }
+}

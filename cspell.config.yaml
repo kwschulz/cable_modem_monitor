@@ -105,6 +105,7 @@ words:
   - scdma
   - scqam
   - serviceflow
+  - serviceflows
   - SNMP
   - Snmp
   - SOAP
@@ -339,8 +340,10 @@ words:
   - cooloff
   - Cooloff
   - COOLOFF
+  - deadband
   - disambiguator
   - dogfood
+  - DRATE
   - EOFCONFIG
   - goldens
   - hars
@@ -370,6 +373,8 @@ words:
   - unschedules
   - unsub
   - unsuffixed
+  - upgrader
+  - upgraders
   - uppercased
   - uppercasing
   - webservers

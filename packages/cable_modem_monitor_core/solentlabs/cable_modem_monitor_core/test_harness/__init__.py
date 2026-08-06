@@ -24,7 +24,13 @@ Public API for Catalog's pytest integration::
 
 from __future__ import annotations
 
-from .discovery import ModemTestCase, RestartTestCase, discover_modem_tests, discover_restart_tests
+from .discovery import (
+    ModemTestCase,
+    RestartTestCase,
+    discover_modem_tests,
+    discover_restart_tests,
+    resolve_modem_config,
+)
 from .golden_file import ComparisonResult, compare_golden_file
 from .loader import ServerConfig, load_server_from_modem_dir
 from .runner import ActionTestResult, TestResult, run_modem_restart_test, run_modem_test, run_modem_test_orchestrated
@@ -42,6 +48,7 @@ __all__ = [
     "discover_modem_tests",
     "discover_restart_tests",
     "load_server_from_modem_dir",
+    "resolve_modem_config",
     "run_modem_restart_test",
     "run_modem_test",
     "run_modem_test_orchestrated",

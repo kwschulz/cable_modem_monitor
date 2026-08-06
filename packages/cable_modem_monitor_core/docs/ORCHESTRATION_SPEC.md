@@ -794,6 +794,10 @@ class ModemSnapshot:
         health_info: Health probe results. None if no health monitor.
         collector_signal: Raw signal from the collector (for diagnostics).
         error: Human-readable error summary.
+        stats_last_reset: Timestamp when error counters were detected
+            to have reset (decreased between polls). Used as a proxy
+            for last boot time when the modem lacks native uptime.
+            None until a reset is detected.
     """
 
     connection_status: ConnectionStatus
@@ -802,6 +806,10 @@ class ModemSnapshot:
     health_info: HealthInfo | None = None
     collector_signal: CollectorSignal = CollectorSignal.OK
     error: str = ""
+    stats_last_reset: datetime | None = None
+
+    def to_event_payload(self) -> SnapshotEventPayload:
+        """Build the consumer event payload from this snapshot."""
 
 
 @dataclass
@@ -990,11 +998,27 @@ class RestartResult:
     error: str = ""
 ```
 
+`to_event_payload()` projects a snapshot onto `SnapshotEventPayload`,
+the Pydantic contract in
+`cable_modem_monitor_core.orchestration.event_payload`. The HA
+integration fires it on every poll, success or failure, and
+subscribers validate with `model_validate()` rather than duck-typing
+the dict. Its `schema_version` field is set from the module constant
+`SCHEMA_VERSION`, so consumers can branch on breaking shape changes.
+`docsis_status` is lifted to the top level and stripped from
+`system_info` so it appears once. PII stripping is the consumer's
+responsibility — the full snapshot is fired. Event name and HA wiring
+are in
+[HA_ADAPTER_SPEC.md § Event Bus](../../../custom_components/cable_modem_monitor/docs/HA_ADAPTER_SPEC.md#event-bus).
+
 ### Collection Flow
 
 The `get_modem_data()` method runs the collector and derives status
-from the result. The orchestrator deals with signal policy and status
-derivation — no retry logic.
+from the result. The orchestrator owns signal policy and status
+derivation. It has exactly one retry: a single same-poll re-attempt on
+`LOAD_AUTH` or `LOAD_INTEGRITY`, both of which mean the current
+session cannot retrieve real data (UC-17, UC-18, UC-19a). No other
+signal is retried.
 
 ```python
 def get_modem_data(self) -> ModemSnapshot:
@@ -1016,18 +1040,31 @@ def get_modem_data(self) -> ModemSnapshot:
 
     result = self._collector.execute()
 
+    # One same-poll retry with a fresh session. A stale session or a
+    # stub page is smoothed over here rather than surfacing to the
+    # user and waiting for the next scheduled cycle. A recovered
+    # retry is recorded so repeated recoveries can disable session
+    # reuse for the runtime.
+    if not result.success and result.signal in (
+            CollectorSignal.LOAD_AUTH, CollectorSignal.LOAD_INTEGRITY):
+        self._collector.attempt_logout_before_retry()
+        self._collector.clear_session()
+        result = self._collector.execute()
+        if result.success:
+            self._policy.record_stale_session_recovery()
+
     if not result.success:
-        status = self._apply_signal_policy(result)
+        status = self._policy.apply(result)
         # Policy may ask the recovery module to enter a window
         # (e.g., connectivity backoff engaged).
         self._recovery.evaluate_failure(result)
         return ModemSnapshot(connection_status=status, ...)
 
     # Success — reset auth failure streak
-    self._auth_failure_streak = 0
+    self._policy.clear_streak()
 
-    status = self._derive_connection_status(result.modem_data)
-    self._enrich_docsis_status(result.modem_data)  # fills system_info if absent
+    status = derive_connection_status(result.modem_data, model=self._modem_config.model)
+    enrich_docsis_status(result.modem_data)  # fills system_info if absent
     docsis_status = (result.modem_data or {}).get("system_info", {}).get("docsis_status", "unknown")
 
     # Hand the snapshot to the recovery module. It runs the reboot-
@@ -1055,15 +1092,15 @@ If `system_info` is empty, the result is ambiguous (parser may not
 extract system_info, or may have matched nothing).
 
 ```python
-def _derive_connection_status(self, modem_data: ModemData) -> ConnectionStatus:
+def derive_connection_status(modem_data: dict[str, Any], model: str = "") -> ConnectionStatus:
     """Derive connection status from a successful collection.
 
     Called when result.success is True. Maps channel data and
     system_info to a ConnectionStatus value.
     """
     has_channels = (
-        len(modem_data["downstream"]) > 0
-        or len(modem_data["upstream"]) > 0
+        len(modem_data.get("downstream", [])) > 0
+        or len(modem_data.get("upstream", [])) > 0
     )
 
     if has_channels:
@@ -1082,21 +1119,18 @@ def _derive_connection_status(self, modem_data: ModemData) -> ConnectionStatus:
     # a parser mismatch where nothing matched at all. Default to
     # no_signal but log a diagnostic warning suggesting the user
     # verify their modem model configuration.
-    logger.warning(
-        "Zero channels and no system_info — cannot confirm parser "
-        "health. Verify modem model matches the configured parser."
-    )
+    log_event(logger, ZeroChannelsNoSystemInfo(model=model))
     return ConnectionStatus.NO_SIGNAL
 ```
 
 ### Signal → Policy Implementation
 
 ```python
-def _apply_signal_policy(self, result: ModemResult) -> ConnectionStatus:
+def apply(self, result: ModemResult) -> ConnectionStatus:  # SignalPolicy
     """Map a collector failure signal to connection status with side effects.
 
     Called only when result.success is False. Successful results go
-    through _derive_connection_status() instead.
+    through derive_connection_status() instead.
 
     Non-connectivity failures clear connectivity backoff — any response
     from the modem proves the network path works.
@@ -1108,13 +1142,23 @@ def _apply_signal_policy(self, result: ModemResult) -> ConnectionStatus:
 
     match result.signal:
         case CollectorSignal.AUTH_FAILED:
+            # Immediate — credentials rejected (401/403) or the login
+            # endpoint is absent (404, UC-87b). result.auth_status_code
+            # is retained so the breaker message can tell those apart.
             self._auth_failure_streak += 1
-            self._circuit_open = True  # immediate — credentials rejected
+            self._trip_circuit_breaker(status_code=result.auth_status_code)
             return ConnectionStatus.AUTH_FAILED
+
+        case CollectorSignal.AUTH_UNAVAILABLE:
+            # UC-87a. The modem answered "try later" (5xx); it did not
+            # judge the credential. No streak, no breaker, no session
+            # clear, at any repetition count — a threshold would only
+            # delay the wrong answer.
+            return ConnectionStatus.UNREACHABLE
 
         case CollectorSignal.AUTH_LOCKOUT:
             self._auth_failure_streak += 1
-            self._circuit_open = True  # immediate — firmware anti-brute-force
+            self._trip_circuit_breaker()  # immediate — firmware anti-brute-force
             return ConnectionStatus.AUTH_FAILED
 
         case CollectorSignal.CONNECTIVITY:
@@ -1128,21 +1172,32 @@ def _apply_signal_policy(self, result: ModemResult) -> ConnectionStatus:
         case CollectorSignal.LOAD_ERROR:
             return ConnectionStatus.UNREACHABLE
 
-        case CollectorSignal.LOAD_AUTH:
-            # Data page returned 401/403. Auth didn't grant data
-            # access — wrong strategy, stale session, or firmware
-            # quirk. Clear session so the next poll starts fresh.
-            # No retry: HA-triggered reboots are handled by restart(),
-            # config issues need user intervention.
+        case CollectorSignal.LOAD_AUTH | CollectorSignal.LOAD_INTEGRITY:
+            # Data page returned 401/403 (LOAD_AUTH) or a 200 stub
+            # (LOAD_INTEGRITY, UC-19a). Both mean auth didn't grant
+            # data access — wrong strategy, stale session, or firmware
+            # quirk. The orchestrator has already retried once in this
+            # poll (UC-17, UC-18, UC-19a); reaching here means the
+            # retry also failed. Clear the session so the next poll
+            # starts fresh, and trip only at threshold since a session
+            # issue may self-correct.
             self._auth_failure_streak += 1
             self._collector.clear_session()
-            if self._auth_failure_streak >= self.AUTH_FAILURE_THRESHOLD:
-                self._circuit_open = True
+            self._maybe_trip_circuit_breaker()  # trips at self._threshold
             return ConnectionStatus.AUTH_FAILED
 
         case CollectorSignal.PARSE_ERROR:
             return ConnectionStatus.PARSER_ISSUE
 ```
+
+Both signals get identical policy treatment, but stay distinct on the
+wire so logs read "stub response" or "credentials rejected" rather
+than one merged phrase. A successful same-poll retry never reaches this
+function; it is recorded as a stale-session recovery instead, which
+disables session reuse for the rest of the runtime once the streak
+threshold is met — see
+[RUNTIME_POLLING_SPEC.md § Session Lifecycle](RUNTIME_POLLING_SPEC.md#session-lifecycle)
+and UC-18.
 
 ### Auth Circuit Breaker
 
@@ -1151,20 +1206,26 @@ wrong credentials cause repeated login failures — on HNAP modems
 with `REBOOT` anti-brute-force, even a single extra attempt can
 cause a device restart.
 
-The circuit breaker has two trip modes:
+The circuit breaker has three trip modes:
 
-- **Immediate** (AUTH_FAILED, AUTH_LOCKOUT): The modem explicitly
-  rejected credentials. Retrying with the same password is pointless.
-  Circuit trips on the first occurrence. One attempt, stop.
-- **Threshold** (LOAD_AUTH): Session issue, not credential rejection.
-  Data page returned 401/403 after successful login. Self-corrects
-  when session is refreshed (UC-18). Circuit trips only after
-  `AUTH_FAILURE_THRESHOLD` (default: 6) consecutive failures.
+- **Immediate** — `_trip_circuit_breaker()` (AUTH_FAILED,
+  AUTH_LOCKOUT): The modem explicitly rejected credentials. Retrying
+  with the same password is pointless. Circuit trips on the first
+  occurrence. One attempt, stop.
+- **Threshold** — `_maybe_trip_circuit_breaker()` (LOAD_AUTH,
+  LOAD_INTEGRITY): Session issue, not credential rejection. Data page
+  returned 401/403, or a 200 stub (UC-19a), after successful login.
+  Self-corrects when the session is refreshed (UC-18). Circuit trips
+  only after `AUTH_FAILURE_THRESHOLD` (default: 6) consecutive
+  failures.
+- **Never** (AUTH_UNAVAILABLE): The modem declined to serve the login
+  rather than judging the credential (UC-87a). No streak, no trip, at
+  any repetition count.
 
 The streak counter resets to 0 on any successful collection.
 
 ```python
-AUTH_FAILURE_THRESHOLD: int = 6  # applies to LOAD_AUTH only
+AUTH_FAILURE_THRESHOLD: int = 6  # LOAD_AUTH and LOAD_INTEGRITY only
 ```
 
 **Recovery paths.** An open circuit blocks all polling indefinitely;
@@ -1286,15 +1347,13 @@ The orchestrator computes these after a successful collection:
 
 **Connection status** — from data interpretation (see above).
 
-**DOCSIS status** — from downstream channel `lock_status` fields:
-
-| Condition | Value |
-|-----------|-------|
-| All DS `lock_status == "locked"` AND upstream present | `operational` |
-| Some DS locked | `partial_lock` |
-| No DS locked | `not_locked` |
-| No DS channels (no signal) | `not_locked` |
-| No `lock_status` field on channels | `unknown` |
+**DOCSIS status** — enriched into `system_info` from downstream
+channel `lock_status` fields when the parser does not provide the
+field. The derivation table is in
+[RUNTIME_POLLING_SPEC.md § Status Derivation](RUNTIME_POLLING_SPEC.md#status-derivation),
+which owns it. Note that "cannot derive" leaves the field **absent**
+rather than writing a fallback value; `snapshot.docsis_status` then
+reads `unknown`.
 
 **Channel counts and aggregate `total_*` fields** are computed by the
 parser coordinator, not the orchestrator. By the time the orchestrator
@@ -2060,7 +2119,7 @@ While `recovery.active` is True:
 ### Exit
 
 The window runs to completion — it always lasts
-`_RECOVERY_WINDOW_SECONDS`. Early exit was considered and rejected:
+`Recovery.WINDOW_SECONDS`. Early exit was considered and rejected:
 it would re-introduce inference ("this snapshot looks operational,
 clear the window") and add no measurable benefit — a few extra fast
 polls at the tail of a window cost nothing.
@@ -2155,7 +2214,7 @@ stats-clear commands, clock drift, signal issues, etc.
 This is a threshold vote, not inference. No weights, no
 probabilities, no judgment. Even if all three match and the modem
 didn't actually reboot, the only consequence is polling faster for
-`_RECOVERY_WINDOW_SECONDS`. No UX fiction, no misleading labels,
+`Recovery.WINDOW_SECONDS`. No UX fiction, no misleading labels,
 no coordinator timeouts.
 
 Modems that don't expose the relevant fields simply don't trigger
