@@ -13,7 +13,6 @@ import posixpath
 from typing import Any
 
 from ...validation.har_utils import WARNING_PREFIX
-from ..mapping import extract_section_mappings
 from ..mapping.channel_detection import detect_channel_type_fixed
 from ..mapping.system_info import detect_system_info
 from ..types import FleetPatterns
@@ -30,6 +29,15 @@ from .table_analysis import (
     is_channel_table,
 )
 from .types import PageAnalysis
+
+# extract_section_mappings is imported inside the _assemble_* helpers
+# below, not here. format and mapping are mutually dependent packages:
+# mapping/__init__ pulls mapping.dispatcher, which pulls
+# format.table_analysis, which initializes this package. A module-level
+# "from ..mapping import ..." would run while mapping/__init__ is still
+# executing and the name is unbound, so importing any analysis.mapping
+# leaf module raises ImportError. Submodule imports above are safe;
+# only the from-package import has to be deferred.
 
 
 def detect_sections(
@@ -133,6 +141,8 @@ def _assemble_table_sections(
     fleet: FleetPatterns | None = None,
 ) -> None:
     """Assemble channel sections from HTML table pages."""
+    from ..mapping import extract_section_mappings
+
     for table in page.tables:
         # Only consider tables that contain channel data — skip
         # layout, navigation, and provisioning status tables.
@@ -187,6 +197,8 @@ def _assemble_js_sections(
     fleet layout exists for them — enabling DOCSIS 3.1 modems that expose
     separate QAM and OFDM functions to emit both in a single section.
     """
+    from ..mapping import extract_section_mappings
+
     for js_func in page.js_functions:
         # Infer direction from function name
         direction = _direction_from_js_name(js_func.name)
@@ -232,6 +244,7 @@ def _assemble_js_json_sections(
     or from the JSON key structure.
     """
     from ...validation.har_utils import WARNING_PREFIX
+    from ..mapping import extract_section_mappings
 
     for js_var in page.js_json_variables:
         # Wrap as dict so extract_section_mappings can find the array
@@ -277,6 +290,8 @@ def _assemble_json_sections(
     warnings: list[str],
 ) -> None:
     """Assemble channel sections from JSON API responses."""
+    from ..mapping import extract_section_mappings
+
     if page.json_data is None:
         return
 

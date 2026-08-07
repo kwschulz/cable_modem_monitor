@@ -205,8 +205,8 @@ session. Logout is handled by the collector via `actions.logout`
 config — the same pattern as HTTP and HNAP. The loader is
 responsible only for fetching data; the collector manages session
 lifecycle (authenticate → load → parse → logout). See
-`ORCHESTRATION_SPEC.md` § `_execute_logout_if_needed()`. Logout
-failure is logged but does not fail the collection cycle.
+`RUNTIME_POLLING_SPEC.md` § Session Lifecycle. Logout failure is
+logged but does not fail the collection cycle.
 
 **Error signals:** Same as HTTP — `ConnectionError`, `Timeout`,
 non-200 status codes. Additionally, malformed XML responses are

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, ClassVar, Literal, NamedTuple, get_args
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_validator, model_validator
 
 
 class AuthStrategyBase(BaseModel):
@@ -62,6 +62,17 @@ class FormSuccess(BaseModel):
     model_config = ConfigDict(extra="forbid")
     redirect: str = ""
     indicator: str = ""
+
+    @model_validator(mode="after")
+    def _require_a_criterion(self) -> FormSuccess:
+        # Both fields default to "", so a bare `success: {}` would validate
+        # and then check nothing, reading like verification while performing
+        # none. Declaring the block is what makes form auth report a later
+        # 401 as SESSION_REJECTED rather than a bad password, so an empty one
+        # would claim a verification that never ran.
+        if not self.redirect and not self.indicator:
+            raise ValueError("success must name at least one of 'redirect' or 'indicator'")
+        return self
 
 
 class FormAuth(AuthStrategyBase):

@@ -104,7 +104,12 @@ def _format(event: OrchestratorEvent) -> str:  # noqa: PLR0911, C901
     # --- auth ---
 
     if isinstance(event, AuthSucceeded):
-        return f"Auth succeeded [{event.model}] — strategy: {event.strategy}, status={event.status_code}"
+        msg = f"Auth succeeded [{event.model}] — strategy: {event.strategy}, status={event.status_code}"
+        # Only strategies that advertise a reuse page carry a landing path;
+        # rendering an empty one on every other strategy would read as a fault.
+        if event.response_url:
+            msg += f", landed: {event.response_url}"
+        return msg
 
     if isinstance(event, AuthFailed):
         if event.method is None:

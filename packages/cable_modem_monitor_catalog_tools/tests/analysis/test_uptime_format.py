@@ -8,10 +8,6 @@ the shape of the format string.
 from __future__ import annotations
 
 import pytest
-
-# analysis.format must initialize before analysis.mapping; importing a
-# mapping submodule first trips the packages' import cycle.
-from solentlabs.cable_modem_monitor_catalog_tools.analysis import format as _format  # noqa: F401
 from solentlabs.cable_modem_monitor_catalog_tools.analysis.mapping.uptime_format import (
     detect_uptime_format,
 )

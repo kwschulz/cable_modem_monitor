@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
+import pytest
 import requests
 from requests.cookies import RequestsCookieJar
 from solentlabs.cable_modem_monitor_core.auth.base import AuthFailureMode
+from solentlabs.cable_modem_monitor_core.orchestration.actions.base import ActionResult
 from solentlabs.cable_modem_monitor_core.orchestration.events import (
     AuthFailed,
     AuthSucceeded,
@@ -135,12 +137,14 @@ def test_session_reused_emitted_when_session_valid():
 # ---------------------------------------------------------------------------
 
 
-def test_auth_succeeded_emitted_on_successful_auth():
+def _fresh_login_collector(response_url: str = "/status.html"):
+    """Collector whose authenticate() always takes the fresh-login branch.
+
+    The cookie jar stays empty, so session_is_valid keeps returning False
+    and repeat calls re-authenticate instead of short-circuiting on reuse.
+    """
     collector = _make_collector()
-    # Force no valid session so authenticate() proceeds
     collector._auth_context = None
-    collector._modem_config.auth = None  # NoneAuth → session_is_valid = True initially
-    # But with NoneAuth we skip auth... let's use a form auth mock
     collector._modem_config.auth = MagicMock(strategy="form", cookie_name="sessionid")
     collector._session.cookies = RequestsCookieJar()  # no session cookie → not valid
 
@@ -150,17 +154,55 @@ def test_auth_succeeded_emitted_on_successful_auth():
     auth_result = MagicMock()
     auth_result.success = True
     auth_result.response = resp
-    auth_result.response_url = "/status.html"
+    auth_result.response_url = response_url
     auth_result.auth_context = MagicMock()
 
     cast(MagicMock, collector._auth_manager).authenticate.return_value = auth_result
+    return collector
+
+
+def _only_auth_succeeded(events) -> AuthSucceeded:
+    return next(e for e in events if isinstance(e, AuthSucceeded))
+
+
+def test_auth_succeeded_emitted_on_successful_auth():
+    collector = _fresh_login_collector()
 
     with capture_events() as events:
         collector.authenticate()
 
     assert_event_emitted(events, AuthSucceeded, model=_MODEL)
-    event = next(e for e in events if isinstance(e, AuthSucceeded))
-    assert event.level == EventLevel.DEBUG
+
+
+def test_auth_succeeded_first_login_is_info():
+    """First successful login is the setup-confirmation line (ORCHESTRATION_SPEC § Log Level Tiers)."""
+    collector = _fresh_login_collector()
+
+    with capture_events() as events:
+        collector.authenticate()
+
+    assert _only_auth_succeeded(events).level == EventLevel.INFO
+
+
+def test_auth_succeeded_relogin_is_debug():
+    """Every login after the first is steady state, so it drops to DEBUG."""
+    collector = _fresh_login_collector()
+    collector.authenticate()
+
+    with capture_events() as events:
+        collector.authenticate()
+
+    assert _only_auth_succeeded(events).level == EventLevel.DEBUG
+
+
+def test_auth_succeeded_carries_response_url():
+    """response_url is the only field that tells an accepted form login from a refused one."""
+    collector = _fresh_login_collector(response_url="/login.html")
+
+    with capture_events() as events:
+        collector.authenticate()
+
+    assert _only_auth_succeeded(events).response_url == "/login.html"
 
 
 # ---------------------------------------------------------------------------
@@ -355,27 +397,61 @@ def test_connection_failed_during_load_emitted():
 # ---------------------------------------------------------------------------
 
 
-def test_collection_complete_emitted_on_success():
+def _collecting_collector():
+    """Collector whose execute() reaches CollectionComplete without I/O."""
     collector = _make_collector()
     collector._auth_context = MagicMock()
+    return collector
 
+
+def _run_collections(collector, count: int):
+    """Run execute() `count` times; return (events, result) from the last run only."""
     modem_data = {"downstream": [1, 2, 3], "upstream": [1, 2]}
-
     with (
-        capture_events() as events,
         patch.object(collector, "_load_resources", return_value=(modem_data, [])),
         patch.object(collector, "_run_parse_phase", return_value=modem_data),
         patch.object(collector, "_execute_logout_if_needed"),
     ):
-        result = collector.execute()
+        for _ in range(count - 1):
+            collector.execute()
+        with capture_events() as events:
+            result = collector.execute()
+    return events, result
+
+
+def _only_collection_complete(events) -> CollectionComplete:
+    return next(e for e in events if isinstance(e, CollectionComplete))
+
+
+def test_collection_complete_emitted_on_success():
+    collector = _collecting_collector()
+
+    events, result = _run_collections(collector, 1)
 
     assert result.success is True
     assert_event_emitted(events, CollectionComplete, model=_MODEL)
-    event = next(e for e in events if isinstance(e, CollectionComplete))
+    event = _only_collection_complete(events)
     assert event.ds_count == 3
     assert event.us_count == 2
     assert event.elapsed_ms >= 0
-    assert event.level == EventLevel.DEBUG
+
+
+def test_collection_complete_first_collection_is_info():
+    """First completed collection confirms the poll returned data (ORCHESTRATION_SPEC § Logging Contract)."""
+    collector = _collecting_collector()
+
+    events, _result = _run_collections(collector, 1)
+
+    assert _only_collection_complete(events).level == EventLevel.INFO
+
+
+def test_collection_complete_subsequent_is_debug():
+    """Every collection after the first is steady state, so it drops to DEBUG."""
+    collector = _collecting_collector()
+
+    events, _result = _run_collections(collector, 2)
+
+    assert _only_collection_complete(events).level == EventLevel.DEBUG
 
 
 # ---------------------------------------------------------------------------
@@ -522,7 +598,15 @@ def _make_collector_with_logout(logout_action=True):
     return _make_collector(cfg)
 
 
-def test_logout_executed_emitted():
+@pytest.mark.parametrize(
+    "action_result, accepted",
+    [
+        pytest.param(ActionResult(success=True, message="Action completed with status 200"), True, id="accepted"),
+        pytest.param(ActionResult(success=False, message="Action refused with status 403"), False, id="refused"),
+    ],
+)
+def test_logout_events_follow_the_action_result(action_result, accepted):
+    """A refused logout emits LogoutFailed and leaves the session alone."""
     collector = _make_collector_with_logout()
     collector._auth_context = MagicMock()
 
@@ -532,12 +616,26 @@ def test_logout_executed_emitted():
         capture_events() as events,
         patch.object(collector, "_load_resources", return_value=(modem_data, [])),
         patch.object(collector, "_run_parse_phase", return_value=modem_data),
-        patch("solentlabs.cable_modem_monitor_core.orchestration.collector.execute_action"),
+        patch(
+            "solentlabs.cable_modem_monitor_core.orchestration.collector.execute_action",
+            return_value=action_result,
+        ),
     ):
         collector.execute()
 
-    assert_event_emitted(events, LogoutExecuted, model=_MODEL)
-    assert any(isinstance(e, SessionCleared) for e in events)
+    if accepted:
+        assert_event_emitted(events, LogoutExecuted, model=_MODEL)
+        assert any(isinstance(e, SessionCleared) for e in events)
+        assert collector.session_is_valid is False
+        return
+
+    assert_event_emitted(events, LogoutFailed, model=_MODEL)
+    assert not any(isinstance(e, LogoutExecuted) for e in events)
+    assert not any(isinstance(e, SessionCleared) for e in events)
+    failure = next(e for e in events if isinstance(e, LogoutFailed))
+    assert failure.reason == action_result.message
+    # The modem still holds the session, so the cookie has to stay.
+    assert collector.session_is_valid is True
 
 
 def test_logout_failed_emitted_on_exception():

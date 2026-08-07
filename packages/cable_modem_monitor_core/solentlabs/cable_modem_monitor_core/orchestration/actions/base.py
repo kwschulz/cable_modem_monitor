@@ -12,7 +12,9 @@ class ActionResult:
 
     All action executors return this.  Restart must read it — a
     refused command is not a sent one (ORCHESTRATION_SPEC § Restart
-    Action).  Logout may ignore it; logout is best-effort by design.
+    Action).  So must the post-poll logout: a refused one means the
+    session is still live, so the local cookie is kept rather than
+    orphaned (RUNTIME_POLLING_SPEC § Single-session logout).
 
     Attributes:
         success: Whether the action succeeded.

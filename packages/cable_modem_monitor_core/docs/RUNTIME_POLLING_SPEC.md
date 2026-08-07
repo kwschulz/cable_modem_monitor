@@ -366,15 +366,20 @@ deliberately does not bypass the breaker (see `ORCHESTRATION_SPEC.md`
 allow only one authenticated session. Logout fires in two places:
 
 1. **After each successful poll** — frees the session so users can
-   access the modem's web UI between polls.
+   access the modem's web UI between polls. The local session is
+   cleared only when the modem accepted the logout. A refused one
+   (non-2xx) leaves the cookie in place: the server-side session is
+   still live and that cookie is the only handle on it, so dropping it
+   orphans one session per poll and locks out single-login firmware.
 2. **Before a same-poll auth retry** — when `LOAD_AUTH` or
    `LOAD_INTEGRITY` fires, the orchestrator calls logout before
    clearing the stale local session and retrying. This recovers from
    a crash or unclean restart where the previous session was never
    released: since single-session firmware logout endpoints do not
    require credentials, the call succeeds even with no cookie. Both
-   logouts are best-effort; failure does not block the subsequent poll
-   or retry.
+   logouts are best-effort in that failure does not block the
+   subsequent poll or retry; only the local session state turns on the
+   answer.
 
 The integration cannot clear another client's session (it doesn't have
 their cookie). If another client holds the session when login is

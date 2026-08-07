@@ -12,6 +12,9 @@ it describes:
 - ``form_pbkdf2`` — ``test_form_pbkdf2.py::TestFormPbkdf2AuthManager::
   test_wrong_password_fails_login``
 - ``hnap`` — ``test_hnap.py::test_login_failure``
+- ``form`` **with success criteria** — below, in both directions per
+  criterion: ``test_form_with_success_criteria_rejects_bad_password`` and
+  ``test_form_success_criteria_decide_both_ways``
 
 The strategies that cannot tell get the inverse test here, pinning the
 fact that a wrong password sails through login. That is precisely why
@@ -47,7 +50,7 @@ from solentlabs.cable_modem_monitor_core.orchestration.auth_failure import (
 # ├───────────────┼──────────────────────┼────────────────────────────────────┤
 # │ none          │ NOT_CONFIGURED       │ no credentials exist               │
 # │ basic         │ CREDENTIALS_SUSPECT  │ never validates; the 401 is the tell│
-# │ form          │ CREDENTIALS_SUSPECT  │ accepts any response under HTTP 400│
+# │ form          │ CREDENTIALS_SUSPECT  │ no success criteria: nothing checked│
 # │ form_nonce    │ CREDENTIALS_SUSPECT  │ checks, but unproven — see below   │
 # │ url_token     │ CREDENTIALS_SUSPECT  │ checks, but unproven — see below   │
 # │ form_cbn      │ CREDENTIALS_SUSPECT  │ checks, but unproven — see below   │
@@ -93,9 +96,17 @@ _MINIMAL_AUTH: dict[str, dict[str, Any]] = {
 # fmt: on
 
 
-def _manager_for(strategy: str) -> Any:
-    """Build the auth manager for a strategy from its minimal config."""
-    auth = TypeAdapter(AuthConfig).validate_python({"strategy": strategy, **_MINIMAL_AUTH[strategy]})
+# The rows above describe each strategy at its minimal config. `form` is
+# the one whose answer depends on that config: naming a `success`
+# criterion makes it verify the credential at login time, so a form modem
+# with one reads its post-login 401 as SESSION_REJECTED. A block naming
+# no criterion cannot occur — FormSuccess rejects it. See
+# test_form_with_success_criteria_rejects_bad_password.
+
+
+def _manager_for(strategy: str, **overrides: Any) -> Any:
+    """Build the auth manager for a strategy from its minimal config, plus any overrides."""
+    auth = TypeAdapter(AuthConfig).validate_python({"strategy": strategy, **_MINIMAL_AUTH[strategy], **overrides})
     # create_auth_manager only reads .auth; a full ModemConfig would add
     # a dozen unrelated required fields to every row of _MINIMAL_AUTH.
     # ModemConfig is named unquoted so the import is a live reference: a
@@ -152,30 +163,48 @@ def test_declared_mode_matches_implementation(strategy: str) -> None:
 class _AlwaysOkHandler(BaseHTTPRequestHandler):
     """Modem that re-renders its login page with HTTP 200 on a bad password."""
 
+    status = 200
+
     def do_POST(self) -> None:  # noqa: N802
         body = b"<html><form><input name='password'></form></html>"
-        self.send_response(200)
+        self.send_response(self.status)
         self.send_header("Content-Type", "text/html")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
-        """Same 200 response as POST — the login pre-fetch also succeeds."""
+        """Same response as POST — the login pre-fetch behaves identically."""
         self.do_POST()
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         """Silence per-request server logging."""
 
 
-@pytest.fixture()
-def always_ok_server() -> Any:
-    """Serve HTTP 200 for everything, the common bad-password response."""
-    server = HTTPServer(("127.0.0.1", 0), _AlwaysOkHandler)
+class _Always401Handler(_AlwaysOkHandler):
+    """Modem that refuses the login outright instead of re-rendering the page."""
+
+    status = 401
+
+
+def _serve(handler: type[BaseHTTPRequestHandler]) -> Any:
+    server = HTTPServer(("127.0.0.1", 0), handler)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield f"http://127.0.0.1:{server.server_address[1]}"
     server.shutdown()
+
+
+@pytest.fixture()
+def always_ok_server() -> Any:
+    """Serve HTTP 200 for everything, the common bad-password response."""
+    yield from _serve(_AlwaysOkHandler)
+
+
+@pytest.fixture()
+def always_401_server() -> Any:
+    """Serve HTTP 401 for everything, the unambiguous login refusal."""
+    yield from _serve(_Always401Handler)
 
 
 # ---------------------------------------------------------------------------
@@ -231,3 +260,80 @@ def test_form_accepts_any_non_error_response(always_ok_server: str) -> None:
 
     assert result.success is True
     assert manager.auth_failure_mode() is AuthFailureMode.CREDENTIALS_SUSPECT
+
+
+def test_form_with_success_criteria_rejects_bad_password(always_ok_server: str) -> None:
+    """form auth declaring success criteria fails the same login the plain config accepts.
+
+    Same server, same wrong password, opposite verdict: the criteria are
+    what turn an unverified login into a verified one. That is the claim
+    ARCHITECTURE_DECISIONS.md requires before a strategy may report
+    SESSION_REJECTED, so a 401 arriving later is genuinely session-side.
+    """
+    manager = _manager_for("form", success={"indicator": "Welcome"})
+
+    result = manager.authenticate(requests.Session(), always_ok_server, "admin", "wrong")
+
+    assert result.success is False
+    assert manager.auth_failure_mode() is AuthFailureMode.SESSION_REJECTED
+
+
+# Rejecting is only half the claim. A criterion that refused every login
+# would satisfy the test above while breaking every good password, so each
+# branch is exercised in both directions against the same server. `redirect`
+# is the branch that matters in the field: all 8 catalog entries declaring
+# `success` use it and none uses `indicator`.
+#
+# fmt: off
+_CRITERIA_CASES = [
+    # (criteria,                          accepted, why)
+    ({"redirect": "/login.htm"},          True,     "landed on the path the criterion names"),
+    ({"redirect": "/DocsisStatus.htm"},   False,    "never left the login page"),
+    ({"indicator": "<form"},              True,     "body carries the indicator"),
+    ({"indicator": "Welcome"},            False,    "re-rendered login page lacks it"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    ("criteria", "accepted", "why"),
+    _CRITERIA_CASES,
+    ids=[f"{next(iter(c[0]))}-{'accept' if c[1] else 'reject'}" for c in _CRITERIA_CASES],
+)
+def test_form_success_criteria_decide_both_ways(
+    always_ok_server: str,
+    criteria: dict[str, str],
+    accepted: bool,
+    why: str,
+) -> None:
+    """Each success criterion accepts and rejects, so SESSION_REJECTED is earned, not blanket."""
+    manager = _manager_for("form", success=criteria)
+
+    result = manager.authenticate(requests.Session(), always_ok_server, "admin", "pw")
+
+    assert result.success is accepted, why
+
+
+# A `success` block naming no criterion would check nothing while reading as
+# verification, so FormSuccess rejects it at load time. That guarantee is what
+# lets auth_failure_mode() treat "success is not None" as "a criterion is
+# named". Coverage lives with the schema:
+# tests/models/fixtures/modem_config/invalid/form_success_{no,blank}_criterion.json
+
+
+def test_form_http_error_fails_login_whatever_the_criteria(always_401_server: str) -> None:
+    """A 4xx login response is a failed login even when `success` is declared.
+
+    The HTTP-error guard used to live on the no-criteria branch only, so
+    declaring `success` silently dropped it. The criterion here is one the
+    401 body satisfies, which is what makes this discriminating: before the
+    fix the status went unchecked, the indicator matched, and a 401 login
+    refusal was reported as a success. Declaring criteria must narrow what
+    counts as success, never widen it.
+    """
+    manager = _manager_for("form", success={"indicator": "<form"})
+
+    result = manager.authenticate(requests.Session(), always_401_server, "admin", "wrong")
+
+    assert result.success is False
+    assert "401" in result.error

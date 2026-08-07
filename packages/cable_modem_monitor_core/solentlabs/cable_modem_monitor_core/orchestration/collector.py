@@ -92,6 +92,14 @@ class ModemDataCollector:
         self._auth_context: AuthContext | None = None
         self._last_auth_result: AuthResult | None = None
         self._session_reused: bool = False
+        # First successful login of this collector's lifetime is the
+        # setup-confirmation line; re-logins after it are steady state.
+        # ORCHESTRATION_SPEC § Logging Contract, auth/resource tier.
+        self._auth_success_logged: bool = False
+        # Same tier for the collection that follows the login: the first
+        # completed collection of this collector's lifetime confirms the
+        # poll returned data, and every one after it is steady state.
+        self._collection_complete_logged: bool = False
 
         # Persistent session — reused across execute() calls.
         # Created via create_session() so HTTPS modems with self-signed
@@ -267,9 +275,10 @@ class ModemDataCollector:
                 ds_count=ds_count,
                 us_count=us_count,
                 elapsed_ms=elapsed_ms,
-                level=EventLevel.DEBUG,
+                level=EventLevel.DEBUG if self._collection_complete_logged else EventLevel.INFO,
             ),
         )
+        self._collection_complete_logged = True
 
         return ModemResult(
             success=True,
@@ -407,9 +416,11 @@ class ModemDataCollector:
                     model=self._modem_config.model,
                     strategy=_strategy_name(self._modem_config),
                     status_code=result.response.status_code if result.response is not None else 0,
-                    level=EventLevel.DEBUG,
+                    response_url=result.response_url,
+                    level=EventLevel.DEBUG if self._auth_success_logged else EventLevel.INFO,
                 ),
             )
+            self._auth_success_logged = True
             # Part of establishing the login, so it belongs here rather
             # than in execute() — restart.py authenticates directly and
             # dispatches its action without ever reaching execute().
@@ -690,15 +701,25 @@ class ModemDataCollector:
             return
 
         try:
-            execute_action(self, self._modem_config, actions.logout, log_level=_LOGOUT_LOG_LEVEL)
+            result = execute_action(self, self._modem_config, actions.logout, log_level=_LOGOUT_LOG_LEVEL)
         except Exception as exc:
             log_event(_logger, LogoutFailed(model=self._modem_config.model, reason=str(exc)))
-        else:
-            log_event(_logger, LogoutExecuted(model=self._modem_config.model))
-            # Session is dead server-side after logout — clear local
-            # state so next poll re-authenticates instead of reusing
-            # a stale session.
-            self.clear_session()
+            return
+
+        # A refused status is not a transport error, so it never reaches
+        # the except. Read the result: the session the modem refused to
+        # end is still live, and our cookie is the only handle on it.
+        # Clearing it here orphans one session per poll, which locks out
+        # firmware that permits a single login.
+        if not result.success:
+            log_event(_logger, LogoutFailed(model=self._modem_config.model, reason=result.message))
+            return
+
+        log_event(_logger, LogoutExecuted(model=self._modem_config.model))
+        # Session is dead server-side after logout — clear local
+        # state so next poll re-authenticates instead of reusing
+        # a stale session.
+        self.clear_session()
 
     def attempt_logout_before_retry(self) -> None:
         """Best-effort logout before a same-poll auth retry on single-session firmware."""

@@ -114,15 +114,19 @@ class AuthAuditIssue:
 
 
 def audit_fleet_auth(catalog_path: Path) -> list[AuthAuditIssue]:
-    """Scan the catalog for login_page / HAR fixture mismatches.
+    """Scan form-auth fixtures for the login-flow responses replay needs.
 
-    For every ``form`` auth modem with ``login_page`` set, checks that each
-    ``test_data/*.har`` fixture contains a GET response for that path with a
-    non-empty HTML body referencing the configured login action.
+    Two checks per ``test_data/*.har``:
 
-    This surfaces gaps that the intake pipeline would have prevented but that
-    manual fixture assembly can introduce — the same check enforced by
-    ``write_modem_package`` at intake time.
+    - With ``login_page`` and ``action`` set, the fixture must hold a GET
+      response for the login page with a non-empty HTML body referencing
+      the action.
+    - A login answering a redirect must land on a page the fixture holds,
+      which is what ``auth.success.redirect`` is evaluated against.
+
+    Both surface gaps the intake pipeline would have prevented but manual
+    fixture assembly can introduce — the same checks enforced at intake
+    time by ``write_modem_package`` and the HAR validation gate.
 
     Args:
         catalog_path: Root of the modem catalog directory.
@@ -149,8 +153,6 @@ def audit_fleet_auth(catalog_path: Path) -> list[AuthAuditIssue]:
 
         login_page: str = auth.get("login_page", "") or ""
         action: str = auth.get("action", "") or ""
-        if not login_page or not action:
-            continue
 
         modem_dir = modem_yaml_path.parent
         test_data = modem_dir / "test_data"
@@ -164,11 +166,32 @@ def audit_fleet_auth(catalog_path: Path) -> list[AuthAuditIssue]:
             except (OSError, json.JSONDecodeError):
                 continue
 
-            issue = check_login_page_in_har(entries, login_page, action)
-            if issue:
-                issues.append(AuthAuditIssue(modem=modem_rel, har=har_path.name, issue=issue))
+            if login_page and action:
+                issue = check_login_page_in_har(entries, login_page, action)
+                if issue:
+                    issues.append(AuthAuditIssue(modem=modem_rel, har=har_path.name, issue=issue))
+
+            issues.extend(_redirect_landing_issues(entries, modem_rel, har_path.name))
 
     return issues
+
+
+def _redirect_landing_issues(
+    entries: list[Any],
+    modem_rel: str,
+    har_name: str,
+) -> list[AuthAuditIssue]:
+    """Run the HAR gate's redirect-landing check over one committed fixture."""
+    # Same function the intake gate runs, so a contributor's capture and a
+    # committed fixture are judged by one implementation.
+    from .validation.auth_flow import validate_auth_redirect_landing
+    from .validation.har_utils import WARNING_PREFIX
+
+    warnings: list[str] = []
+    validate_auth_redirect_landing(entries, warnings)
+    return [
+        AuthAuditIssue(modem=modem_rel, har=har_name, issue=w.removeprefix(WARNING_PREFIX).strip()) for w in warnings
+    ]
 
 
 # -----------------------------------------------------------------------

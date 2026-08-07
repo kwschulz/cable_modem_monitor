@@ -71,6 +71,18 @@ repos:
         pass_filenames: false
         files: \.py$
 
+  # Import isolation. A published module that only imports when
+  # something else was imported first is an import cycle waiting to
+  # break a consumer. Scoped to changed files here; validate-ci sweeps
+  # every module. See CLAUDE.md § Verification Discipline.
+  - repo: local
+    hooks:
+      - id: import-isolation
+        name: import-isolation
+        entry: .venv/bin/python scripts/check_import_isolation.py
+        language: system
+        files: ^packages/[^/]+/solentlabs/.*\.py$
+
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

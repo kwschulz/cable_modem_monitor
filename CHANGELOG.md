@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.20] - 2026-08-07
+
+### Fixed
+
+- **A logout the modem refused no longer drops a live session.** The
+  post-poll logout discarded its result, so a refusal cleared the local
+  cookie all the same. That leaves the session open on the modem with
+  nothing left to close it, and on firmware that permits one login at a
+  time it orphans a session per poll until the next login is locked out.
+  The session is now cleared only after a logout the modem accepted; a
+  refusal is logged and the cookie kept. Eight catalog files declare
+  `actions.logout`, and behavior is unchanged for any whose logout
+  answers 2xx.
+
+- **Catalog tools: intake flags a capture that stops at the login
+  redirect.** A login answering 3xx sends the browser somewhere, and that
+  landing page is what `auth.success.redirect` is checked against, so a
+  capture without it cannot test the login. The XB7 and XB8 fixtures were
+  in that state and their replays passed anyway, because of the dropped
+  HTTP-error check below. The HAR validation gate now warns at intake,
+  and the same check runs over committed fixtures in the intake pipeline
+  regression. Both fixtures are reconstructions rather than wire
+  captures; each gains a landing entry whose comment records what was
+  inferred, from which same-family captures, and what was left empty
+  rather than invented. Neither modem's behavioural config changes.
+  (Related to #189)
+
+- **A form modem that checks the login no longer reports a rejected
+  session as a bad password.** `form` auth verifies the credential when
+  the entry names a `success` criterion, so a 401 arriving later is
+  session-side, not the password; it had been reporting every such 401 as
+  credentials-suspect, which sends a user with working credentials to
+  re-check them. Nine catalog entries declare a criterion. A separate
+  defect made declaring one *drop* the HTTP-error check, so a login the
+  modem answered 401 was reported as successful; the check now runs for
+  every form login. A `success` block naming neither `redirect` nor
+  `indicator` is now a schema error rather than a block that silently
+  checks nothing. (Related to #189)
+
+- **The auth-success log line says which page the login landed on.** Form
+  logins follow redirects, so a modem that refuses the credential and one
+  that accepts it can both answer 200 and the line reported only that
+  status. The landing path, which is what separates them, was carried on
+  the auth result and never logged; it now appears as `landed:` for the
+  strategies that have one. The line itself was pinned to DEBUG despite
+  being documented as first-poll INFO, so the confirmation that auth
+  worked was invisible unless debug logging was already on. The first
+  login of a session's lifetime now logs at INFO and every login after it
+  at DEBUG. (Related to #189)
+
+- **The collection-complete log line is visible without debug logging.**
+  It was pinned to DEBUG despite being documented as first-poll INFO, the
+  same defect as the auth-success line above. A default-level log showed
+  that the login worked but said nothing about whether the poll returned
+  data, which is the half carrying the downstream and upstream channel
+  counts. The first completed collection of a session's lifetime now logs
+  at INFO and every one after it at DEBUG. (Related to #189)
+
+- **Netgear CM2050V: a refused login is caught at the login.** The entry
+  named no success criterion, so Core's fallback accepted any response
+  under HTTP 400 and a refused login scored as success, surfacing two
+  steps later as a data page that was really the login page. Both
+  captures on file, two units six months apart, land an accepted login
+  on `/index.htm`, and the entry now names that redirect. A refusal is
+  reported as an authentication failure on the first poll instead of the
+  sixth. (Related to #189)
+
+- **The login-failed screen no longer asks the user to sign in with a
+  browser first.** Step 3 read as a prerequisite for the integration,
+  and on firmware holding auth state server-side it disturbs the thing
+  being measured; the earlier fix for that advice covered only the 5xx
+  path. The credential check stays, now conditional on the username and
+  password looking right, and tells the user to sign out afterwards.
+  Every translation carries the new wording. (Related to #189)
+
+- **Catalog tools: every published module imports on its own again.**
+  `analysis.format` and `analysis.mapping` imported each other at module
+  level, so importing an `analysis.mapping` leaf module raised
+  `ImportError` unless `analysis.format` had been imported first, which
+  three test files worked around with a side-effect import. The
+  from-package import now happens inside the four helpers that use it,
+  and `scripts/check_import_isolation.py` holds the property by importing
+  each published module with the package tree purged from `sys.modules`.
+
 ## [3.14.0-beta.19] - 2026-08-05
 
 ### Added

@@ -12,6 +12,8 @@ auth:
   username_field: loginName
   password_field: loginPassword
   cookie_name: "XSRF_TOKEN"
+  success:
+    redirect: "/index.htm"
 
 hardware:
   docsis_version: "3.1"
@@ -21,7 +23,10 @@ hardware:
 status: confirmed
 
 sources:
-  auth_config: "[#105 Netgear CM2050V](https://github.com/solentlabs/cable_modem_monitor/issues/105)"
+  auth_config:
+    "[#105 Netgear CM2050V](https://github.com/solentlabs/cable_modem_monitor/issues/105),
+    [#189 CM2050V authentication and persistence](https://github.com/solentlabs/cable_modem_monitor/issues/189)
+    — two captures six months apart, both landing on /index.htm"
   release_date: "[Netgear press release, September 22, 2020](https://www.businesswire.com/news/home/20200922005367/en/Netgear-Introduces-Industry-first-2.5Gbps-DOCSIS-3.1-Cable-Modems-to-Deliver-Top-Internet-Speeds-to-the-Home) announcing CM2050V availability"
   chipset: "[DSLReports community post](https://www.dslreports.com/forum/r33000298-Netgear-CM2000-vs-Arris-S33-vs-Motorola-MB8611) — same BCM3390 platform as CM2000/CM1200 family"
 
@@ -37,7 +42,11 @@ notes: |
   Nighthawk DOCSIS 3.1 modem. 32 SC-QAM + OFDM downstream,
   ATDMA + OFDMA upstream. Same tagValueList format as CM2000/CM1200.
   XSRF_TOKEN cookie set on first GET, sent with all subsequent requests.
-  Login page at /, POST to /goform/Login.
+  Login page at /, POST to /goform/Login; an accepted login redirects
+  to /index.htm, observed in captures six months apart (#105, #189).
+  A refused login has not been captured. The success criterion exists
+  because without one, any response under HTTP 400 scores as auth
+  success, which is how #189 reported working credentials as bad.
   The XSRF_TOKEN value in the HAR's structured cookies arrays was
   redacted by hand: har-capture masks cookie headers but not the
   cookies arrays.
@@ -45,3 +54,4 @@ notes: |
 references:
   issues:
     - "[#105 — [Modem Request] Netgear CM2050V](https://github.com/solentlabs/cable_modem_monitor/issues/105)"
+    - "[#189 — [Bug]: Authentication setup and persistence with Nighthawk CM2050V](https://github.com/solentlabs/cable_modem_monitor/issues/189)"
