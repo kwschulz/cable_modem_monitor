@@ -262,7 +262,7 @@ Example — successful collection with no channels:
 
 | Tier | Level | When | Purpose |
 |------|-------|------|---------|
-| Pulse | INFO first poll, DEBUG after | Successful poll summaries | `"Parse complete [MODEL]: 24 DS, 4 US"` — visible at INFO for first-poll confirmation, then DEBUG in steady-state to keep success-path logs quiet |
+| Pulse | INFO first poll, DEBUG after | Successful poll summaries | `"Collection complete [MODEL] — DS: 24, US: 4 (120ms)"` — visible at INFO for first-poll confirmation, then DEBUG in steady-state to keep success-path logs quiet |
 | Auth/resource | INFO first poll, DEBUG after | Steady-state noise reduction | Auth strategy, session state, resource loading. Visible at INFO for first-poll diagnostics, drops to DEBUG after to avoid flooding multi-modem logs |
 | Failures | WARNING/ERROR always | Never demoted | Auth failures, connectivity errors, parse errors. Always visible regardless of poll count |
 | Wire data | DEBUG always | Troubleshooting only | Request/response details, parsing internals |
