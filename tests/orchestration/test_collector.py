@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
+import pytest
 import requests
 from requests.cookies import RequestsCookieJar
 from solentlabs.cable_modem_monitor_core.auth.base import AuthFailureMode
+from solentlabs.cable_modem_monitor_core.orchestration.actions.base import ActionResult
 from solentlabs.cable_modem_monitor_core.orchestration.events import (
     AuthFailed,
     AuthSucceeded,
@@ -562,7 +564,15 @@ def _make_collector_with_logout(logout_action=True):
     return _make_collector(cfg)
 
 
-def test_logout_executed_emitted():
+@pytest.mark.parametrize(
+    "action_result, accepted",
+    [
+        pytest.param(ActionResult(success=True, message="Action completed with status 200"), True, id="accepted"),
+        pytest.param(ActionResult(success=False, message="Action refused with status 403"), False, id="refused"),
+    ],
+)
+def test_logout_events_follow_the_action_result(action_result, accepted):
+    """A refused logout emits LogoutFailed and leaves the session alone."""
     collector = _make_collector_with_logout()
     collector._auth_context = MagicMock()
 
@@ -572,12 +582,26 @@ def test_logout_executed_emitted():
         capture_events() as events,
         patch.object(collector, "_load_resources", return_value=(modem_data, [])),
         patch.object(collector, "_run_parse_phase", return_value=modem_data),
-        patch("solentlabs.cable_modem_monitor_core.orchestration.collector.execute_action"),
+        patch(
+            "solentlabs.cable_modem_monitor_core.orchestration.collector.execute_action",
+            return_value=action_result,
+        ),
     ):
         collector.execute()
 
-    assert_event_emitted(events, LogoutExecuted, model=_MODEL)
-    assert any(isinstance(e, SessionCleared) for e in events)
+    if accepted:
+        assert_event_emitted(events, LogoutExecuted, model=_MODEL)
+        assert any(isinstance(e, SessionCleared) for e in events)
+        assert collector.session_is_valid is False
+        return
+
+    assert_event_emitted(events, LogoutFailed, model=_MODEL)
+    assert not any(isinstance(e, LogoutExecuted) for e in events)
+    assert not any(isinstance(e, SessionCleared) for e in events)
+    failure = next(e for e in events if isinstance(e, LogoutFailed))
+    assert failure.reason == action_result.message
+    # The modem still holds the session, so the cookie has to stay.
+    assert collector.session_is_valid is True
 
 
 def test_logout_failed_emitted_on_exception():

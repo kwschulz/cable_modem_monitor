@@ -2384,9 +2384,11 @@ Returns `ActionResult`.
 
 All executors return `ActionResult(success, message, details)`.
 
-Restart must read it (§ Restart Action). Logout may ignore it —
-logout is best-effort at both call sites by design, and a modem that
-refuses one costs nothing but a stale server-side session.
+Restart must read it (§ Restart Action), and so does the post-poll
+logout: a refused logout leaves the session live server-side, so
+`clear_session()` runs only on an accepted one. Neither logout call
+site lets the result change the poll's outcome — best-effort governs
+what fails, not what the session state becomes.
 
 ---
 

@@ -44,6 +44,7 @@ from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
     BasicAuth,
     NoneAuth,
 )
+from solentlabs.cable_modem_monitor_core.orchestration.actions.base import ActionResult
 from solentlabs.cable_modem_monitor_core.orchestration.collector import (
     LoginLockoutError,
     ModemDataCollector,
@@ -878,13 +879,35 @@ class TestLogout:
 
         assert result.success is True
 
-    def test_logout_clears_session_for_next_poll(self) -> None:
-        """After successful logout, session_is_valid returns False.
-
-        Regression test: without session clearing after logout, the
-        collector reuses a stale session on the next poll and hits the
-        modem's login page instead of the data page (LOAD_AUTH signal).
-        """
+    @pytest.mark.parametrize(
+        "action_result, session_kept",
+        [
+            # Clearing after an accepted logout: without it the collector
+            # reuses a dead session on the next poll and hits the login
+            # page instead of the data page (LOAD_AUTH signal).
+            pytest.param(
+                ActionResult(success=True, message="Action completed with status 200"),
+                False,
+                id="accepted",
+            ),
+            # Keeping it after a refused one: the modem still holds the
+            # session, and dropping our cookie orphans it for good. On
+            # firmware that permits one login at a time that is one
+            # orphaned session per poll, then lockout.
+            pytest.param(
+                ActionResult(success=False, message="Action refused with status 403"),
+                True,
+                id="refused",
+            ),
+        ],
+    )
+    def test_logout_result_decides_session_clearing(
+        self,
+        action_result: ActionResult,
+        session_kept: bool,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The local session is cleared only when the modem accepted the logout."""
         config = _make_config(
             auth_type="form",
             cookie_name="",
@@ -899,7 +922,11 @@ class TestLogout:
             patch.object(collector, "authenticate", return_value=auth_result),
             patch.object(collector, "_load_resources", return_value=({}, [])),
             patch.object(collector, "_parse", return_value=(modem_data, ParseDiagnostics())),
-            patch("solentlabs.cable_modem_monitor_core.orchestration.collector.execute_action"),
+            patch(
+                "solentlabs.cable_modem_monitor_core.orchestration.collector.execute_action",
+                return_value=action_result,
+            ),
+            caplog.at_level(logging.WARNING),
         ):
             # Set auth context as if authentication succeeded
             collector._auth_context = AuthContext()
@@ -908,9 +935,13 @@ class TestLogout:
             result = collector.execute()
 
         assert result.success is True
-        # After logout, session should be cleared
-        assert collector.session_is_valid is False
-        assert collector._auth_context is None
+        assert collector.session_is_valid is session_kept
+        assert (collector._auth_context is not None) is session_kept
+        if session_kept:
+            assert "Logout failed" in caplog.text
+            assert action_result.message in caplog.text
+        else:
+            assert "Logout failed" not in caplog.text
 
 
 # ------------------------------------------------------------------

@@ -696,15 +696,25 @@ class ModemDataCollector:
             return
 
         try:
-            execute_action(self, self._modem_config, actions.logout, log_level=_LOGOUT_LOG_LEVEL)
+            result = execute_action(self, self._modem_config, actions.logout, log_level=_LOGOUT_LOG_LEVEL)
         except Exception as exc:
             log_event(_logger, LogoutFailed(model=self._modem_config.model, reason=str(exc)))
-        else:
-            log_event(_logger, LogoutExecuted(model=self._modem_config.model))
-            # Session is dead server-side after logout — clear local
-            # state so next poll re-authenticates instead of reusing
-            # a stale session.
-            self.clear_session()
+            return
+
+        # A refused status is not a transport error, so it never reaches
+        # the except. Read the result: the session the modem refused to
+        # end is still live, and our cookie is the only handle on it.
+        # Clearing it here orphans one session per poll, which locks out
+        # firmware that permits a single login.
+        if not result.success:
+            log_event(_logger, LogoutFailed(model=self._modem_config.model, reason=result.message))
+            return
+
+        log_event(_logger, LogoutExecuted(model=self._modem_config.model))
+        # Session is dead server-side after logout — clear local
+        # state so next poll re-authenticates instead of reusing
+        # a stale session.
+        self.clear_session()
 
     def attempt_logout_before_retry(self) -> None:
         """Best-effort logout before a same-poll auth retry on single-session firmware."""

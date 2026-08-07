@@ -157,6 +157,8 @@ only one authenticated session.
 - Session is released (modem's web UI is accessible to user)
 - `session_is_valid` may be False after logout (strategy-dependent)
 - If logout fails, collection still succeeds (logout is best-effort)
+- A refused logout (non-2xx) keeps the local session — the modem still
+  holds it, so the next poll reuses the cookie instead of orphaning it
 
 ---
 

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A logout the modem refused no longer drops a live session.** The
+  post-poll logout discarded its result, so a refusal cleared the local
+  cookie all the same. That leaves the session open on the modem with
+  nothing left to close it, and on firmware that permits one login at a
+  time it orphans a session per poll until the next login is locked out.
+  The session is now cleared only after a logout the modem accepted; a
+  refusal is logged and the cookie kept. Eight catalog files declare
+  `actions.logout`, and behavior is unchanged for any whose logout
+  answers 2xx.
+
 - **Catalog tools: intake flags a capture that stops at the login
   redirect.** A login answering 3xx sends the browser somewhere, and that
   landing page is what `auth.success.redirect` is checked against, so a
