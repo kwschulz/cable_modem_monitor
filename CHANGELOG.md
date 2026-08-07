@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.20] - 2026-08-07
+
 ### Fixed
 
 - **A logout the modem refused no longer drops a live session.** The
