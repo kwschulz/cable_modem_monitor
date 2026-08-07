@@ -53,6 +53,20 @@ notes: |
   Confirmed per-model (observed across two independent units). Same
   chipset-level pattern as SB8200. Aggregate intentionally omitted because
   the duplicated OFDM data makes QAM totals unreliable.
+  Assembled fixture — not a full wire capture. test_data/modem.har holds a
+  real har-capture response for /network_setup.jst; the /check.jst login
+  and the /at_a_glance.jst landing are hand-built. The login's 302 Location
+  is the modem's own. The landing entry records only that following that
+  redirect returns 200, inferred from the redirect target plus the XB6 and
+  XB10 captures of the same firmware family, which both serve
+  /at_a_glance.jst 200. Unobserved on this unit: the landing response body
+  and headers, the check.jst POST mechanics, the session cookie value. The
+  landing body is never parsed (parser.yaml declares only
+  /network_setup.jst), so it is left empty rather than invented.
+  status: confirmed rests on test_data/modem.verified.json (CGM4331COM,
+  34 downstream / 5 upstream, docsis_status Operational), not on this
+  fixture. Replace the fixture with a real full-session HAR when an XB7
+  owner contributes one.
 references:
   issues:
     - "[#2 — Add support for Technicolor XB7](https://github.com/solentlabs/cable_modem_monitor/issues/2)"

@@ -116,15 +116,19 @@ class TestFormAuthManager:
         with HARMockServer(entries, modem_config=modem_config) as server:
             config = FormAuth(
                 strategy="form",
-                action="/login",
-                success=FormSuccess(redirect="/login"),
+                action="/goform/login",
+                success=FormSuccess(redirect="/goform/login"),
             )
             manager = FormAuthManager(config)
             manager.configure_session(session, {})
 
             result = manager.authenticate(session, server.base_url, "admin", "pw")
-            # The mock server doesn't redirect, so the final URL
-            # is the login URL itself -- which contains "/login"
+            # The mock server doesn't redirect, so the final URL is the
+            # login URL itself -- which contains "/goform/login". The
+            # action must be the endpoint the fixture serves: it used to
+            # be "/login", which the server answers 401, and the redirect
+            # check passed anyway because declaring `success` skipped the
+            # HTTP-error guard.
             assert result.success is True
 
     def test_success_indicator_present(self, session: requests.Session) -> None:

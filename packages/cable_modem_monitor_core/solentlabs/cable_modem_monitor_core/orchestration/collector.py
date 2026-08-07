@@ -92,6 +92,10 @@ class ModemDataCollector:
         self._auth_context: AuthContext | None = None
         self._last_auth_result: AuthResult | None = None
         self._session_reused: bool = False
+        # First successful login of this collector's lifetime is the
+        # setup-confirmation line; re-logins after it are steady state.
+        # ORCHESTRATION_SPEC § Logging Contract, auth/resource tier.
+        self._auth_success_logged: bool = False
 
         # Persistent session — reused across execute() calls.
         # Created via create_session() so HTTPS modems with self-signed
@@ -407,9 +411,11 @@ class ModemDataCollector:
                     model=self._modem_config.model,
                     strategy=_strategy_name(self._modem_config),
                     status_code=result.response.status_code if result.response is not None else 0,
-                    level=EventLevel.DEBUG,
+                    response_url=result.response_url,
+                    level=EventLevel.DEBUG if self._auth_success_logged else EventLevel.INFO,
                 ),
             )
+            self._auth_success_logged = True
             # Part of establishing the login, so it belongs here rather
             # than in execute() — restart.py authenticates directly and
             # dispatches its action without ever reaching execute().

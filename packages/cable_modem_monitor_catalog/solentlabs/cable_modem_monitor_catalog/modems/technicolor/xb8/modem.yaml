@@ -54,7 +54,12 @@ notes: |
   frequencies, SNR, power, modulation, upstream channel types, error
   codewords, uptime, software/BOOT/hardware versions, model string.
   Unobserved template filler: per-channel lock status, upstream symbol
-  rates, unerrored codewords, check.jst POST mechanics. Replace the
+  rates, unerrored codewords, check.jst POST mechanics, and the
+  /at_a_glance.jst landing the login redirects to. That landing entry
+  records only that following the login's own 302 Location returns 200,
+  inferred from the XB6 and XB10 captures of the same firmware family. Its
+  body is never parsed (parser.yaml declares only /network_setup.jst), so
+  it is left empty rather than invented. Replace the
   fixture with a real HAR when an XB8 owner contributes one.
   Firmware renders the SC-QAM fallback "TDMA" channel type for OFDMA
   upstream channels (observed on channel 11, modulation OFDMA).

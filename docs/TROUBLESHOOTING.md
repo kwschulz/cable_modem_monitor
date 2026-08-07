@@ -303,7 +303,15 @@ logger:
   default: info
   logs:
     custom_components.cable_modem_monitor: debug
+    solentlabs.cable_modem_monitor_core: debug
+    solentlabs.cable_modem_monitor_catalog: debug
 ```
+
+All three are needed. The `custom_components` logger covers the Home
+Assistant layer only; auth, resource loading, and orchestration detail
+(including the messages shown above) comes from the core library, and
+modem matching comes from the catalog. These are the integration's
+declared `loggers` in `manifest.json`.
 
 After enabling debug logging:
 

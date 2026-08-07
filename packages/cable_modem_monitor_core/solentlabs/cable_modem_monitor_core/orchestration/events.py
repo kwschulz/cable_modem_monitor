@@ -70,12 +70,20 @@ class ConnectivityBackoffReset:
 
 @dataclass
 class AuthSucceeded:
-    """Authentication completed. Level is caller-determined."""
+    """Fresh login completed. Level is caller-determined.
+
+    Never fires on the session-reuse path — ``SessionReused`` covers that.
+    """
 
     model: str
     strategy: str
     status_code: int  # response.status_code if response is not None else 0
-    level: EventLevel  # caller-determined: INFO on first poll, DEBUG on reuse
+    # Path the login response landed on, "" when the strategy advertises no
+    # reuse page. For form auth the POST follows redirects, so the status
+    # alone cannot tell an accepted login from a refused one; the landing
+    # path can.
+    response_url: str
+    level: EventLevel  # caller-determined: INFO on first login, DEBUG after
 
 
 @dataclass

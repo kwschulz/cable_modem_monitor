@@ -17,6 +17,12 @@ from solentlabs.cable_modem_monitor_core.analysis import (
     parse_diagnostics,
     parse_ts,
 )
+from solentlabs.cable_modem_monitor_core.analysis.log_parser import CORE_PATTERNS
+from solentlabs.cable_modem_monitor_core.orchestration.events import (
+    AuthSucceeded,
+    EventLevel,
+)
+from solentlabs.cable_modem_monitor_core.orchestration.logging import _format
 from solentlabs.cable_modem_monitor_core.orchestration.models import (
     OrchestratorDiagnostics,
 )
@@ -159,6 +165,42 @@ class TestConnectivityFields:
         ts, desc = result.transitions[0]
         assert desc == "offline -> online"
         assert isinstance(ts, datetime)
+
+
+# ---------------------------------------------------------------------------
+# CORE_PATTERNS vs the adapter that produces the lines
+# ---------------------------------------------------------------------------
+
+_TS_PREFIX = "2025-04-01 10:00:01.123 INFO solentlabs.cable_modem_monitor_core.orchestration — "
+
+
+class TestPatternsMatchAdapterOutput:
+    """Patterns are matched against real adapter output, not hand-typed lines.
+
+    The auth_success pattern had drifted out of sync with the adapter and
+    nothing caught it: no handler consumes it, so a stale regex is silent.
+    """
+
+    @pytest.mark.parametrize(
+        ("response_url", "expected_landed"),
+        [("/status.html", "/status.html"), ("", None)],
+    )
+    def test_auth_success(self, response_url: str, expected_landed: str | None) -> None:
+        line = _TS_PREFIX + _format(
+            AuthSucceeded(
+                model="T100",
+                strategy="form",
+                status_code=200,
+                response_url=response_url,
+                level=EventLevel.INFO,
+            )
+        )
+        match = CORE_PATTERNS["auth_success"].search(line)
+        assert match is not None
+        assert match.group(2) == "T100"
+        assert match.group(3) == "form"
+        assert match.group(4) == "200"
+        assert match.group(5) == expected_landed
 
 
 # ---------------------------------------------------------------------------

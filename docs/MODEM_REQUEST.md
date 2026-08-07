@@ -48,6 +48,16 @@ A few cable-modem-specific tips:
   browser. har-capture launches its own controlled chromium instance,
   so there's no need to use your regular browser's incognito mode —
   each capture starts from a clean session.
+- **After logging in, let the page your modem sends you to finish
+  loading** before clicking anything else. Many modems answer the login
+  with a redirect, and that landing page is how the integration confirms
+  the login worked. A capture that moves on before it loads cannot be
+  used to test the login.
+- **Click your modem's Logout link last**, before closing the browser.
+  Some modems allow only one login at a time. Without the logout
+  request in the capture, the integration cannot learn how to release
+  the session, and may hold it while you are trying to reach the
+  modem's own web page.
 
 har-capture produces a sanitized, gzipped `.sanitized.har.gz` file —
 that's the artifact to attach in Step 3.

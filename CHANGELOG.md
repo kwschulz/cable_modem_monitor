@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Catalog tools: intake flags a capture that stops at the login
+  redirect.** A login answering 3xx sends the browser somewhere, and that
+  landing page is what `auth.success.redirect` is checked against, so a
+  capture without it cannot test the login. Two committed fixtures are in
+  that state and their replays passed anyway, because of the dropped
+  HTTP-error check below. The HAR validation gate now warns at intake,
+  and the same check runs over committed fixtures in the intake pipeline
+  regression. (Related to #189)
+
+- **A form modem that checks the login no longer reports a rejected
+  session as a bad password.** `form` auth verifies the credential when
+  the entry names a `success` criterion, so a 401 arriving later is
+  session-side, not the password; it had been reporting every such 401 as
+  credentials-suspect, which sends a user with working credentials to
+  re-check them. Eight catalog entries declare a criterion. A separate
+  defect made declaring one *drop* the HTTP-error check, so a login the
+  modem answered 401 was reported as successful; the check now runs for
+  every form login. A `success` block naming neither `redirect` nor
+  `indicator` is now a schema error rather than a block that silently
+  checks nothing. (Related to #189)
+
+- **The auth-success log line says which page the login landed on.** Form
+  logins follow redirects, so a modem that refuses the credential and one
+  that accepts it can both answer 200 and the line reported only that
+  status. The landing path, which is what separates them, was carried on
+  the auth result and never logged; it now appears as `landed:` for the
+  strategies that have one. The line itself was pinned to DEBUG despite
+  being documented as first-poll INFO, so the confirmation that auth
+  worked was invisible unless debug logging was already on. The first
+  login of a session's lifetime now logs at INFO and every login after it
+  at DEBUG. (Related to #189)
+
 ## [3.14.0-beta.19] - 2026-08-05
 
 ### Added

@@ -62,14 +62,22 @@ Fields — `ConnectivityBackoffReset`: `model`
 
 | Event | Level | When |
 |---|---|---|
-| `AuthSucceeded` | caller-determined | Auth completed |
+| `AuthSucceeded` | caller-determined | Fresh login completed (never on session reuse — `SessionReused` covers that) |
 | `AuthFailed` | WARNING | Auth failed |
 | `AuthLockoutDetected` | WARNING | Lockout detected |
 | `AuthCircuitBreakerOpen` | ERROR | Circuit breaker opened |
 | `CircuitBreakerPollingBlocked` | ERROR | Per-poll guard — breaker is open; credentials must be reconfigured |
 | `StaleSessionRecoveryDisabled` | INFO | Stale-session recovery streak hit threshold; session reuse disabled for this runtime |
 
-Fields — `AuthSucceeded`: `model`, `strategy: str`, `status_code: int` (0 when no response)
+Fields — `AuthSucceeded`: `model`, `strategy: str`, `status_code: int` (0 when
+no response), `response_url: str` — the path the login response landed on,
+`""` for strategies that advertise no reuse page. Form logins follow
+redirects, so an accepted and a refused login can both end 200; the landing
+path is what separates them. Rendered as `landed: <path>` only when set.
+
+The collector emits `EventLevel.INFO` for the first login of its lifetime and
+`EventLevel.DEBUG` for every login after it — the auth/resource tier in
+ORCHESTRATION_SPEC.md § Logging Contract.
 Fields — `AuthFailed`: `model`, `strategy: str`, `error: str`, `method: str | None`,
 `url: str | None`, `status_code: int | None`, `content_type: str | None`,
 `response_body: str | None`

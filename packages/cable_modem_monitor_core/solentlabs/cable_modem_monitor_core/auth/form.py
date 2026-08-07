@@ -13,7 +13,7 @@ import requests
 from bs4 import BeautifulSoup, Tag
 
 from ..models.modem_config.auth import FormAuth
-from .base import AuthResult, BaseAuthManager
+from .base import AuthFailureMode, AuthResult, BaseAuthManager
 
 _logger = logging.getLogger(__name__)
 
@@ -32,6 +32,17 @@ class FormAuthManager(BaseAuthManager):
 
     def __init__(self, config: FormAuth) -> None:
         self._config = config
+
+    def auth_failure_mode(self) -> AuthFailureMode:
+        """Login is verified only when success criteria are declared."""
+        # Proven by test_auth_failure_modes — with a criterion set, a modem
+        # re-rendering its login page fails the check, so a later 401 is not
+        # the credential. FormSuccess rejects a block naming no criterion, so
+        # a present block always checks something; without that guarantee this
+        # would claim a verification that never ran.
+        if self._config.success is not None:
+            return AuthFailureMode.SESSION_REJECTED
+        return super().auth_failure_mode()
 
     def authenticate(
         self,
@@ -143,10 +154,15 @@ def _check_success(config: FormAuth, response: requests.Response) -> str:
 
     Returns an error message on failure, empty string on success.
     """
+    # An HTTP error is a failed login whatever the criteria say. This guard
+    # used to sit on the no-criteria branch alone, so declaring `success`
+    # dropped it and an empty block turned a 401 refusal into a success.
+    # Criteria must narrow what counts as success, never widen it.
+    if response.status_code >= 400:
+        return f"Login returned HTTP {response.status_code}"
+
     if config.success is None:
         # No explicit success criteria — accept any non-error response
-        if response.status_code >= 400:
-            return f"Login returned HTTP {response.status_code}"
         return ""
 
     if config.success.redirect:

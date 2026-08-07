@@ -135,12 +135,14 @@ def test_session_reused_emitted_when_session_valid():
 # ---------------------------------------------------------------------------
 
 
-def test_auth_succeeded_emitted_on_successful_auth():
+def _fresh_login_collector(response_url: str = "/status.html"):
+    """Collector whose authenticate() always takes the fresh-login branch.
+
+    The cookie jar stays empty, so session_is_valid keeps returning False
+    and repeat calls re-authenticate instead of short-circuiting on reuse.
+    """
     collector = _make_collector()
-    # Force no valid session so authenticate() proceeds
     collector._auth_context = None
-    collector._modem_config.auth = None  # NoneAuth → session_is_valid = True initially
-    # But with NoneAuth we skip auth... let's use a form auth mock
     collector._modem_config.auth = MagicMock(strategy="form", cookie_name="sessionid")
     collector._session.cookies = RequestsCookieJar()  # no session cookie → not valid
 
@@ -150,17 +152,55 @@ def test_auth_succeeded_emitted_on_successful_auth():
     auth_result = MagicMock()
     auth_result.success = True
     auth_result.response = resp
-    auth_result.response_url = "/status.html"
+    auth_result.response_url = response_url
     auth_result.auth_context = MagicMock()
 
     cast(MagicMock, collector._auth_manager).authenticate.return_value = auth_result
+    return collector
+
+
+def _only_auth_succeeded(events) -> AuthSucceeded:
+    return next(e for e in events if isinstance(e, AuthSucceeded))
+
+
+def test_auth_succeeded_emitted_on_successful_auth():
+    collector = _fresh_login_collector()
 
     with capture_events() as events:
         collector.authenticate()
 
     assert_event_emitted(events, AuthSucceeded, model=_MODEL)
-    event = next(e for e in events if isinstance(e, AuthSucceeded))
-    assert event.level == EventLevel.DEBUG
+
+
+def test_auth_succeeded_first_login_is_info():
+    """First successful login is the setup-confirmation line (ORCHESTRATION_SPEC § Log Level Tiers)."""
+    collector = _fresh_login_collector()
+
+    with capture_events() as events:
+        collector.authenticate()
+
+    assert _only_auth_succeeded(events).level == EventLevel.INFO
+
+
+def test_auth_succeeded_relogin_is_debug():
+    """Every login after the first is steady state, so it drops to DEBUG."""
+    collector = _fresh_login_collector()
+    collector.authenticate()
+
+    with capture_events() as events:
+        collector.authenticate()
+
+    assert _only_auth_succeeded(events).level == EventLevel.DEBUG
+
+
+def test_auth_succeeded_carries_response_url():
+    """response_url is the only field that tells an accepted form login from a refused one."""
+    collector = _fresh_login_collector(response_url="/login.html")
+
+    with capture_events() as events:
+        collector.authenticate()
+
+    assert _only_auth_succeeded(events).response_url == "/login.html"
 
 
 # ---------------------------------------------------------------------------

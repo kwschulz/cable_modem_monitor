@@ -331,8 +331,27 @@ config: `username_field`, `password_field` entries, and
 
 **Success detection:** If `success` is provided, checks `redirect`
 (path substring match) and/or `indicator` (body substring match).
-Both are optional; if both present, both must pass. If `success` is
-omitted, any response with HTTP status < 400 is treated as success.
+Either may be omitted; if both are present, both must pass. A block
+naming neither is a schema error, because it would check nothing while
+reading as verification. If `success` is omitted entirely, any response
+with HTTP status < 400 is treated as success.
+
+An HTTP status of 400 or above always fails the login, whether or not
+`success` is provided. Criteria narrow what counts as success; they
+never widen it.
+
+**A declared `success` block is a claim about the login.** It is what
+makes `form` report a post-login 401 as `SESSION_REJECTED` rather than
+`CREDENTIALS_SUSPECT` (ARCHITECTURE_DECISIONS.md § Post-login 401 is
+read per auth strategy). Declare it only when the criterion genuinely
+distinguishes an accepted login from a refused one on that modem.
+
+**Which criterion to reach for.** `redirect` suits a modem whose login
+answers 3xx and lands on a known page; every entry declaring `success`
+today uses it. `indicator` is for a modem that answers the login **200
+in place**, with no redirect to match — `cm3500b`, `coda56`, and
+`dm1000` all behave that way, so `redirect` could never verify their
+logins. Neither is retired for lack of current use.
 
 **When to leave `success` omitted:** Many modems return 200 plus the
 login page body when credentials are rejected (e.g., MB7621 returns

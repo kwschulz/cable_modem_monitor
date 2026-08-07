@@ -676,6 +676,19 @@ entry is wrong rather than the password. `AuthFailureMode` in
 `auth/base.py` is the authoritative set. Core's failure hint and the HA
 config-flow error key both derive from it.
 
+The answer may depend on the entry's config, not only on the strategy
+class. `form` verifies the credential exactly when `auth.success` names a
+criterion, so it reports `SESSION_REJECTED` with one and
+`CREDENTIALS_SUSPECT` without. It reads its own config to decide; nothing
+in the orchestration layer branches on strategy.
+
+That equivalence is held by the schema, not by the auth manager. Both
+`FormSuccess` fields default to `""`, so a bare `success: {}` would once
+have validated and then checked nothing, reading like verification while
+performing none. `FormSuccess` now rejects a block naming neither field
+(MODEM_YAML_SPEC.md § form), which is what lets the manager treat
+"`success` is present" as "a criterion is named".
+
 **Rationale:** `LOAD_AUTH` does not mean the login succeeded — it means the
 strategy *believed* it did. `basic` never validates a credential at all
 (`auth/basic.py` sets `session.auth` and returns success), and plain `form`
@@ -687,10 +700,16 @@ pessimistic, and overriding is a claim.
 
 **Proven, not assumed.** A strategy may declare `SESSION_REJECTED` only
 with a bad-password test showing `success=False`. Today that is
-`form_pbkdf2` and `hnap` — the two the mock harness can reject. The others
-likely do verify, but the harness cannot yet simulate a rejected login for
-them, so the claim is unpaid and they keep the conservative default.
-Adding harness rejection plus its test is the price of flipping one.
+`form_pbkdf2`, `hnap`, and `form` with success criteria. The others likely
+do verify, but the harness cannot yet simulate a rejected login for them,
+so the claim is unpaid and they keep the conservative default. Adding
+harness rejection plus its test is the price of flipping one.
+
+For `form` the claim is per criterion, and each is tested in both
+directions — a criterion that refused every login would satisfy a
+rejection test while breaking every good password. `redirect` is the one
+that carries the fleet: all 8 catalog entries declaring `success` use it
+and none uses `indicator`.
 
 **Constrains:** The knowledge lives on the strategy, not in an `isinstance`
 chain in the orchestration layer — this replaced one that had drifted into

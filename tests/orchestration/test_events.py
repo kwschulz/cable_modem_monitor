@@ -109,7 +109,13 @@ def test_health_status_report_level(status, changed, expected_level):
 
 
 def test_caller_determined_level_accepted():
-    event = AuthSucceeded(model="SB8200", strategy="form", status_code=200, level=EventLevel.INFO)
+    event = AuthSucceeded(
+        model="SB8200",
+        strategy="form",
+        status_code=200,
+        response_url="/status.html",
+        level=EventLevel.INFO,
+    )
     assert event.level == EventLevel.INFO
 
 
@@ -174,6 +180,31 @@ def test_polling_blocked_message_endpoint_not_found():
     _, msg = logger.log.call_args.args
     assert "login endpoint not found" in msg
     assert "Reconfigure credentials" not in msg
+
+
+@pytest.mark.parametrize(
+    ("response_url", "expected_tail"),
+    [
+        ("/status.html", ", landed: /status.html"),
+        ("/login.html", ", landed: /login.html"),
+        ("", ""),  # strategies that advertise no reuse page say nothing
+    ],
+)
+def test_auth_succeeded_message_reports_landing_path(response_url, expected_tail):
+    """A form login that lands back on the login page is the only visible sign it was refused."""
+    logger = MagicMock(spec=logging.Logger)
+    log_event(
+        logger,
+        AuthSucceeded(
+            model="SB8200",
+            strategy="form",
+            status_code=200,
+            response_url=response_url,
+            level=EventLevel.INFO,
+        ),
+    )
+    _, msg = logger.log.call_args.args
+    assert msg == f"Auth succeeded [SB8200] — strategy: form, status=200{expected_tail}"
 
 
 def test_log_event_message_contains_model():

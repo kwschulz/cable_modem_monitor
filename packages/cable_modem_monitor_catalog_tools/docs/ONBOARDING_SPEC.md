@@ -219,6 +219,23 @@ Check the **first request** in the HAR:
 | First request has `Cookie` header with session value | Browser had existing session | **HARD STOP**: Request fresh HAR |
 | Returns 301/302 redirect to login page | Pre-auth captured | Continue |
 
+**The login's own redirect must land somewhere the capture holds.** When
+the credential POST answers 3xx, Core follows the `Location` (the login
+POST sets `allow_redirects=True`) and evaluates `auth.success.redirect`
+against where it lands. The landing page is part of the auth flow, not a
+page the capture may skip. If it is absent, emit a **WARNING** naming the
+path and ask for a recapture that follows the redirect.
+
+Not a hard stop: the data pages may all be present and the entry still
+parses. What is lost is auth replay coverage — the mock server answers
+the landing 404, so the replay exercises a failed login rather than a
+successful one. `Location` may be relative or absolute, so resolve it
+against the request URL before looking it up, and follow redirect chains
+to a bounded depth.
+
+The same check runs over committed fixtures via `audit_fleet_auth`, which
+reports under AUTH FIXTURE ISSUES in the intake pipeline regression.
+
 ### Step 3: Auth mechanism identification
 
 | Wire evidence | Auth mechanism |

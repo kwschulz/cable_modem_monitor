@@ -56,7 +56,7 @@ def parse_ts(ts_str: str) -> datetime:
 
 CORE_PATTERNS: dict[str, re.Pattern[str]] = {
     "poll_start": re.compile(_TS + r" .+Poll \[(.+?)\] — auth: (\w+), .+session: (\w+)"),
-    "auth_success": re.compile(_TS + r" .+Auth succeeded \[(.+?)\]: status=(\d+), url=(.+)"),
+    "auth_success": re.compile(_TS + r" .+Auth succeeded \[(.+?)\] — strategy: (\w+), status=(\d+)(?:, landed: (.+))?"),
     "auth_fail": re.compile(_TS + r" .+Connection failed during auth \[(.+?)\]"),
     "parse_complete": re.compile(_TS + r" .+Parse complete \[(.+?)\]: (\d+) DS, (\d+) US"),
     "health_responsive": re.compile(_TS + r" .+Health check \[(.+?)\]: responsive \((.+?)\)"),

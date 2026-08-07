@@ -2,7 +2,8 @@
 
 Orchestrates four-step validation on a HAR file before analysis proceeds:
 1. Structural validation (valid JSON, non-empty entries, request/response)
-2. Auth flow validation (first request check, session cookie check)
+2. Auth flow validation (first request check, session cookie check,
+   login redirect lands on a captured page)
 3. Protocol signal scanning (transport hints, auth hints)
 4. Response integrity (bodies stripped/replaced after capture)
 
@@ -15,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .validation.auth_flow import validate_auth_flow
+from .validation.auth_flow import validate_auth_flow, validate_auth_redirect_landing
 from .validation.har_utils import HARD_STOP_PREFIX
 from .validation.protocol_signals import identify_transport_and_auth
 from .validation.response_integrity import validate_response_integrity
@@ -63,6 +64,7 @@ def validate_har(har_path: str | Path) -> ValidationResult:
 
     # Step 2: Auth flow validation
     auth_flow_detected = validate_auth_flow(entries, issues)
+    validate_auth_redirect_landing(entries, issues)
 
     # Step 3: Protocol signal scanning
     identify_transport_and_auth(entries, issues, transport_hints)
