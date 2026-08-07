@@ -43,8 +43,10 @@ notes: |
   ATDMA + OFDMA upstream. Same tagValueList format as CM2000/CM1200.
   XSRF_TOKEN cookie set on first GET, sent with all subsequent requests.
   Login page at /, POST to /goform/Login; an accepted login redirects
-  to /index.htm. A refused login answers under HTTP 400, so without
-  that success criterion it scored as auth success (#189).
+  to /index.htm, observed in captures six months apart (#105, #189).
+  A refused login has not been captured. The success criterion exists
+  because without one, any response under HTTP 400 scores as auth
+  success, which is how #189 reported working credentials as bad.
   The XSRF_TOKEN value in the HAR's structured cookies arrays was
   redacted by hand: har-capture masks cookie headers but not the
   cookies arrays.
