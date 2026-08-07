@@ -47,9 +47,16 @@ notes: |
   A refused login has not been captured. The success criterion exists
   because without one, any response under HTTP 400 scores as auth
   success, which is how #189 reported working credentials as bad.
-  The XSRF_TOKEN value in the HAR's structured cookies arrays was
-  redacted by hand: har-capture masks cookie headers but not the
-  cookies arrays.
+  Two captures on file. modem.har (#105) is served over plain HTTP on
+  port 80; modem-https.har (#189) is the same flow over TLS 1.3 on port
+  443, its login redirect naming https://192.168.100.1:443/index.htm.
+  The scheme is user-configured, not a catalog field, so both captures
+  share this config.
+  Hand redactions: the XSRF_TOKEN value in modem.har's structured
+  cookies arrays, since har-capture masks cookie headers but not the
+  cookies arrays; and the TLS certificate subject in modem-https.har,
+  which carried the unit's MAC as its CableLabs device certificate
+  subject and now reads XX:XX:XX:XX:XX:XX.
 
 references:
   issues:
