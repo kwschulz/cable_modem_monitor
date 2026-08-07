@@ -166,6 +166,13 @@ Fields — `HealthBackoffCleared`: `model`
 | `ZeroChannelsNoSystemInfo` | WARNING | Zero channels and no system_info |
 
 Fields — `CollectionComplete`: `model`, `ds_count: int`, `us_count: int`, `elapsed_ms: float`
+
+The collector emits `EventLevel.INFO` for the first completed collection of
+its lifetime and `EventLevel.DEBUG` for every collection after it — the
+auth/resource tier in ORCHESTRATION_SPEC.md § Logging Contract. Pairs with
+`AuthSucceeded`: the login line says the credential was accepted, this one
+says the poll returned data.
+
 Fields — `ParseError`: `model`, `reason: str`
 Fields — `ResourceLoadError` / `HttpStatusError` / `ConnectionFailedDuringLoad`:
 `model`, `path: str`, `status_code: int | None`, `reason: str`

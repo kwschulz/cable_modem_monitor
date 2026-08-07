@@ -119,9 +119,11 @@ def test_caller_determined_level_accepted():
     assert event.level == EventLevel.INFO
 
 
-def test_caller_determined_level_debug():
-    event = CollectionComplete(model="SB8200", ds_count=32, us_count=8, elapsed_ms=120.0, level=EventLevel.DEBUG)
-    assert event.level == EventLevel.DEBUG
+@pytest.mark.parametrize("level", [EventLevel.INFO, EventLevel.DEBUG])
+def test_collection_complete_accepts_either_level(level):
+    """INFO for the first collection of a collector's lifetime, DEBUG for every one after."""
+    event = CollectionComplete(model="SB8200", ds_count=32, us_count=8, elapsed_ms=120.0, level=level)
+    assert event.level == level
 
 
 # ---------------------------------------------------------------------------

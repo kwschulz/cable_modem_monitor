@@ -96,6 +96,10 @@ class ModemDataCollector:
         # setup-confirmation line; re-logins after it are steady state.
         # ORCHESTRATION_SPEC § Logging Contract, auth/resource tier.
         self._auth_success_logged: bool = False
+        # Same tier for the collection that follows the login: the first
+        # completed collection of this collector's lifetime confirms the
+        # poll returned data, and every one after it is steady state.
+        self._collection_complete_logged: bool = False
 
         # Persistent session — reused across execute() calls.
         # Created via create_session() so HTTPS modems with self-signed
@@ -271,9 +275,10 @@ class ModemDataCollector:
                 ds_count=ds_count,
                 us_count=us_count,
                 elapsed_ms=elapsed_ms,
-                level=EventLevel.DEBUG,
+                level=EventLevel.DEBUG if self._collection_complete_logged else EventLevel.INFO,
             ),
         )
+        self._collection_complete_logged = True
 
         return ModemResult(
             success=True,

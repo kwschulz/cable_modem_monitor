@@ -307,7 +307,7 @@ class CollectionComplete:
     ds_count: int
     us_count: int
     elapsed_ms: float
-    level: EventLevel  # caller-determined: INFO on first poll, DEBUG on steady-state
+    level: EventLevel  # caller-determined: INFO on first collection, DEBUG after
 
 
 @dataclass

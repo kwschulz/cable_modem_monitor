@@ -397,27 +397,61 @@ def test_connection_failed_during_load_emitted():
 # ---------------------------------------------------------------------------
 
 
-def test_collection_complete_emitted_on_success():
+def _collecting_collector():
+    """Collector whose execute() reaches CollectionComplete without I/O."""
     collector = _make_collector()
     collector._auth_context = MagicMock()
+    return collector
 
+
+def _run_collections(collector, count: int):
+    """Run execute() `count` times; return (events, result) from the last run only."""
     modem_data = {"downstream": [1, 2, 3], "upstream": [1, 2]}
-
     with (
-        capture_events() as events,
         patch.object(collector, "_load_resources", return_value=(modem_data, [])),
         patch.object(collector, "_run_parse_phase", return_value=modem_data),
         patch.object(collector, "_execute_logout_if_needed"),
     ):
-        result = collector.execute()
+        for _ in range(count - 1):
+            collector.execute()
+        with capture_events() as events:
+            result = collector.execute()
+    return events, result
+
+
+def _only_collection_complete(events) -> CollectionComplete:
+    return next(e for e in events if isinstance(e, CollectionComplete))
+
+
+def test_collection_complete_emitted_on_success():
+    collector = _collecting_collector()
+
+    events, result = _run_collections(collector, 1)
 
     assert result.success is True
     assert_event_emitted(events, CollectionComplete, model=_MODEL)
-    event = next(e for e in events if isinstance(e, CollectionComplete))
+    event = _only_collection_complete(events)
     assert event.ds_count == 3
     assert event.us_count == 2
     assert event.elapsed_ms >= 0
-    assert event.level == EventLevel.DEBUG
+
+
+def test_collection_complete_first_collection_is_info():
+    """First completed collection confirms the poll returned data (ORCHESTRATION_SPEC § Logging Contract)."""
+    collector = _collecting_collector()
+
+    events, _result = _run_collections(collector, 1)
+
+    assert _only_collection_complete(events).level == EventLevel.INFO
+
+
+def test_collection_complete_subsequent_is_debug():
+    """Every collection after the first is steady state, so it drops to DEBUG."""
+    collector = _collecting_collector()
+
+    events, _result = _run_collections(collector, 2)
+
+    assert _only_collection_complete(events).level == EventLevel.DEBUG
 
 
 # ---------------------------------------------------------------------------

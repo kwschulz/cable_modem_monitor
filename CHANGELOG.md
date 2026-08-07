@@ -51,6 +51,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   login of a session's lifetime now logs at INFO and every login after it
   at DEBUG. (Related to #189)
 
+- **The collection-complete log line is visible without debug logging.**
+  It was pinned to DEBUG despite being documented as first-poll INFO, the
+  same defect as the auth-success line above. A default-level log showed
+  that the login worked but said nothing about whether the poll returned
+  data, which is the half carrying the downstream and upstream channel
+  counts. The first completed collection of a session's lifetime now logs
+  at INFO and every one after it at DEBUG. (Related to #189)
+
 ## [3.14.0-beta.19] - 2026-08-05
 
 ### Added
