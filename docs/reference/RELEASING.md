@@ -135,6 +135,19 @@ then merged and tagged on the merge commit. Delete the branch after.
   author's own approval), so the maintainer merges with admin bypass.
 - A branch off current `main` can't fall behind. If one drifts, rebase
   it onto `main`, don't cherry-pick.
+- **"Current `main`" means `origin/main`, not the local branch.** PRs
+  merge on GitHub, and `git fetch` advances only the remote-tracking
+  ref, so local `main` never moves unless it is checked out and pulled.
+  In this workflow it never is. Cut from the fetched ref:
+
+  ```bash
+  git fetch origin
+  git checkout -b feature/vX.Y.0-beta.N origin/main
+  ```
+
+  To bring local `main` current without checking it out, run
+  `git fetch origin main:main`. It fast-forwards, and refuses rather
+  than rewrites if the branch has diverged.
 
 This replaced a long-lived beta-line branch that fell behind `main` and
 let commits dodge the PR gates until they surfaced all at once (the

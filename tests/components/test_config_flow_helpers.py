@@ -1220,17 +1220,23 @@ class TestValidationReleasesSession:
 class TestPostLoginKeyIsStrategyDependent:
     """A post-login 401 only means "session refused" if the login was verified.
 
-    basic auth never validates a password, and plain form auth accepts
-    any response under HTTP 400, so for those a 401 on the data page is
-    most often the bad password surfacing late. Reporting it as "your
-    password is fine" is what beta.17 got wrong.
+    basic auth never validates a password, and form auth with no
+    ``success:`` criterion accepts any response under HTTP 400, so for
+    those a 401 on the data page is most often the bad password
+    surfacing late. Reporting it as "your password is fine" is what
+    beta.17 got wrong. The discriminator is not the strategy name:
+    ``form`` answers differently depending on whether the entry
+    declares a criterion.
     """
 
     # fmt: off
     _CASES = [
         # (strategy,     auth kwargs,                        expected key,       description)
         ("basic",        {},                                 "invalid_auth",     "never validates"),
-        ("form",         {"action": "/login.htm"},           "invalid_auth",     "accepts any 2xx/3xx"),
+        ("form",         {"action": "/login.htm"},           "invalid_auth",     "no criterion, accepts any 2xx/3xx"),
+        ("form",         {"action": "/login.htm",
+                          "success": {
+                              "redirect": "/index.htm"}},    "session_rejected", "criterion checks the landing"),
         ("form_pbkdf2",  {"login_endpoint": "/l",
                           "pbkdf2_iterations": 1000,
                           "pbkdf2_key_length": 128},         "session_rejected", "verifies via login_success"),
@@ -1247,7 +1253,9 @@ class TestPostLoginKeyIsStrategyDependent:
         config.auth = TypeAdapter(AuthConfig).validate_python({"strategy": strategy, **auth})
         return config
 
-    @pytest.mark.parametrize(("strategy", "auth", "expected", "description"), _CASES, ids=[c[0] for c in _CASES])
+    @pytest.mark.parametrize(
+        ("strategy", "auth", "expected", "description"), _CASES, ids=[f"{c[0]}-{c[3]}" for c in _CASES]
+    )
     @pytest.mark.parametrize("signal", [CollectorSignal.LOAD_AUTH, CollectorSignal.LOAD_INTEGRITY])
     def test_key_follows_auth_strategy(
         self,

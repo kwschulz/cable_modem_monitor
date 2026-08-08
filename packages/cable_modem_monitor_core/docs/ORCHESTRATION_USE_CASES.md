@@ -1897,7 +1897,8 @@ HA are now wrong. Current session in memory may still be valid.
 **Scope.** UC-87 is the 401/403 case: the modem examined the credential
 and rejected it. A login that answers 5xx never reaches this use case —
 the modem declined to serve the request without judging the credential,
-which is UC-87a. A 404 is UC-87b.
+which is UC-87a. A 404 is UC-87b. A login answered under HTTP 400 whose
+landing fails a declared `success:` criterion is UC-87c.
 
 **Why not retry?** AUTH_FAILED means the modem explicitly rejected the
 credentials. Unlike CONNECTIVITY (network glitch) or LOAD_AUTH (stale
@@ -2002,6 +2003,73 @@ firmware moved the login endpoint. The login answers 404.
 > **Status:** Implemented. `_trip_circuit_breaker(status_code=404)`;
 > the orchestrator's blocked-poll branch reads
 > `circuit_trip_status_code`.
+
+---
+
+### UC-87c: Runtime — login answered, success criterion rejected the landing
+
+**Preconditions:** Modem uses `strategy: form` with a `success:` block.
+The login POST answers under HTTP 400, so the transport-level login
+succeeded, but the landing does not match the declared criterion. Nine
+catalog entries declare a criterion as of 3.14.0-beta.20, all of them
+`redirect`.
+
+| Step | Action | State change | Observable |
+|------|--------|-------------|------------|
+| 1 | Collector: session invalid → authenticate | | |
+| 2 | FormAuthManager: POST to `action`, following redirects | | |
+| 3 | `_check_success`: status < 400 passes the HTTP guard; criterion compared against the landing → mismatch | | |
+| 4 | Returns `AuthResult(success=False)` naming which criterion failed and what was observed | | WARNING log: "Auth failed [model] strategy=form" with request, response status, body snippet |
+| 5 | Collector: status is not 5xx → `ModemResult(signal=AUTH_FAILED, auth_status_code=<login status>)` | | |
+| 6 | Policy: AUTH_FAILED trips the breaker on the first occurrence | streak 0→1, circuit=True | ERROR log: "Auth circuit breaker OPEN — credentials rejected..." |
+| 7 | Later polls short-circuit | No collection | Snapshot error: "Circuit breaker open — reconfigure credentials" |
+
+**Current behavior:**
+
+- Identical to UC-87 from step 5 on: immediate trip, no retry, HA starts
+  the reauth flow (UC-81)
+- `auth_status_code` is the login response's own status, so it is 2xx or
+  3xx here. Only 404 changes the blocked-poll message (UC-87b)
+- Config flow shows `invalid_auth`. `_SIGNAL_ERROR_MAP` maps
+  `AUTH_FAILED` unconditionally; the `session_rejected` refinement
+  applies to `LOAD_AUTH` and `LOAD_INTEGRITY` only, so it never sees
+  this signal (`CONFIG_FLOW_SPEC.md` § Step 4: Validate, the
+  signal-to-error-key table)
+- The mismatch detail reaches the WARNING log and nothing the user sees
+
+**Distinguishing this from UC-87.** UC-87 is the modem's own verdict on
+the credential. Here the modem returned success and the criterion
+supplied the verdict, so the same signal covers two different states: a
+wrong password, and a correct password landing somewhere the entry never
+captured. Nothing downstream separates them.
+
+**What this use case does not establish.** Whether a criterion
+discriminates a refused login from an accepted one is a per-entry
+evidence question, not a Core behavior. `_check_success` compares the
+landing against what the entry declares; a firmware that answers its
+success landing regardless of credentials never reaches this path, and
+the refusal reads as success instead. No committed fixture captures a
+refused login for any of the nine entries — every captured login POST is
+an accepted one — so for those entries the criterion is observed to
+accept, and not observed to reject.
+
+**Evidence:** #189 (Netgear CM2050V, 3.14.0-beta.20). The login answers
+200 at `/ErrorMsg.htm` where the entry declares `/index.htm`, producing
+`AUTH_FAILED` with "Login redirect mismatch: expected path containing
+'/index.htm', got '/ErrorMsg.htm'". The reporter states the credential
+is known good, and the committed captures for the same firmware land on
+`/index.htm`, so the landing varies on this hardware — but the cause is
+not established, which is why this use case documents the signal and not
+a diagnosis.
+
+> **Status:** Implemented. `_check_success` applies the criterion after
+> the HTTP-error guard; the collector maps the failure to `AUTH_FAILED`.
+> **Open decision:** what `AUTH_FAILED` should tell the user when the
+> criterion, not the modem, rejected the login. Tracked as journal task
+> `decide-what-auth-failed-should-tell-the-user-when-a-success`; the
+> message is unchanged until it is settled.
+
+---
 
 ### UC-88: Reboot-signal trigger
 

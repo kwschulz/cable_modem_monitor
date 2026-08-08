@@ -20,7 +20,7 @@
 | [RESOURCE_LOADING_SPEC.md](RESOURCE_LOADING_SPEC.md) | Resource dict contract, loader behavior, HNAP batching |
 | [ORCHESTRATION_SPEC.md](ORCHESTRATION_SPEC.md) | Orchestrator, collector, health monitor, restart monitor — interface contracts and data models |
 | [LOGGING_SPEC.md](LOGGING_SPEC.md) | Structured log event union — EventLevel, adapter contract, full event inventory by phase, test pattern |
-| [ORCHESTRATION_USE_CASES.md](ORCHESTRATION_USE_CASES.md) | 81 scenario-based use cases — normal ops, auth failures, connectivity, restart, health, lifecycle |
+| [ORCHESTRATION_USE_CASES.md](ORCHESTRATION_USE_CASES.md) | 71 scenario-based use cases — normal ops, auth failures, connectivity, restart, health, lifecycle |
 | [RUNTIME_POLLING_SPEC.md](RUNTIME_POLLING_SPEC.md) | Poll cycle, session lifecycle, health pipeline, restart recovery |
 | [FIELD_REGISTRY.md](FIELD_REGISTRY.md) | Three-tier field naming authority |
 | [VERIFICATION_STATUS.md](VERIFICATION_STATUS.md) | Modem status enum and verification lifecycle |
