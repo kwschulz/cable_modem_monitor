@@ -428,6 +428,9 @@ class TestAuthFailure:
     """UC-10/UC-87: Wrong credentials — circuit trips immediately."""
 
     def test_single_auth_failure_trips_circuit(self) -> None:
+        # UC-10's full assertion set. TestCircuitBreaker held a second copy
+        # of this scenario until beta.21 — the same duplication UC-10 and
+        # UC-14 carried in the docs, arrived at independently.
         collector = _mock_collector(_fail_result(CollectorSignal.AUTH_FAILED, "wrong password"))
         orch = _make_orchestrator(collector=collector)
 
@@ -437,6 +440,7 @@ class TestAuthFailure:
         assert orch.diagnostics().auth_failure_streak == 1
         assert orch.diagnostics().circuit_breaker_open is True
         assert snapshot.modem_data is None
+        assert collector.execute.call_count == 1, "one attempt, then stop"
 
 
 class TestStreakReset:
@@ -485,18 +489,11 @@ class TestLockout:
 
 
 class TestCircuitBreaker:
-    """UC-10/15/87: Circuit breaker trip and blocking."""
+    """UC-15/87: an open breaker blocks every later poll.
 
-    def test_auth_failed_trips_immediately(self) -> None:
-        """UC-87: First AUTH_FAILED → circuit open. One attempt, stop."""
-        collector = _mock_collector(_fail_result(CollectorSignal.AUTH_FAILED))
-        orch = _make_orchestrator(collector=collector)
-
-        orch.get_modem_data()
-
-        assert orch.diagnostics().circuit_breaker_open is True
-        assert orch.diagnostics().auth_failure_streak == 1
-        assert collector.execute.call_count == 1
+    The trip itself is TestAuthFailure's; this class owns what happens
+    afterwards.
+    """
 
     def test_circuit_blocks_polling(self) -> None:
         """UC-15: Open circuit → no collection."""

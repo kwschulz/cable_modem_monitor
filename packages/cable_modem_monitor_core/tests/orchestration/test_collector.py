@@ -1047,9 +1047,15 @@ def _login_failure(status: int | None) -> dict[str, Any]:
     }
 
 
+# Only 5xx is the modem declining to serve the login. Everything else that
+# comes back as a failed AuthResult is a verdict on the credential, whoever
+# reached it — the modem itself, or a declared success criterion.
+#
 # ┌────────┬─────────────────────┬──────────────────────────────────────┐
 # │ status │ expected signal     │ why                                  │
 # ├────────┼─────────────────────┼──────────────────────────────────────┤
+# │ 200    │ AUTH_FAILED         │ criterion rejected the landing       │
+# │        │                     │ (UC-87c); HNAP's LoginResult FAILED  │
 # │ 401    │ AUTH_FAILED         │ credential examined and rejected     │
 # │ 403    │ AUTH_FAILED         │ credential examined and rejected     │
 # │ 404    │ AUTH_FAILED         │ login endpoint absent (UC-87b)       │
@@ -1060,8 +1066,14 @@ def _login_failure(status: int | None) -> dict[str, Any]:
 # │ none   │ AUTH_FAILED         │ no response to inspect               │
 # └────────┴─────────────────────┴──────────────────────────────────────┘
 #
+# The 200 row is not hypothetical: a form entry with a success criterion
+# fails on a 2xx landing, and HNAP answers a rejected credential with 200
+# and LoginResult "FAILED". auth_status_code carries that 2xx through, so
+# only a 404 changes the blocked-poll message (UC-87b).
+#
 # fmt: off
 LOGIN_STATUS_CASES = [
+    (200,  CollectorSignal.AUTH_FAILED,      "200-criterion-rejected"),
     (401,  CollectorSignal.AUTH_FAILED,      "401-rejected"),
     (403,  CollectorSignal.AUTH_FAILED,      "403-rejected"),
     (404,  CollectorSignal.AUTH_FAILED,      "404-absent-endpoint"),
