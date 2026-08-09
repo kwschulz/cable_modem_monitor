@@ -436,10 +436,14 @@ complete matrix and interval limits.
 
 ## Reauthentication Flow
 
-When the modem rejects credentials 6 times consecutively, the
-integration triggers HA's native reauth flow. The user re-enters
-credentials via `async_step_reauth` (reusing the Step 3 connection
-form). Validation runs identically to Step 4.
+When Core's auth circuit breaker opens, the integration triggers HA's
+native reauth flow. Two mechanisms open it, and either one gets here: a
+rejected credential (`AUTH_FAILED`) or a firmware lockout
+(`AUTH_LOCKOUT`) trips it on the first occurrence, while a
+session-shaped failure (`LOAD_AUTH`, `LOAD_INTEGRITY`) accumulates and
+trips it at 6 consecutive failures. The user re-enters credentials via
+`async_step_reauth` (reusing the Step 3 connection form). Validation
+runs identically to Step 4.
 
 See [HA_ADAPTER_SPEC.md](HA_ADAPTER_SPEC.md#reauth-flow) for the
 full orchestrator state machine and circuit breaker behavior.

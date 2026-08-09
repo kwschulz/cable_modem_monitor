@@ -12,11 +12,10 @@ Use case coverage (orchestrator level):
 - UC-04: Zero channels with system_info — NO_SIGNAL
 - UC-05: Zero channels without system_info — NO_SIGNAL with warning
 - UC-07: DOCSIS status derivation (table-driven)
-- UC-10: Wrong credentials — single failure
+- UC-10: Wrong credentials — breaker trips on the first failure
 - UC-11: Transient auth failure — streak resets on success
 - UC-12: Firmware lockout — AUTH_LOCKOUT trips circuit immediately
 - UC-13: LOAD_AUTH — threshold circuit breaker, session issues self-correct
-- UC-14: Circuit breaker trip — credential rejection
 - UC-15: Circuit breaker blocks polling
 - UC-17: LOAD_AUTH — 401 on data page
 - UC-18: LOAD_AUTH — self-correcting stale session
@@ -486,7 +485,7 @@ class TestLockout:
 
 
 class TestCircuitBreaker:
-    """UC-14/15/87: Circuit breaker trip and blocking."""
+    """UC-10/15/87: Circuit breaker trip and blocking."""
 
     def test_auth_failed_trips_immediately(self) -> None:
         """UC-87: First AUTH_FAILED → circuit open. One attempt, stop."""

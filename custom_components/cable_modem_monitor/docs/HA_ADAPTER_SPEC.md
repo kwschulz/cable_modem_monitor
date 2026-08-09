@@ -522,8 +522,10 @@ User presses "Restart Modem"
  │     shows a flakey state.
  │
  ├─ 4. Send persistent notification:
- │     success → "Restart command sent"
- │     failure → "Restart command failed: <error>"
+ │     success → "Restart Command Sent [MODEL]" / "<model> restart
+ │               command dispatched in <N.N> seconds."
+ │     failure → "Modem Restart Failed [MODEL]" / "<model> restart did
+ │               not dispatch: <error>"
  │
  └─ 5. Trigger one immediate data refresh so the dashboard reacts to
        the post-dispatch state (typically UNREACHABLE while the modem
@@ -863,8 +865,14 @@ Two defences, both required:
 
 ## Reauth Flow
 
-When Core's auth circuit breaker opens (6 consecutive auth failures),
-the adapter triggers HA's native reauthentication flow.
+When Core's auth circuit breaker opens, the adapter triggers HA's
+native reauthentication flow. Two mechanisms open it: `AUTH_FAILED` and
+`AUTH_LOCKOUT` trip it on the first occurrence, while `LOAD_AUTH` and
+`LOAD_INTEGRITY` accumulate and trip it at 6 consecutive failures
+(`ORCHESTRATION_SPEC.md` § Auth Circuit Breaker). The adapter reads
+`connection_status` and the open flag, never the signal, and the policy
+collapses all four signals to `AUTH_FAILED` — so all four routes land
+on this one flow with one message (UC-81a).
 
 ```text
 Circuit breaker opens

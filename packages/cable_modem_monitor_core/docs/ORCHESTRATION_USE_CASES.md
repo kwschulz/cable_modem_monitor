@@ -185,31 +185,43 @@ only one authenticated session.
 
 ## Auth Failures
 
-### UC-10: Wrong credentials — single failure
+### UC-10: Wrong credentials — breaker trips on the first failure
 
-**Preconditions:** Incorrect password configured.
+**Preconditions:** Modem reachable. Incorrect password configured.
 
 | Step | Action | State change | Observable |
 |------|--------|-------------|------------|
 | 1 | Consumer calls `get_modem_data()` | | |
-| 2 | Collector: auth fails → `AuthResult.FAILURE` | | |
+| 2 | Collector: auth fails → `AuthResult(success=False)` | | WARNING log: "Auth failed [MODEL] strategy=..." with request, response status, body snippet |
 | 3 | Collector returns `ModemResult(success=False, signal=AUTH_FAILED)` | | |
-| 4 | Orchestrator: streak 0→1 | | |
-| 5 | Orchestrator: threshold check (1 < 6) → circuit stays closed | | |
-| 6 | Return `ModemSnapshot(AUTH_FAILED)` | | |
+| 4 | Policy: streak 0→1, then trips the breaker in the same call | streak=1, circuit=True | |
+| 5 | Return `ModemSnapshot(AUTH_FAILED)` | | |
 
 **Assertions:**
 
 - `snapshot.connection_status == AUTH_FAILED`
 - `diagnostics().auth_failure_streak == 1`
-- `diagnostics().circuit_breaker_open == False`
+- `diagnostics().circuit_breaker_open == True`
 - `snapshot.modem_data is None`
+- Exactly one login attempt against the modem
+- ERROR log: "Auth circuit breaker OPEN [MODEL] — 1 consecutive auth
+  failures. Polling stopped. Reconfigure credentials to resume."
+
+**The threshold does not apply here.** `AUTH_FAILED` and `AUTH_LOCKOUT`
+route to `_trip_circuit_breaker`, which never reads
+`auth_failure_threshold`; the threshold governs `LOAD_AUTH` and
+`LOAD_INTEGRITY` only (UC-13). Both mechanisms increment the same
+`_auth_failure_streak`, so the count in the log line is not progress
+toward a limit here — it reads 1 because this was the first failure.
+The polls that follow are blocked by the open breaker (UC-15).
 
 ---
 
 ### UC-11: Transient auth failure — streak resets on success
 
-**Preconditions:** One prior auth failure (streak=1).
+**Preconditions:** One prior `LOAD_AUTH` or `LOAD_INTEGRITY` failure
+(streak=1, breaker still closed). `AUTH_FAILED` cannot leave this state:
+it trips the breaker on the first occurrence (UC-10).
 
 | Step | Action | State change | Observable |
 |------|--------|-------------|------------|
@@ -244,8 +256,10 @@ only one authenticated session.
 - `diagnostics().circuit_breaker_open == True`
 - No further login attempts — polling blocked until the consumer
   rebuilds the orchestrator (reauth → entry reload, UC-16)
-- WARNING log: "Auth lockout — firmware anti-brute-force triggered,
-  stopping immediately"
+- WARNING log: "Auth lockout [MODEL] — firmware anti-brute-force
+  triggered, stopping immediately (streak: 1)"
+- ERROR log: "Auth circuit breaker OPEN [MODEL] — 1 consecutive auth
+  failures. Polling stopped. Reconfigure credentials to resume."
 
 ---
 
@@ -276,24 +290,13 @@ If LOAD_AUTH persists (6 consecutive):
 
 ---
 
-### UC-14: Circuit breaker trip — credential rejection
+### UC-14: (retired)
 
-**Preconditions:** Modem reachable. Credentials are wrong.
-
-| Step | Action | State change | Observable |
-|------|--------|-------------|------------|
-| 1 | Consumer calls `get_modem_data()` | | |
-| 2 | Collector: AUTH_FAILED | | |
-| 3 | Orchestrator: streak 0→1, circuit trips | circuit=True | |
-| 4 | Return `ModemSnapshot(AUTH_FAILED)` | | |
-
-**Assertions:**
-
-- `diagnostics().circuit_breaker_open == True`
-- `diagnostics().auth_failure_streak == 1`
-- Exactly one login attempt against the modem
-- ERROR log: "Auth circuit breaker OPEN [MODEL] — 1 consecutive auth
-  failures. Polling stopped. Reconfigure credentials to resume."
+UC-14 described the same scenario as UC-10 — reachable modem, wrong
+credentials, `AUTH_FAILED` — and the two drifted into opposite
+assertions about the circuit breaker while neither named the other.
+UC-10 is the live case; UC-15 covers the polls that follow once the
+breaker is open.
 
 ---
 
@@ -518,7 +521,7 @@ bodies or JSON variables the parser is configured to extract from.
 - What the user is told on escalation is UC-17a's rule, not this use
   case's — `LOAD_INTEGRITY` takes the same per-strategy refinement as
   `LOAD_AUTH`. Do not restate it here
-- WARNING log: `"Stub response on /status.html [MODEL] — 0 of N expected parser anchors found, treating as session integrity failure"`
+- WARNING log: `"Stub page detected [MODEL] — /status.html: 0/N anchors found"`
 - `ParseDiagnostics` is captured per resource in the diagnostic dump (`RUNTIME_POLLING_SPEC § Diagnostics for Remote Troubleshooting`)
 
 **Discriminator from UC-04:** UC-04 assumes the parser fulfilled its
@@ -687,7 +690,7 @@ has expired the session (firmware timeout or max-session limit).
 - Signal is LOAD_AUTH (not LOAD_ERROR) — session context determines routing
 - Session is cleared before the same-poll retry (→ UC-18)
 - Successful retry does not increment auth failure streak
-- WARNING log: "HNAP HTTP 404 on reused session [MODEL] — session likely expired"
+- WARNING log: "HNAP session expired [MODEL] — HTTP 404"
 - INFO logs show the retry and successful same-poll recovery
 - After the second consecutive recovered stale session, later polls
   clear the cached session before collection and go straight to fresh auth
@@ -718,7 +721,7 @@ a firmware issue or temporary overload.
 - Signal is LOAD_ERROR (not LOAD_AUTH) — fresh session rules out stale session
 - Session is NOT cleared — avoid unnecessary re-login that could trigger lockout
 - Auth failure streak NOT incremented
-- INFO log: "HNAP load error [MODEL] — {reason}"
+- WARNING log: "HNAP load error [MODEL] — {reason}"
 
 ---
 
@@ -733,7 +736,7 @@ configured. The login page contains `<input type="hidden">` fields
 | 1 | Consumer calls `get_modem_data()` | | |
 | 2 | Collector: no active session, starts auth | | |
 | 3 | FormAuthManager: GET `login_page` | Session cookies established | |
-| 4 | FormAuthManager: reads hidden fields from login form HTML | | DEBUG log: "Discovered N hidden field(s)" |
+| 4 | FormAuthManager: reads hidden fields from login form HTML | | DEBUG log: "Discovered N hidden field(s) from login form" |
 | 5 | FormAuthManager: builds POST data — discovered fields (base) ← `hidden_fields` (override) ← credentials | | |
 | 6 | FormAuthManager: POST to `action` endpoint with merged form data | | |
 | 7 | Success evaluation (redirect or status check) | Auth succeeded | |
@@ -1052,6 +1055,94 @@ No LOAD_AUTH step needed. Both paths are valid.
 
 ---
 
+### UC-88: Reboot-signal trigger
+
+**Preconditions:** Integration polling normally. The ISP pushes new
+firmware, the user power-cycles the modem, or the modem reboots
+itself from watchdog. No HA-layer restart was issued. The modem
+returns to answering polls before the user's next scheduled poll
+(otherwise the connectivity trigger would catch it instead — see
+UC-49).
+
+| Poll | What happens | `recovery_active` | Coordinator interval |
+|------|-------------|-------------------|---------------------|
+| N    | Normal poll — counters = (500, 50), docsis = Operational | False | user-configured (e.g., 15 min) |
+| N+1  | Successful poll: counters = (0, 0), docsis = Denied. Reboot-signal check matches (counter reset + transitional docsis = 2 of 3); recovery opens a window with reason `reboot_signals:counter_reset+transitional_docsis`. Observer fires. | **True** | Switches to recovery cadence (e.g., 30 s) |
+| N+2..k | Polls run at recovery cadence. Snapshots reflect actual modem state (ranging → operational). Window is NOT closed by operational snapshot — it runs its full duration. | True | recovery cadence |
+| N+k+1 | `Recovery.WINDOW_SECONDS` elapsed; window closes. Observer fires. | False | Restored to user-configured |
+
+**Core behavior:** The reboot-signal check runs inside
+`Recovery.evaluate_snapshot()` on every successful poll. It's a
+2-of-3 vote over counter reset, uptime drop, transitional docsis
+and returns a trigger reason or None. Recovery opens a window when
+the reason is non-None and no window is already active. See
+ORCHESTRATION_SPEC § Reboot-Signal Trigger for the signal set.
+
+**HA behavior:** The observer fires the `recovery_state_changed`
+dispatcher signal. Listeners respond:
+
+1. The data coordinator's `update_interval` switches to the
+   recovery cadence on entry, restores on exit. On entry, HA calls
+   `async_request_refresh()` so the first fast-cadence poll happens
+   immediately.
+2. The restart button's enabled state re-evaluates.
+
+**Status sensor is not special-cased.** It renders the snapshot's
+actual status throughout — Operational / Denied / Not Locked /
+Unreachable / whatever. No synthetic "Restarting…" label fires
+from recovery state.
+
+**False positives are bounded-harm.** If the reboot-signal check
+misfires on a firmware stats-clear or signal anomaly, the only
+consequence is polling faster for `Recovery.WINDOW_SECONDS`.
+Dashboard state is unaffected (it always reflects truth). No stalls,
+no timeouts, no misleading UX.
+
+**Modems without the relevant fields** simply don't trigger from
+the reboot-signal check. Their reboots surface through normal
+polling via UC-49 instead. That's fine — the signal check is an
+enhancement, not a requirement.
+
+**Interaction with commanded restart:** the two triggers re-enter
+differently. A restart command issued while a signal-check window is
+open is *not* refused — `recovery.begin()` is the one entry that
+always (re)starts the window, so the clock resets and the reason
+updates (UC-42). A reboot-signal match during an already-open window
+is a no-op, because the vote opens a window only when none is active.
+
+---
+
+### UC-89: Restart refused by the modem
+
+**Preconditions:** `actions.restart` is declared. The user presses
+restart. Nothing raises: the modem answers, but it answers no.
+
+Two ways this arrives, both returning `ActionResult(success=False)`
+rather than an exception:
+
+| Step | Action | Observable |
+|------|--------|-----------|
+| 1 | `actions.restart` declares `action_auth` and the per-action login is refused (bad or missing credentials → HTTP 401). The command is never sent. | ERROR log: `Restart command failed [MODEL] — Per-action auth failed: Login returned HTTP 401` |
+| 2 | Or the command itself is sent and the modem answers 4xx/5xx. | ERROR log: `Restart command failed [MODEL] — Action refused with status 401` |
+
+**Assertions:**
+
+- `restart()` returns `success=False`, `error="command_failed"`
+- **No recovery window opens** — there is no reboot to poll through
+- **The collector session is not cleared** — the reason to clear it is
+  firmware invalidating it during a reboot, and no reboot happened
+- The consumer surfaces the failure. HA raises `HomeAssistantError`
+  from the button press, so the user sees it rather than a success
+  notification for a modem that never restarted
+
+**Why this is its own case.** A modem with no monitoring auth but a
+credentialed restart (`auth.strategy: none` + `action_auth`) has a
+config-entry state where monitoring works perfectly and restart cannot
+work at all: no password was ever stored, because nothing needed one.
+Silence here reads as success to the only person who can fix it (#82).
+
+---
+
 ## Health
 
 ### UC-50: Normal health check — all probes on a HEAD-capable modem
@@ -1074,7 +1165,8 @@ No LOAD_AUTH step needed. Both paths are valid.
 - ICMP, HEAD, and TCP all run when conditions are met
 - Order: ICMP first, then HEAD (uncontested connection), then TCP
 - Status derives from ICMP + TCP only — HEAD is latency-only
-- DEBUG log: "Health check: responsive (ICMP 4ms, TCP 2ms, HTTP HEAD 10ms, 0 bytes)"
+- DEBUG log (steady state; INFO on a status change): "Health check
+  [MODEL]: responsive — ICMP 4.0ms, TCP 2.0ms, HTTP HEAD 10.0ms"
 
 ---
 
@@ -1204,7 +1296,8 @@ responds at L3.
 
 - `health_status == DEGRADED`
 - Modem is network-reachable but TCP listen path is unhappy
-- WARNING log: "Health check: degraded (ICMP OK, TCP timeout)"
+- WARNING log (on the transition into degraded): "Health check [MODEL]:
+  degraded — ICMP OK, TCP timeout"
 - HEAD failure alone (when TCP succeeds) does **not** produce DEGRADED
   — application-layer issues surface via the next slow-poll instead
 
@@ -2004,7 +2097,7 @@ sequenceDiagram
 - No duplicate entities — deferred creation is one-shot
 - Deferred listener does not fire after unsubscribe
 - If consumer unloads before modem recovers, listener is cleaned up
-- Transition logged: "Status transition: unreachable to online"
+- Transition logged: "Status transition [MODEL]: unreachable → online"
 - Equivalent to UC-34 at orchestrator level, but consumer handles entity lifecycle
 - Health recovery listener bounds recovery latency to the health check interval
   (not the scan interval) — orchestrator clears connectivity backoff when health
@@ -2104,24 +2197,31 @@ HA are now wrong. Current session in memory may still be valid.
 | Poll | What happens | Streak | Status |
 |------|-------------|--------|--------|
 | N | Session still valid → reuse → OK | 0 | ONLINE |
-| N+K | Session expires → re-auth → wrong password | 1 | AUTH_FAILED |
-| N+K+1 | Circuit trips immediately → trigger reauth | 1 | AUTH_FAILED |
+| N+K | Session expires → re-auth → wrong password. Streak 0→1 and the breaker trips in the same poll → trigger reauth | 1 | AUTH_FAILED |
+| N+K+1 | Breaker blocks the poll — no collection (UC-15) | 1 | AUTH_FAILED |
 
 **Target behavior:**
 
-- First AUTH_FAILED → circuit breaker trips (threshold=1 for
-  credential failures)
+- First AUTH_FAILED → circuit breaker trips. `_trip_circuit_breaker`
+  does not read `auth_failure_threshold` at all; there is no
+  credential-failure threshold to configure. The threshold is
+  `LOAD_AUTH`/`LOAD_INTEGRITY`'s alone (UC-13)
 - Polling stops immediately — no further login attempts
 - HA triggers reauth flow (UC-81) — user sees notification to
   re-enter credentials
 - After successful reauth → back to normal (UC-16)
 - Zero risk of triggering modem anti-brute-force lockout
 
-**Scope.** UC-87 is the 401/403 case: the modem examined the credential
-and rejected it. A login that answers 5xx never reaches this use case —
-the modem declined to serve the request without judging the credential,
-which is UC-87a. A 404 is UC-87b. A login answered under HTTP 400 whose
-landing fails a declared `success:` criterion is UC-87c.
+**Scope.** UC-87 is the case where the modem examined the credential and
+rejected it. The status code is not what identifies it: HNAP answers a
+rejected login with HTTP 200 and `LoginResult: "FAILED"`. `AUTH_FAILED`
+is the collector's default for any failed login that is not a 5xx, so
+the siblings below are carved out by cause, not by status code. A login
+answering 5xx is UC-87a — the modem declined to serve the request
+without judging the credential. A 404 is UC-87b. A login
+answered under HTTP 400 whose landing fails a declared `success:`
+criterion is UC-87c. A login that failed before the modem judged
+anything is UC-87d.
 
 **Why not retry?** AUTH_FAILED means the modem explicitly rejected the
 credentials. Unlike CONNECTIVITY (network glitch) or LOAD_AUTH (stale
@@ -2349,90 +2449,3 @@ being wrong, reported to the user as their password being wrong.
 > **Status:** Current behavior. The signal is correct in the sense that
 > the login did fail; what it asserts about *why* is the open question
 > UC-87c also carries.
-
----
-
-### UC-88: Reboot-signal trigger
-
-**Preconditions:** Integration polling normally. The ISP pushes new
-firmware, the user power-cycles the modem, or the modem reboots
-itself from watchdog. No HA-layer restart was issued. The modem
-returns to answering polls before the user's next scheduled poll
-(otherwise the connectivity trigger would catch it instead — see
-UC-49).
-
-| Poll | What happens | `recovery_active` | Coordinator interval |
-|------|-------------|-------------------|---------------------|
-| N    | Normal poll — counters = (500, 50), docsis = Operational | False | user-configured (e.g., 15 min) |
-| N+1  | Successful poll: counters = (0, 0), docsis = Denied. Reboot-signal check matches (counter reset + transitional docsis = 2 of 3); recovery opens a window with reason `reboot_signals:counter_reset+transitional_docsis`. Observer fires. | **True** | Switches to recovery cadence (e.g., 30 s) |
-| N+2..k | Polls run at recovery cadence. Snapshots reflect actual modem state (ranging → operational). Window is NOT closed by operational snapshot — it runs its full duration. | True | recovery cadence |
-| N+k+1 | `Recovery.WINDOW_SECONDS` elapsed; window closes. Observer fires. | False | Restored to user-configured |
-
-**Core behavior:** The reboot-signal check runs inside
-`Recovery.evaluate_snapshot()` on every successful poll. It's a
-2-of-3 vote over counter reset, uptime drop, transitional docsis
-and returns a trigger reason or None. Recovery opens a window when
-the reason is non-None and no window is already active. See
-ORCHESTRATION_SPEC § Reboot-Signal Trigger for the signal set.
-
-**HA behavior:** The observer fires the `recovery_state_changed`
-dispatcher signal. Listeners respond:
-
-1. The data coordinator's `update_interval` switches to the
-   recovery cadence on entry, restores on exit. On entry, HA calls
-   `async_request_refresh()` so the first fast-cadence poll happens
-   immediately.
-2. The restart button's enabled state re-evaluates.
-
-**Status sensor is not special-cased.** It renders the snapshot's
-actual status throughout — Operational / Denied / Not Locked /
-Unreachable / whatever. No synthetic "Restarting…" label fires
-from recovery state.
-
-**False positives are bounded-harm.** If the reboot-signal check
-misfires on a firmware stats-clear or signal anomaly, the only
-consequence is polling faster for `Recovery.WINDOW_SECONDS`.
-Dashboard state is unaffected (it always reflects truth). No stalls,
-no timeouts, no misleading UX.
-
-**Modems without the relevant fields** simply don't trigger from
-the reboot-signal check. Their reboots surface through normal
-polling via UC-49 instead. That's fine — the signal check is an
-enhancement, not a requirement.
-
-**Interaction with commanded restart:** if a restart command is
-issued and recovery is already open from a signal-check trigger, the
-command is refused (UC-42). If the command is issued first, any
-subsequent reboot-signal match during the command's window is a no-op
-(window is already open; re-entry does nothing).
-
----
-
-### UC-89: Restart refused by the modem
-
-**Preconditions:** `actions.restart` is declared. The user presses
-restart. Nothing raises: the modem answers, but it answers no.
-
-Two ways this arrives, both returning `ActionResult(success=False)`
-rather than an exception:
-
-| Step | Action | Observable |
-|------|--------|-----------|
-| 1 | `actions.restart` declares `action_auth` and the per-action login is refused (bad or missing credentials → HTTP 401). The command is never sent. | `Restart command failed [MODEL]: Per-action auth failed: Login returned HTTP 401` |
-| 2 | Or the command itself is sent and the modem answers 4xx/5xx. | `Restart command failed [MODEL]: Action refused with status 401` |
-
-**Assertions:**
-
-- `restart()` returns `success=False`, `error="command_failed"`
-- **No recovery window opens** — there is no reboot to poll through
-- **The collector session is not cleared** — the reason to clear it is
-  firmware invalidating it during a reboot, and no reboot happened
-- The consumer surfaces the failure. HA raises `HomeAssistantError`
-  from the button press, so the user sees it rather than a success
-  notification for a modem that never restarted
-
-**Why this is its own case.** A modem with no monitoring auth but a
-credentialed restart (`auth.strategy: none` + `action_auth`) has a
-config-entry state where monitoring works perfectly and restart cannot
-work at all: no password was ever stored, because nothing needed one.
-Silence here reads as success to the only person who can fix it (#82).

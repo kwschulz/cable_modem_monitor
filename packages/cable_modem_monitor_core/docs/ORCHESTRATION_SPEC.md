@@ -1272,9 +1272,15 @@ Poll N+1: circuit blocks — no collection
 **Root cause detection via logs:**
 
 ```text
-INFO  Poll N: "Auth failed — wrong credentials or strategy mismatch (streak: 1)"
-ERROR Poll N: "Auth circuit breaker OPEN — credentials rejected. Polling stopped. Reconfigure credentials to resume."
+WARNING Poll N: "Auth failed [MODEL] strategy=form" plus the request,
+                response and body lines (see § Auth-Failure Detail Log)
+ERROR   Poll N: "Auth circuit breaker OPEN [MODEL] — 1 consecutive auth
+                failures. Polling stopped. Reconfigure credentials to resume."
 ```
+
+The streak in that ERROR line is the value at the moment of the trip,
+not a count toward a limit. `AUTH_FAILED` trips on the first
+occurrence, so it reads 1 here.
 
 **Firmware changes auth mechanism:**
 Same pattern as password change. The auth strategy in modem.yaml no
@@ -1283,14 +1289,17 @@ attempt, circuit trips immediately. User sees error, opens a GitHub
 issue or reconfigures.
 
 **Transient auth failure:**
-Modem is busy, temporarily rejects a login.
+Modem is busy and declines to serve the login (5xx).
 
 ```text
-Poll N:   AUTH_FAILED (streak: 1)
-Poll N+1: collection succeeds (streak: 0) — circuit stays closed
+Poll N:   AUTH_UNAVAILABLE — unreachable (streak unchanged, circuit closed)
+Poll N+1: collection succeeds
 ```
 
-Streak resets on success. Transient failures never reach the threshold.
+`AUTH_UNAVAILABLE` never touches the streak or the breaker at any
+repetition count (UC-87a). There is no transient form of `AUTH_FAILED`:
+it trips on the first occurrence, so a rejected credential never gets a
+second poll to recover in.
 
 **LOAD_AUTH on a data page:**
 401/403 on a data page after auth appeared to succeed.
@@ -1463,13 +1472,13 @@ first-poll output.
 
 **Backoff and circuit breaker:**
 
-- INFO: `"Backoff active [MODEL] (2 remaining), skipping collection"`
-- INFO: `"Backoff cleared [MODEL], resuming"`
+- INFO: `"Connectivity backoff active [MODEL] (2 remaining), skipping poll"`
+- INFO: `"Connectivity backoff cleared [MODEL], retrying"`
 
 **Collection outcomes:**
 
-- INFO (first poll) / DEBUG (after): `"Parse complete [MODEL]: 24 DS, 4 US channels"`
-- WARNING: `"Poll failed [MODEL] — signal: connectivity, error: ..."`
+- INFO (first poll) / DEBUG (after): `"Collection complete [MODEL] — DS: 24, US: 4 (812ms)"`
+- WARNING: `"Connection failure [MODEL] — unreachable (streak: 1, backoff: 1 polls)"`
 - INFO: `"Counter reset detected [MODEL] — corrected: 1000→0, uncorrected: 50→0"` (modem reboot — operator-relevant transition, never demoted)
 
 **State transitions:**
@@ -2057,7 +2066,7 @@ Every line includes `[MODEL]`. Two lines total — the command is
 one-shot.
 
 - INFO: `"Restart command sent [MODEL] — session cleared (0.4s)"`
-- ERROR: `"Restart command failed [MODEL]: <reason>"` — an exception,
+- ERROR: `"Restart command failed [MODEL] — <reason>"` — an exception,
   or the `ActionResult.message` when the executor reported failure
   (e.g. `Per-action auth failed: Login returned HTTP 401`).
 
@@ -2317,13 +2326,14 @@ per-poll noise.
 | UC | Covers |
 |----|--------|
 | UC-40 | Restart button: command dispatches, returns quickly, recovery window opens |
-| UC-42 | (retired) — Core no longer refuses based on recovery state; HA mutex serializes rapid button presses |
+| UC-42 | Restart during recovery is allowed — Core does not refuse based on recovery state; HA mutex serializes rapid button presses |
 | UC-43 | `get_modem_data()` during a recovery window behaves normally — no short-circuit |
 | UC-44 | Raises `RestartNotSupportedError` when `actions.restart` is absent |
 | UC-45 | Restart bypasses circuit breaker |
 | UC-46 | (retired; no response-timeout phase in the new model) |
 | UC-78 | Data sensors go Unavailable only when the snapshot's ``modem_data`` is None |
 | UC-88 | Reboot-signal check matches on a scheduled poll → recovery window opens |
+| UC-89 | Modem answers the restart but refuses it → `error="command_failed"`, no recovery window |
 
 ---
 

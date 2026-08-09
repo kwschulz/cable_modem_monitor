@@ -572,8 +572,8 @@ mismatches (JSON served as `text/html`) and auth issues (unexpected
 Each fetch is logged at DEBUG with its elapsed time:
 
 ```text
-DEBUG "Resource loaded: /status.html (800ms, 12.2KB)"
-DEBUG "Resource loaded: /info.html (1200ms, 8.0KB)"
+DEBUG "Resource fetched [MODEL] — /status.html (200, 12200B, 800ms)"
+DEBUG "Resource fetched [MODEL] — /info.html (200, 8000B, 1200ms)"
 ```
 
 This data is diagnostic — useful for identifying slow resources,
