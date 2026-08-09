@@ -292,11 +292,9 @@ If LOAD_AUTH persists (6 consecutive):
 
 ### UC-14: (retired)
 
-UC-14 described the same scenario as UC-10 — reachable modem, wrong
-credentials, `AUTH_FAILED` — and the two drifted into opposite
-assertions about the circuit breaker while neither named the other.
-UC-10 is the live case; UC-15 covers the polls that follow once the
-breaker is open.
+A reachable modem with wrong credentials is one scenario, not two.
+UC-10 is where it lives, and UC-15 covers the polls that follow once
+the breaker is open.
 
 ---
 
@@ -2396,31 +2394,40 @@ a diagnosis.
 
 ### UC-87d: Runtime — the login failed before the modem judged anything
 
-**Preconditions:** The login flow gave up part-way through, without a
-response the collector can read a status from. The modem may have
-answered every request it was sent. Four shapes reach here:
+**Preconditions:** The login flow gave up before the modem judged the
+credential. What is missing is a verdict, not necessarily a response —
+the modem may have answered every request it was sent, and answered
+them well. Four shapes reach here:
 
 | Shape | Example | Where |
 |-------|---------|-------|
-| The login page did not carry what our config expects | "Login page missing myIv or mySalt JS variables" | `form_sjcl` |
-| A value the page did carry failed validation | `myIv` is not valid hex; AES-CCM decryption failed | `form_sjcl` |
+| The login page did not carry what the strategy needs | "Login page missing myIv or mySalt JS variables" | `form_sjcl` |
+| A value the page carried failed validation | `myIv` is not valid hex; AES-CCM decryption failed | `form_sjcl` |
 | The handshake response omitted a required field | HNAP challenge missing `Challenge` or `PublicKey`; `url_token` inject with an empty body | `hnap`, `url_token` |
 | An environment problem, not a modem one | the `cryptography` package is absent | `form_sjcl`, `form_cbn` |
+
+A login page answering `>= 400` is not one of them. That is an HTTP
+failure carrying a status worth reading, so it classifies from that
+status like any other login failure and a 5xx is UC-87a. Only a page
+answering **under** 400 reaches here: the wrong device at the address,
+or firmware that moved the variables.
 
 | Step | Action | State change | Observable |
 |------|--------|-------------|------------|
 | 1 | Collector: session invalid → authenticate | | |
-| 2 | Auth returns `AuthResult(success=False)` with no `response` attached | | WARNING log naming the strategy and the specific error |
-| 3 | Collector: `auth_status_code` is `None`, so the 5xx test cannot match | | |
+| 2 | Auth returns `AuthResult(success=False)`, attaching the response wherever one exists | | WARNING log naming the strategy and the specific error |
+| 3 | Collector: `auth_status_code` is `None` or a 2xx, so the 5xx test cannot match | | |
 | 4 | `ModemResult(signal=AUTH_FAILED)` | | |
 | 5 | Policy: `AUTH_FAILED` trips the breaker on the first occurrence | streak 0→1, circuit=True | ERROR log: "Auth circuit breaker OPEN [MODEL] — 1 consecutive auth failures. Polling stopped. Reconfigure credentials to resume." |
 | 6 | HA starts the reauth flow (UC-81a) | | "The modem rejected your credentials. Please re-enter them." |
 
 **Assertions:**
 
-- `auth_status_code is None`. The `AUTH_UNAVAILABLE` classification
-  tests `500 <= status < 600`, so a missing status falls through to
-  `AUTH_FAILED` — the accusing branch is the default
+- `auth_status_code` carries no verdict: `None` where the flow stopped
+  before any response, a 2xx where the modem served one the strategy
+  could not use. The `AUTH_UNAVAILABLE` classification tests
+  `500 <= status < 600`, and neither value matches, so both fall through
+  to `AUTH_FAILED` — the accusing branch is the default
 - Immediate trip, no retry, identical to UC-87 from step 4 on
 - The blocked-poll message says reconfigure credentials, because only
   404 changes it (UC-87b)
@@ -2434,12 +2441,13 @@ was judged, and in the `form_sjcl` shape often before one was even
 sent. Retyping the password cannot resolve any of these, and for the
 environment shape no password exists that would.
 
-**`form_sjcl` reaches this on any HTTP error.** `_fetch_page_vars`
-never reads the login page's status and discards the response, so a
-401, a 404 and a 503 all arrive as an empty variable dict and are
-reported as a missing JavaScript variable. `AUTH_UNAVAILABLE` is
-unreachable from that strategy, and a busy modem (UC-87a) is reported
-as a bad password on the first poll. One catalog entry uses it.
+**Why the response still matters when there is no status to read.**
+Every failure here carries the response that produced it wherever one
+exists, even though the collector cannot classify from it: the page
+answered under 400, so the status says nothing. The body is what
+distinguishes a wrong device from moved firmware variables, and it is
+the only place that distinction survives. One catalog entry reaches
+this through `form_sjcl` (Arris TG3442DE).
 
 **Not observed in the field.** No ticket reports this class. It is
 enumerated from the failure branches, and it is the same cause family

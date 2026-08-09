@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A modem that is busy or erroring during login is no longer reported
+  as a wrong password.** Two auth strategies did not read the HTTP status
+  of the login they had just sent. `form_nonce` judged the outcome purely
+  from the response body, so a 401 or a 503 whose body happened not to
+  carry the firmware's error prefix was treated as a successful login.
+  `form_sjcl` fetched the login page without checking its status and
+  discarded the response, so every HTTP error arrived as an empty set of
+  JavaScript variables and surfaced as "Login page missing myIv or mySalt"
+  — stopping polling on the first attempt and telling the user to fix
+  their credentials. Both now treat a login answering 400 or above as
+  failed and keep the response, so a busy modem reports as unreachable
+  and retries on the next poll instead of demanding a password. Affects
+  the Arris SB6190 auth-required variant and the Arris TG3442DE; no
+  change for a modem whose login answers normally.
+
 ## [3.14.0-beta.20] - 2026-08-07
 
 ### Fixed

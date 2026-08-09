@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 import requests
@@ -187,6 +188,12 @@ class _Always401Handler(_AlwaysOkHandler):
     status = 401
 
 
+class _Always503Handler(_AlwaysOkHandler):
+    """Modem declining to serve the login — busy session slot, or mid-reboot."""
+
+    status = 503
+
+
 def _serve(handler: type[BaseHTTPRequestHandler]) -> Any:
     server = HTTPServer(("127.0.0.1", 0), handler)
     thread = Thread(target=server.serve_forever, daemon=True)
@@ -205,6 +212,89 @@ def always_ok_server() -> Any:
 def always_401_server() -> Any:
     """Serve HTTP 401 for everything, the unambiguous login refusal."""
     yield from _serve(_Always401Handler)
+
+
+@pytest.fixture()
+def always_503_server() -> Any:
+    """Serve HTTP 503 for everything, the modem declining to serve a login."""
+    yield from _serve(_Always503Handler)
+
+
+# ---------------------------------------------------------------------------
+# One rule — a login answering >= 400 failed, and brings the response home
+# ---------------------------------------------------------------------------
+
+# Two ratified decisions meet here, both in ARCHITECTURE_DECISIONS.md:
+# § Auth-failure detail via single WARNING log — "Auth managers must
+# include the requests.Response on their failure AuthResult" — and § How
+# to add an auth strategy — "If the strategy pre-fetches a login page,
+# use the response... Discarding the response body is a bug."
+#
+# Attaching is not only about the log line. The collector reads the
+# attached response's status to tell AUTH_UNAVAILABLE from AUTH_FAILED
+# (UC-87a), so a strategy that drops it forces a 5xx to read as a
+# rejected credential and trips the breaker on the first poll.
+#
+# The threshold is >= 400, not != 200: form_nonce and form_cbn post with
+# allow_redirects=False, and basic's challenge probe is a GET with the
+# same, so a 302 is a normal answer on all three.
+
+# Declared exceptions at their minimal config — these send no login
+# request, so nothing can answer it 503. Their 5xx arrives later, on the
+# data fetch, as LOAD_ERROR. `basic` stops being an exception once
+# challenge_cookie is configured; see the test below the parametrized one.
+_NO_LOGIN_REQUEST = {
+    "none": "sends no credential and issues no login request",
+    "basic": "sets session.auth and returns; the credential rides on the data fetch",
+}
+
+
+@pytest.mark.parametrize("strategy", sorted(DECLARED_MODES), ids=sorted(DECLARED_MODES))
+def test_login_5xx_fails_and_attaches_response(strategy: str, always_503_server: str) -> None:
+    """Every strategy that issues a login reports a 5xx as failure, with the response."""
+    result = _manager_for(strategy).authenticate(requests.Session(), always_503_server, "admin", "pw")
+
+    if strategy in _NO_LOGIN_REQUEST:
+        assert result.success is True, f"{strategy} {_NO_LOGIN_REQUEST[strategy]}"
+        return
+
+    assert result.success is False, f"{strategy} reported success for a login answered 503"
+    assert result.response is not None, (
+        f"{strategy} failed without attaching the response — the collector cannot "
+        f"tell AUTH_UNAVAILABLE from AUTH_FAILED, so the user is told their password is wrong"
+    )
+    assert result.response.status_code == 503
+
+
+def test_basic_challenge_probe_status_is_not_read(always_503_server: str) -> None:
+    """Pinned, not endorsed: `basic` with a challenge probe ignores what the probe answers.
+
+    The row above exempts `basic` because at its minimal config it sends
+    nothing. With ``challenge_cookie: true`` it does send a
+    credential-bearing ``GET /`` and still returns success whatever comes
+    back. Two catalog entries depend on that: `netgear/c7000v2` and
+    `netgear/cm1200`'s basic variant both record the 401 from this probe
+    as what sets ``XSRF_TOKEN``, so on those modems the refusal is the
+    mechanism and a status guard would break the auth it protects.
+
+    Whether that expected 401 can be told apart from a genuine 5xx is an
+    open question needing evidence no capture holds. This pins today's
+    answer so changing it is a decision rather than a drift.
+    """
+    session = requests.Session()
+    manager = _manager_for("basic", challenge_cookie=True)
+
+    with patch.object(session, "get", wraps=session.get) as probe:
+        result = manager.authenticate(session, always_503_server, "admin", "pw")
+
+    # Assert the probe fired and carried the credential; without this the
+    # test would still pass if the probe were removed entirely.
+    assert probe.call_count == 1, "the challenge probe must actually be sent"
+    assert session.auth == ("admin", "pw"), "the probe carries the credential"
+    assert probe.call_args.args[0].endswith("/"), "the probe targets the modem root"
+
+    assert result.success is True, "a 503 on the challenge probe is not currently read"
+    assert result.response is None
 
 
 # ---------------------------------------------------------------------------

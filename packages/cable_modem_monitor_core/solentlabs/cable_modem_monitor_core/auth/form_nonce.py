@@ -133,6 +133,18 @@ class FormNonceAuthManager(BaseAuthManager):
                 error=f"Nonce login POST failed: {type(e).__name__}: {e}",
             )
 
+        # An HTTP error is a failed login before the body is worth reading:
+        # this strategy judges by text prefix alone, so a 401 or 503 whose
+        # body simply lacks the error prefix used to fall through as success.
+        # The threshold is >= 400 rather than != 200 because this POST does
+        # not follow redirects, so a 302 is a normal answer here.
+        if response.status_code >= 400:
+            return AuthResult(
+                success=False,
+                error=f"Login returned HTTP {response.status_code}",
+                response=response,
+            )
+
         # Step 4: Parse text-prefix response
         text = response.text.strip()
 
