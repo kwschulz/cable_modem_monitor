@@ -708,7 +708,7 @@ harness rejection plus its test is the price of flipping one.
 For `form` the claim is per criterion, and each is tested in both
 directions — a criterion that refused every login would satisfy a
 rejection test while breaking every good password. `redirect` is the one
-that carries the fleet: all 8 catalog entries declaring `success` use it
+that carries the fleet: all 9 catalog entries declaring `success` use it
 and none uses `indicator`.
 
 **Constrains:** The knowledge lives on the strategy, not in an `isinstance`

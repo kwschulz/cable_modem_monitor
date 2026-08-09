@@ -281,7 +281,7 @@ def test_form_with_success_criteria_rejects_bad_password(always_ok_server: str) 
 # Rejecting is only half the claim. A criterion that refused every login
 # would satisfy the test above while breaking every good password, so each
 # branch is exercised in both directions against the same server. `redirect`
-# is the branch that matters in the field: all 8 catalog entries declaring
+# is the branch that matters in the field: all 9 catalog entries declaring
 # `success` use it and none uses `indicator`.
 #
 # fmt: off
