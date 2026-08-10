@@ -12,11 +12,10 @@ Use case coverage (orchestrator level):
 - UC-04: Zero channels with system_info — NO_SIGNAL
 - UC-05: Zero channels without system_info — NO_SIGNAL with warning
 - UC-07: DOCSIS status derivation (table-driven)
-- UC-10: Wrong credentials — single failure
+- UC-10: Wrong credentials — breaker trips on the first failure
 - UC-11: Transient auth failure — streak resets on success
 - UC-12: Firmware lockout — AUTH_LOCKOUT trips circuit immediately
 - UC-13: LOAD_AUTH — threshold circuit breaker, session issues self-correct
-- UC-14: Circuit breaker trip — credential rejection
 - UC-15: Circuit breaker blocks polling
 - UC-17: LOAD_AUTH — 401 on data page
 - UC-18: LOAD_AUTH — self-correcting stale session
@@ -429,6 +428,9 @@ class TestAuthFailure:
     """UC-10/UC-87: Wrong credentials — circuit trips immediately."""
 
     def test_single_auth_failure_trips_circuit(self) -> None:
+        # UC-10's full assertion set. TestCircuitBreaker held a second copy
+        # of this scenario until beta.21 — the same duplication UC-10 and
+        # UC-14 carried in the docs, arrived at independently.
         collector = _mock_collector(_fail_result(CollectorSignal.AUTH_FAILED, "wrong password"))
         orch = _make_orchestrator(collector=collector)
 
@@ -438,6 +440,7 @@ class TestAuthFailure:
         assert orch.diagnostics().auth_failure_streak == 1
         assert orch.diagnostics().circuit_breaker_open is True
         assert snapshot.modem_data is None
+        assert collector.execute.call_count == 1, "one attempt, then stop"
 
 
 class TestStreakReset:
@@ -486,18 +489,11 @@ class TestLockout:
 
 
 class TestCircuitBreaker:
-    """UC-14/15/87: Circuit breaker trip and blocking."""
+    """UC-15/87: an open breaker blocks every later poll.
 
-    def test_auth_failed_trips_immediately(self) -> None:
-        """UC-87: First AUTH_FAILED → circuit open. One attempt, stop."""
-        collector = _mock_collector(_fail_result(CollectorSignal.AUTH_FAILED))
-        orch = _make_orchestrator(collector=collector)
-
-        orch.get_modem_data()
-
-        assert orch.diagnostics().circuit_breaker_open is True
-        assert orch.diagnostics().auth_failure_streak == 1
-        assert collector.execute.call_count == 1
+    The trip itself is TestAuthFailure's; this class owns what happens
+    afterwards.
+    """
 
     def test_circuit_blocks_polling(self) -> None:
         """UC-15: Open circuit → no collection."""
@@ -561,7 +557,85 @@ class TestCircuitBreakerTripReason:
         orch.get_modem_data()  # credential trip
         snapshot = orch.get_modem_data()  # blocked
 
-        assert "reconfigure credentials" in snapshot.error
+        assert "credentials rejected" in snapshot.error
+
+    def test_blocked_error_names_the_lockout_for_a_lockout_trip(self) -> None:
+        """UC-12: waiting is the remedy, so the message must not say credentials."""
+        collector = _mock_collector(_fail_result(CollectorSignal.AUTH_LOCKOUT))
+        orch = _make_orchestrator(collector=collector)
+
+        orch.get_modem_data()  # lockout trip
+        snapshot = orch.get_modem_data()  # blocked
+
+        assert "locked out" in snapshot.error
+        assert "credentials" not in snapshot.error
+
+
+# UC-81a. The blocked-poll snapshot carries CollectorSignal.OK because
+# it is built before collection runs, so a diagnostics download taken
+# after polling stopped cannot name the cause from the snapshot. The
+# trip signal is what makes a stopped modem diagnosable.
+#
+# ┌────────────────────┬───────────┬──────────────────────────────────┐
+# │ signal             │ polls     │ why it opened                    │
+# ├────────────────────┼───────────┼──────────────────────────────────┤
+# │ AUTH_FAILED        │ 1         │ credential verdict               │
+# │ AUTH_LOCKOUT       │ 1         │ firmware protecting itself       │
+# │ LOAD_AUTH          │ 6         │ six refused sessions             │
+# │ LOAD_INTEGRITY     │ 6         │ six stub pages                   │
+# └────────────────────┴───────────┴──────────────────────────────────┘
+#
+# fmt: off
+DIAGNOSTICS_TRIP_SIGNAL_CASES = [
+    (CollectorSignal.AUTH_FAILED,    1, "credential verdict"),
+    (CollectorSignal.AUTH_LOCKOUT,   1, "firmware lockout"),
+    (CollectorSignal.LOAD_AUTH,      6, "six refused sessions"),
+    (CollectorSignal.LOAD_INTEGRITY, 6, "six stub pages"),
+]
+# fmt: on
+
+
+class TestDiagnosticsReportTheTripReason:
+    """A stopped modem's diagnostics download says why polling stopped."""
+
+    def test_no_trip_signal_while_polling_healthy(self) -> None:
+        orch = _make_orchestrator()
+        assert orch.diagnostics().circuit_trip_signal is None
+        assert orch.diagnostics().to_dict()["circuit_trip_signal"] is None
+
+    @pytest.mark.parametrize(
+        "signal,polls,desc",
+        DIAGNOSTICS_TRIP_SIGNAL_CASES,
+        ids=[c[2] for c in DIAGNOSTICS_TRIP_SIGNAL_CASES],
+    )
+    def test_trip_reason_reaches_the_download(
+        self,
+        signal: CollectorSignal,
+        polls: int,
+        desc: str,
+    ) -> None:
+        """The serialized key carries the signal's own value, not the enum."""
+        collector = _mock_collector([_fail_result(signal) for _ in range(polls * 2)])
+        orch = _make_orchestrator(collector=collector)
+
+        for _ in range(polls):
+            orch.get_modem_data()
+
+        diagnostics = orch.diagnostics()
+        assert diagnostics.circuit_breaker_open is True
+        assert diagnostics.circuit_trip_signal is signal
+        assert diagnostics.to_dict()["circuit_trip_signal"] == signal.value
+
+    def test_trip_reason_survives_the_blocked_polls_that_follow(self) -> None:
+        """The blocked-poll snapshot reports OK; the diagnostics field must not."""
+        collector = _mock_collector(_fail_result(CollectorSignal.AUTH_LOCKOUT))
+        orch = _make_orchestrator(collector=collector)
+
+        orch.get_modem_data()  # trip
+        snapshot = orch.get_modem_data()  # blocked
+
+        assert snapshot.collector_signal is CollectorSignal.OK
+        assert orch.diagnostics().circuit_trip_signal is CollectorSignal.AUTH_LOCKOUT
 
 
 class TestLoadAuth:

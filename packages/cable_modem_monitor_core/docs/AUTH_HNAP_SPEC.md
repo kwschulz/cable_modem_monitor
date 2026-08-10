@@ -193,14 +193,31 @@ reuse is the primary defence against ever reaching lockout; the
 circuit breaker is the safety net.
 
 HNAP keeps a distinct exit path (`LoginLockoutError` ->
-`AUTH_LOCKOUT`) rather than collapsing into generic `AUTH_FAILED`.
-Today the two are treated alike downstream: both trip the breaker on
-the first occurrence, and the HA adapter maps both to `invalid_auth`
-(`config_flow_helpers.py`). The only surviving difference is the
-WARNING log. Whether lockout should carry its own user-facing message
---- a modem protecting itself is not a wrong password --- is open,
-not settled here. See ORCHESTRATION_SPEC.md § Exceptions and
-§ Auth Circuit Breaker.
+`AUTH_LOCKOUT`) rather than collapsing into generic `AUTH_FAILED`, and
+that path now earns its keep downstream. Both signals still trip the
+breaker on the first occurrence, but from there they diverge:
+
+- The breaker records `AUTH_LOCKOUT` as its trip reason, so the blocked
+  polls that follow report the lockout rather than advising a
+  credential change, and a diagnostics download taken after polling
+  stopped can tell a lockout from a wrong password
+  (ORCHESTRATION_SPEC.md § Auth Circuit Breaker, "Trip reason is
+  preserved").
+- The HA adapter does not raise its reauth prompt on this route.
+  Submitting that form is a real login attempt, which is the one thing
+  a locked-out modem must not receive; it fires a notification instead
+  (HA_ADAPTER_SPEC.md § Reauth Flow, UC-81a).
+
+A modem protecting itself is not a wrong password, and no surface says
+it is. The remedy is to wait out the cool-down or power cycle, then
+reload the integration --- the breaker never times out on its own
+(§ Auth Circuit Breaker, "Recovery paths").
+
+`_SIGNAL_ERROR_MAP` still maps `AUTH_LOCKOUT` to `invalid_auth`
+(`config_flow_helpers.py`). That map feeds the config flow's error slot,
+reached only when a user is already typing credentials into a form, and
+the runtime route no longer sends them there. See ORCHESTRATION_SPEC.md
+§ Exceptions and § Auth Circuit Breaker.
 
 ## Firmware Assumptions
 

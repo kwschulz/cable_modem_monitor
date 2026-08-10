@@ -320,11 +320,15 @@ default log view without requiring DEBUG to be enabled, which is
 what shortens the round-trip on issues like #86, #104, #120.
 
 ```text
-Auth failed [MODEL] strategy=form
+Auth failed [MODEL] strategy=form — Login redirect mismatch: expected path containing '/index.htm', got '/ErrorMsg.htm'
   request: POST http://192.168.100.1/login?<redacted>
   response: 401 text/html
   body: <truncated 500-char snippet, with the user's password replaced by [REDACTED]>
 ```
+
+The reason leads. The wire detail is evidence for it, not a substitute:
+a criterion mismatch names the criterion and what was observed, and
+that sentence exists nowhere else the user or the maintainer looks.
 
 The log fires from the collector's existing failure path, so
 initial setup, reauth, options-flow re-validation, and steady-state
@@ -861,6 +865,11 @@ class OrchestratorDiagnostics:
             count. 0 when healthy.
         circuit_breaker_open: Whether polling is stopped due to
             persistent auth failures.
+        circuit_trip_signal: Signal that opened the breaker, None while
+            it is closed. Every poll after a trip short-circuits before
+            collection, so its snapshot reports CollectorSignal.OK —
+            this is the only field that says why polling stopped. See
+            § Auth Circuit Breaker, "Trip reason is preserved".
         session_is_valid: Current session state from the collector.
         auth_strategy: Auth strategy name from modem config (e.g.,
             "form", "hnap", "none"). Empty string if unknown.
@@ -887,7 +896,9 @@ class OrchestratorDiagnostics:
             successful polls so it is present in user-shared diagnostics
             downloads even after the modem recovers. Full body stored;
             no truncation (stub pages are small, and the full body is
-            the diagnostic signal).
+            the diagnostic signal). The user's password is scrubbed at
+            capture — see ARCHITECTURE_DECISIONS § LOAD_INTEGRITY
+            failure detail via diagnostics download.
         system_info_fields_missing: Field names parser.yaml maps in
             system_info whose source key appeared in no configured
             source's response on the most recent completed parse.
@@ -914,6 +925,7 @@ class OrchestratorDiagnostics:
     auth_failure_streak: int
     circuit_breaker_open: bool
     session_is_valid: bool
+    circuit_trip_signal: CollectorSignal | None = None
     auth_strategy: str = ""
     connectivity_streak: int = 0
     connectivity_backoff_remaining: int = 0
@@ -1250,11 +1262,31 @@ wrong network, modem web UI temporarily down) recover via reload,
 which is acceptable for their frequency. Revisit only with field
 evidence of latched breakers that a reload cannot reasonably cover.
 
-**Trip reason is preserved.** The policy records the HTTP status
-that tripped the breaker (`circuit_trip_status_code`). Every
-subsequent blocked poll logs advice matching the trip cause: a 404
-trip says "login endpoint not found — reload the integration to
-retry," not "reconfigure credentials."
+**Trip reason is preserved.** The policy records both the HTTP status
+that tripped the breaker (`circuit_trip_status_code`) and the signal
+that opened it (`circuit_trip_signal`). Every subsequent blocked poll
+logs advice matching the trip cause: a 404 trip says "login endpoint
+not found — reload the integration to retry," an `AUTH_LOCKOUT` trip
+says the modem locked out further logins, and neither says
+"reconfigure credentials."
+
+This is not redundant with the snapshot. A blocked poll returns before
+collection runs, so `snapshot.collector_signal` is `OK` on every poll
+after the trip and the cause is unrecoverable from it. Both trip fields
+survive on the policy until orchestrator reconstruction, which is what
+makes a stopped modem diagnosable from a diagnostics download, and what
+lets a consumer decide whether the trip warrants a credential prompt
+(UC-81a). Threshold trips record the signal too, so the six-refused-
+sessions case is distinguishable from an immediate credential verdict.
+
+**One table owns what the user is told.** `auth_stop_advice()`
+(`orchestration/auth_stop.py`) maps a trip reason to a cause phrase and
+a remedy. The blocked-poll snapshot error takes the cause; both
+circuit-breaker log events take the remedy. Adding a trip cause is a row
+there, not an edit at every surface.
+
+The default in that table is the commonest cause, not a catch-all: a
+cause with a different remedy earns a row above it.
 
 #### Use Cases
 
@@ -1272,9 +1304,16 @@ Poll N+1: circuit blocks — no collection
 **Root cause detection via logs:**
 
 ```text
-INFO  Poll N: "Auth failed — wrong credentials or strategy mismatch (streak: 1)"
-ERROR Poll N: "Auth circuit breaker OPEN — credentials rejected. Polling stopped. Reconfigure credentials to resume."
+WARNING Poll N: "Auth failed [MODEL] strategy=form — <reason>" plus the
+                request, response and body lines (see § Auth-Failure
+                Detail Log)
+ERROR   Poll N: "Auth circuit breaker OPEN [MODEL] — 1 consecutive auth
+                failures. Polling stopped. Reconfigure credentials to resume."
 ```
+
+The streak in that ERROR line is the value at the moment of the trip,
+not a count toward a limit. `AUTH_FAILED` trips on the first
+occurrence, so it reads 1 here.
 
 **Firmware changes auth mechanism:**
 Same pattern as password change. The auth strategy in modem.yaml no
@@ -1283,14 +1322,17 @@ attempt, circuit trips immediately. User sees error, opens a GitHub
 issue or reconfigures.
 
 **Transient auth failure:**
-Modem is busy, temporarily rejects a login.
+Modem is busy and declines to serve the login (5xx).
 
 ```text
-Poll N:   AUTH_FAILED (streak: 1)
-Poll N+1: collection succeeds (streak: 0) — circuit stays closed
+Poll N:   AUTH_UNAVAILABLE — unreachable (streak unchanged, circuit closed)
+Poll N+1: collection succeeds
 ```
 
-Streak resets on success. Transient failures never reach the threshold.
+`AUTH_UNAVAILABLE` never touches the streak or the breaker at any
+repetition count (UC-87a). There is no transient form of `AUTH_FAILED`:
+it trips on the first occurrence, so a rejected credential never gets a
+second poll to recover in.
 
 **LOAD_AUTH on a data page:**
 401/403 on a data page after auth appeared to succeed.
@@ -1463,13 +1505,13 @@ first-poll output.
 
 **Backoff and circuit breaker:**
 
-- INFO: `"Backoff active [MODEL] (2 remaining), skipping collection"`
-- INFO: `"Backoff cleared [MODEL], resuming"`
+- INFO: `"Connectivity backoff active [MODEL] (2 remaining), skipping poll"`
+- INFO: `"Connectivity backoff cleared [MODEL], retrying"`
 
 **Collection outcomes:**
 
-- INFO (first poll) / DEBUG (after): `"Parse complete [MODEL]: 24 DS, 4 US channels"`
-- WARNING: `"Poll failed [MODEL] — signal: connectivity, error: ..."`
+- INFO (first poll) / DEBUG (after): `"Collection complete [MODEL] — DS: 24, US: 4 (812ms)"`
+- WARNING: `"Connection failure [MODEL] — unreachable (streak: 1, backoff: 1 polls)"`
 - INFO: `"Counter reset detected [MODEL] — corrected: 1000→0, uncorrected: 50→0"` (modem reboot — operator-relevant transition, never demoted)
 
 **State transitions:**
@@ -2057,7 +2099,7 @@ Every line includes `[MODEL]`. Two lines total — the command is
 one-shot.
 
 - INFO: `"Restart command sent [MODEL] — session cleared (0.4s)"`
-- ERROR: `"Restart command failed [MODEL]: <reason>"` — an exception,
+- ERROR: `"Restart command failed [MODEL] — <reason>"` — an exception,
   or the `ActionResult.message` when the executor reported failure
   (e.g. `Per-action auth failed: Login returned HTTP 401`).
 
@@ -2317,13 +2359,14 @@ per-poll noise.
 | UC | Covers |
 |----|--------|
 | UC-40 | Restart button: command dispatches, returns quickly, recovery window opens |
-| UC-42 | (retired) — Core no longer refuses based on recovery state; HA mutex serializes rapid button presses |
+| UC-42 | Restart during recovery is allowed — Core does not refuse based on recovery state; HA mutex serializes rapid button presses |
 | UC-43 | `get_modem_data()` during a recovery window behaves normally — no short-circuit |
 | UC-44 | Raises `RestartNotSupportedError` when `actions.restart` is absent |
 | UC-45 | Restart bypasses circuit breaker |
 | UC-46 | (retired; no response-timeout phase in the new model) |
 | UC-78 | Data sensors go Unavailable only when the snapshot's ``modem_data`` is None |
 | UC-88 | Reboot-signal check matches on a scheduled poll → recovery window opens |
+| UC-89 | Modem answers the restart but refuses it → `error="command_failed"`, no recovery window |
 
 ---
 

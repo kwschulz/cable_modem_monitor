@@ -185,31 +185,43 @@ only one authenticated session.
 
 ## Auth Failures
 
-### UC-10: Wrong credentials — single failure
+### UC-10: Wrong credentials — breaker trips on the first failure
 
-**Preconditions:** Incorrect password configured.
+**Preconditions:** Modem reachable. Incorrect password configured.
 
 | Step | Action | State change | Observable |
 |------|--------|-------------|------------|
 | 1 | Consumer calls `get_modem_data()` | | |
-| 2 | Collector: auth fails → `AuthResult.FAILURE` | | |
+| 2 | Collector: auth fails → `AuthResult(success=False)` | | WARNING log: "Auth failed [MODEL] strategy=... — " then the reason, with request, response status, body snippet |
 | 3 | Collector returns `ModemResult(success=False, signal=AUTH_FAILED)` | | |
-| 4 | Orchestrator: streak 0→1 | | |
-| 5 | Orchestrator: threshold check (1 < 6) → circuit stays closed | | |
-| 6 | Return `ModemSnapshot(AUTH_FAILED)` | | |
+| 4 | Policy: streak 0→1, then trips the breaker in the same call | streak=1, circuit=True | |
+| 5 | Return `ModemSnapshot(AUTH_FAILED)` | | |
 
 **Assertions:**
 
 - `snapshot.connection_status == AUTH_FAILED`
 - `diagnostics().auth_failure_streak == 1`
-- `diagnostics().circuit_breaker_open == False`
+- `diagnostics().circuit_breaker_open == True`
 - `snapshot.modem_data is None`
+- Exactly one login attempt against the modem
+- ERROR log: "Auth circuit breaker OPEN [MODEL] — 1 consecutive auth
+  failures. Polling stopped. Reconfigure credentials to resume."
+
+**The threshold does not apply here.** `AUTH_FAILED` and `AUTH_LOCKOUT`
+route to `_trip_circuit_breaker`, which never reads
+`auth_failure_threshold`; the threshold governs `LOAD_AUTH` and
+`LOAD_INTEGRITY` only (UC-13). Both mechanisms increment the same
+`_auth_failure_streak`, so the count in the log line is not progress
+toward a limit here — it reads 1 because this was the first failure.
+The polls that follow are blocked by the open breaker (UC-15).
 
 ---
 
 ### UC-11: Transient auth failure — streak resets on success
 
-**Preconditions:** One prior auth failure (streak=1).
+**Preconditions:** One prior `LOAD_AUTH` or `LOAD_INTEGRITY` failure
+(streak=1, breaker still closed). `AUTH_FAILED` cannot leave this state:
+it trips the breaker on the first occurrence (UC-10).
 
 | Step | Action | State change | Observable |
 |------|--------|-------------|------------|
@@ -242,10 +254,20 @@ only one authenticated session.
 
 - `snapshot.connection_status == AUTH_FAILED`
 - `diagnostics().circuit_breaker_open == True`
+- `diagnostics().circuit_trip_signal == AUTH_LOCKOUT`, so a diagnostics
+  download taken after polling stopped tells this apart from a wrong
+  password
+- Blocked polls report "Circuit breaker open — modem locked out further
+  logins". Waiting is the remedy, so the message never says credentials
+- The consumer must not raise a credential prompt on this route: the
+  prompt's form is a real login attempt (UC-81a, UC-86)
 - No further login attempts — polling blocked until the consumer
-  rebuilds the orchestrator (reauth → entry reload, UC-16)
-- WARNING log: "Auth lockout — firmware anti-brute-force triggered,
-  stopping immediately"
+  rebuilds the orchestrator. Unlike the other trip causes there is no
+  reauth flow to do it, so the reload is the user's own step (UC-16)
+- WARNING log: "Auth lockout [MODEL] — firmware anti-brute-force
+  triggered, stopping immediately (streak: 1)"
+- ERROR log: "Auth circuit breaker OPEN [MODEL] — 1 consecutive auth
+  failures. Polling stopped. Reconfigure credentials to resume."
 
 ---
 
@@ -276,23 +298,11 @@ If LOAD_AUTH persists (6 consecutive):
 
 ---
 
-### UC-14: Circuit breaker trip — credential rejection
+### UC-14: (retired)
 
-**Preconditions:** Modem reachable. Credentials are wrong.
-
-| Step | Action | State change | Observable |
-|------|--------|-------------|------------|
-| 1 | Consumer calls `get_modem_data()` | | |
-| 2 | Collector: AUTH_FAILED | | |
-| 3 | Orchestrator: streak 0→1, circuit trips | circuit=True | |
-| 4 | Return `ModemSnapshot(AUTH_FAILED)` | | |
-
-**Assertions:**
-
-- `diagnostics().circuit_breaker_open == True`
-- `diagnostics().auth_failure_streak == 1`
-- Exactly one login attempt against the modem
-- ERROR log: "Auth circuit breaker OPEN — credentials rejected..."
+A reachable modem with wrong credentials is one scenario, not two.
+UC-10 is where it lives, and UC-15 covers the polls that follow once
+the breaker is open.
 
 ---
 
@@ -310,7 +320,8 @@ If LOAD_AUTH persists (6 consecutive):
 
 - Collector.execute() was NOT called
 - No HTTP traffic to the modem
-- ERROR log: "Circuit breaker is OPEN — polling stopped..."
+- ERROR log: "Circuit breaker OPEN [MODEL] — polling stopped.
+  Reconfigure credentials to resume."
 - `recovery_active == False` (circuit breaker is a separate concern from recovery)
 
 ---
@@ -365,7 +376,58 @@ Session may be stale, or strategy doesn't grant data access.
 - Auth failure streak is incremented (LOAD_AUTH is auth-related)
 - If the retry also fails, the failure remains auth-related and can
   still escalate to the circuit breaker
-- INFO log: "LOAD_AUTH — clearing session, reporting auth_failed..."
+- INFO log: "LOAD_AUTH [MODEL] — clearing session and retrying once in
+  same poll"
+
+---
+
+### UC-17a: Post-login 401 — the strategy decides what the user is told
+
+**Preconditions:** UC-17. `authenticate()` reported success and a data
+page then answered 401/403. Two states produce that: a session the
+modem no longer honours, and a wrong password the login never checked.
+The status code does not separate them, so the message is chosen from
+what the strategy is known to verify.
+
+| Declared mode | Meaning | Core log hint | Config-flow error key |
+|---------------|---------|---------------|----------------------|
+| `NOT_CONFIGURED` | No credential was sent at all, so the catalog entry is wrong, not the password | "modem requires authentication (check config)" | `invalid_auth` |
+| `CREDENTIALS_SUSPECT` | The strategy did not verify the credential at login, so the 401 is very often the bad password surfacing late | "credentials rejected" | `invalid_auth` |
+| `SESSION_REJECTED` | The strategy rejects a bad password at login time, so the login having succeeded rules the credential out | "session expired" | `session_rejected` |
+
+**Assertions:**
+
+- `BaseAuthManager.auth_failure_mode()` owns the answer. Nothing in the
+  orchestration layer branches on strategy name
+- The base returns `CREDENTIALS_SUSPECT`. A missed declaration is
+  unspecific, never wrong in the user's face
+- `SESSION_REJECTED` is a claim, payable only by a bad-password test
+  showing `success=False`. Today: `form_pbkdf2`, `hnap`, and `form` with
+  a `success:` criterion
+- `form` reads its own config, not its class: with a criterion it
+  reports `SESSION_REJECTED`, without one `CREDENTIALS_SUSPECT`
+- The refinement applies to `LOAD_AUTH` and `LOAD_INTEGRITY` only.
+  `AUTH_FAILED` maps to `invalid_auth` unconditionally and never
+  reaches this path (UC-87c)
+- The strategies holding the conservative default are not known *not*
+  to verify — the harness cannot yet simulate a refusal for them, so
+  the claim is unpaid rather than disproved
+
+**Why the default is pessimistic rather than absent.** Telling a user
+with a genuinely wrong password "the login worked, so this is not a
+username or password problem" is a dead end. Telling a user with good
+credentials to check their password is merely unhelpful. So the
+unverified case takes the recoverable error.
+
+**Evidence:** #120 (Technicolor CGA6444VF, `form_pbkdf2`). `LOAD_AUTH`
+mapped to `invalid_auth` for every strategy, so a modem that had
+authenticated us and issued a session told the user to check their
+password. `form_pbkdf2` verifies the credential at login, which is what
+made the accusation demonstrably wrong and drove the refinement.
+
+**Authority:** `ARCHITECTURE_DECISIONS.md` § Post-login 401 is read per
+auth strategy. `AuthFailureMode` in `auth/base.py` is the authoritative
+set; `CONFIG_FLOW_SPEC.md` § Step 4 carries the error-key table.
 
 ---
 
@@ -462,7 +524,10 @@ bodies or JSON variables the parser is configured to extract from.
 - Same-poll retry follows the LOAD_AUTH precedent (UC-17/UC-18); if the stub clears, recovery is symmetric to UC-18
 - Auth failure streak is incremented when retry also fails (LOAD_INTEGRITY is auth-related)
 - Repeated failures escalate to circuit breaker via the standard streak threshold
-- WARNING log: `"Stub response on /status.html [MODEL] — 0 of N expected parser anchors found, treating as session integrity failure"`
+- What the user is told on escalation is UC-17a's rule, not this use
+  case's — `LOAD_INTEGRITY` takes the same per-strategy refinement as
+  `LOAD_AUTH`. Do not restate it here
+- WARNING log: `"Stub page detected [MODEL] — /status.html: 0/N anchors found"`
 - `ParseDiagnostics` is captured per resource in the diagnostic dump (`RUNTIME_POLLING_SPEC § Diagnostics for Remote Troubleshooting`)
 
 **Discriminator from UC-04:** UC-04 assumes the parser fulfilled its
@@ -517,6 +582,77 @@ login-page classification the loader already applies (UC-19).
 
 ---
 
+### UC-19c: Login-page detection — false positive on a real data page
+
+**Preconditions:** Login-page detection is enabled (stateful strategy
+on the `http` transport). A fetch-list page answers HTTP 200 with real
+data, and its markup happens to contain `type="password"` — a
+gateway's "show my WiFi password" widget, a settings panel rendered
+into a status page, or the string inside inline JS or a comment.
+
+| Step | Action | State change | Observable |
+|------|--------|-------------|------------|
+| 1 | Consumer calls `get_modem_data()` | | |
+| 2 | Collector: auth succeeds (or session reused) | | |
+| 3 | Resource Loader: GET /status.html → HTTP 200, real data, body contains a password input | | |
+| 4 | Detection fires; the raise aborts the poll and discards every resource fetched so far | | WARNING log |
+| 5 | Collector returns `ModemResult(signal=LOAD_AUTH)` | | |
+| 6 | Orchestrator: clear session, retry once in same poll — the retry refetches the same page and trips again | streak++ | `ModemSnapshot(AUTH_FAILED)` |
+| 7 | Repeat until the streak reaches the threshold | circuit breaker opens | HA prompts for credentials that are not wrong |
+
+**Assertions:**
+
+- The test is a substring on the undecoded body, not a DOM query, and
+  requires no wrapping `<form>` — so a bare `<input type="password">`
+  outside any form matches
+- Nothing distinguishes this from UC-19 at runtime. A correct data page
+  and a served login page produce the same signal, the same recovery,
+  and the same escalation
+- The failure does not self-correct: the page is the modem's real
+  answer, so every retry reproduces it
+- The end state is the reauth prompt (UC-81a) for a working password
+
+**Why the looser test is still right.** Parsing for an `<input>` node
+would miss the false negatives that cost more: markup too broken to
+yield a node, and login forms that exist only inside a script template.
+Detection also runs before decode, so it reads a body that fails to
+decode. `RESOURCE_LOADING_SPEC.md` § Login Page Detection states the
+tradeoff and rates this row's likelihood "very low" on the grounds that
+the fetch list holds status pages, not settings pages — which holds for
+standalone modems and is exactly what a combined modem/router gateway
+breaks.
+
+**Evidence:** #184 (Technicolor XB7 / CGM4331COM, firmware
+Prod_24.2_PD, reported against 3.13.1). The authenticated
+`at_a_glance.jst` renders the WiFi passkey in a readonly input inside a
+bare `<span>`; the reporter confirmed the page carries no `<form>` at
+all. Four Technicolor gateway entries name that same page as their
+login `success:` landing, so the shape is in the catalog.
+
+**Not reproduced by any committed capture.** Across the 48 catalog
+HARs, no page on any entry's fetch list carries a password input. The
+XB7 entry fetches `/network_setup.jst`, not `at_a_glance.jst`, so the
+reported page is not on its fetch list today.
+
+**No intake gate stands behind this.** `RESOURCE_LOADING_SPEC.md`
+describes an MCP onboarding HARD STOP for a data page containing a
+password field. No such check exists. `catalog_tools/validation/` has
+none, and every other password-field matcher in the repo reads a login
+form to name its fields during intake — none of them looks at a data
+page.
+
+**Consequence in 3.13.1 vs 3.14.** In 3.13.1 the detector logged a
+session-expired error and parsing continued, so the reporter saw log
+noise with intact data. In 3.14 the raise aborts the poll, so the same
+page yields no data at all.
+
+> **Status:** Current behavior, documented rather than endorsed. The
+> escape hatch `RESOURCE_LOADING_SPEC.md` names — a per-modem
+> `session.login_page` override with an explicit indicator — is not
+> spec'd and not implemented.
+
+---
+
 ### UC-20: Password changed after months of success
 
 **Preconditions:** Modem working for months. User changes password on
@@ -560,7 +696,7 @@ has expired the session (firmware timeout or max-session limit).
 - Signal is LOAD_AUTH (not LOAD_ERROR) — session context determines routing
 - Session is cleared before the same-poll retry (→ UC-18)
 - Successful retry does not increment auth failure streak
-- WARNING log: "HNAP HTTP 404 on reused session [MODEL] — session likely expired"
+- WARNING log: "HNAP session expired [MODEL] — HTTP 404"
 - INFO logs show the retry and successful same-poll recovery
 - After the second consecutive recovered stale session, later polls
   clear the cached session before collection and go straight to fresh auth
@@ -591,7 +727,7 @@ a firmware issue or temporary overload.
 - Signal is LOAD_ERROR (not LOAD_AUTH) — fresh session rules out stale session
 - Session is NOT cleared — avoid unnecessary re-login that could trigger lockout
 - Auth failure streak NOT incremented
-- INFO log: "HNAP load error [MODEL]: ..."
+- WARNING log: "HNAP load error [MODEL] — {reason}"
 
 ---
 
@@ -606,7 +742,7 @@ configured. The login page contains `<input type="hidden">` fields
 | 1 | Consumer calls `get_modem_data()` | | |
 | 2 | Collector: no active session, starts auth | | |
 | 3 | FormAuthManager: GET `login_page` | Session cookies established | |
-| 4 | FormAuthManager: reads hidden fields from login form HTML | | DEBUG log: "Discovered N hidden field(s)" |
+| 4 | FormAuthManager: reads hidden fields from login form HTML | | DEBUG log: "Discovered N hidden field(s) from login form" |
 | 5 | FormAuthManager: builds POST data — discovered fields (base) ← `hidden_fields` (override) ← credentials | | |
 | 6 | FormAuthManager: POST to `action` endpoint with merged form data | | |
 | 7 | Success evaluation (redirect or status check) | Auth succeeded | |
@@ -925,6 +1061,94 @@ No LOAD_AUTH step needed. Both paths are valid.
 
 ---
 
+### UC-88: Reboot-signal trigger
+
+**Preconditions:** Integration polling normally. The ISP pushes new
+firmware, the user power-cycles the modem, or the modem reboots
+itself from watchdog. No HA-layer restart was issued. The modem
+returns to answering polls before the user's next scheduled poll
+(otherwise the connectivity trigger would catch it instead — see
+UC-49).
+
+| Poll | What happens | `recovery_active` | Coordinator interval |
+|------|-------------|-------------------|---------------------|
+| N    | Normal poll — counters = (500, 50), docsis = Operational | False | user-configured (e.g., 15 min) |
+| N+1  | Successful poll: counters = (0, 0), docsis = Denied. Reboot-signal check matches (counter reset + transitional docsis = 2 of 3); recovery opens a window with reason `reboot_signals:counter_reset+transitional_docsis`. Observer fires. | **True** | Switches to recovery cadence (e.g., 30 s) |
+| N+2..k | Polls run at recovery cadence. Snapshots reflect actual modem state (ranging → operational). Window is NOT closed by operational snapshot — it runs its full duration. | True | recovery cadence |
+| N+k+1 | `Recovery.WINDOW_SECONDS` elapsed; window closes. Observer fires. | False | Restored to user-configured |
+
+**Core behavior:** The reboot-signal check runs inside
+`Recovery.evaluate_snapshot()` on every successful poll. It's a
+2-of-3 vote over counter reset, uptime drop, transitional docsis
+and returns a trigger reason or None. Recovery opens a window when
+the reason is non-None and no window is already active. See
+ORCHESTRATION_SPEC § Reboot-Signal Trigger for the signal set.
+
+**HA behavior:** The observer fires the `recovery_state_changed`
+dispatcher signal. Listeners respond:
+
+1. The data coordinator's `update_interval` switches to the
+   recovery cadence on entry, restores on exit. On entry, HA calls
+   `async_request_refresh()` so the first fast-cadence poll happens
+   immediately.
+2. The restart button's enabled state re-evaluates.
+
+**Status sensor is not special-cased.** It renders the snapshot's
+actual status throughout — Operational / Denied / Not Locked /
+Unreachable / whatever. No synthetic "Restarting…" label fires
+from recovery state.
+
+**False positives are bounded-harm.** If the reboot-signal check
+misfires on a firmware stats-clear or signal anomaly, the only
+consequence is polling faster for `Recovery.WINDOW_SECONDS`.
+Dashboard state is unaffected (it always reflects truth). No stalls,
+no timeouts, no misleading UX.
+
+**Modems without the relevant fields** simply don't trigger from
+the reboot-signal check. Their reboots surface through normal
+polling via UC-49 instead. That's fine — the signal check is an
+enhancement, not a requirement.
+
+**Interaction with commanded restart:** the two triggers re-enter
+differently. A restart command issued while a signal-check window is
+open is *not* refused — `recovery.begin()` is the one entry that
+always (re)starts the window, so the clock resets and the reason
+updates (UC-42). A reboot-signal match during an already-open window
+is a no-op, because the vote opens a window only when none is active.
+
+---
+
+### UC-89: Restart refused by the modem
+
+**Preconditions:** `actions.restart` is declared. The user presses
+restart. Nothing raises: the modem answers, but it answers no.
+
+Two ways this arrives, both returning `ActionResult(success=False)`
+rather than an exception:
+
+| Step | Action | Observable |
+|------|--------|-----------|
+| 1 | `actions.restart` declares `action_auth` and the per-action login is refused (bad or missing credentials → HTTP 401). The command is never sent. | ERROR log: `Restart command failed [MODEL] — Per-action auth failed: Login returned HTTP 401` |
+| 2 | Or the command itself is sent and the modem answers 4xx/5xx. | ERROR log: `Restart command failed [MODEL] — Action refused with status 401` |
+
+**Assertions:**
+
+- `restart()` returns `success=False`, `error="command_failed"`
+- **No recovery window opens** — there is no reboot to poll through
+- **The collector session is not cleared** — the reason to clear it is
+  firmware invalidating it during a reboot, and no reboot happened
+- The consumer surfaces the failure. HA raises `HomeAssistantError`
+  from the button press, so the user sees it rather than a success
+  notification for a modem that never restarted
+
+**Why this is its own case.** A modem with no monitoring auth but a
+credentialed restart (`auth.strategy: none` + `action_auth`) has a
+config-entry state where monitoring works perfectly and restart cannot
+work at all: no password was ever stored, because nothing needed one.
+Silence here reads as success to the only person who can fix it (#82).
+
+---
+
 ## Health
 
 ### UC-50: Normal health check — all probes on a HEAD-capable modem
@@ -947,7 +1171,8 @@ No LOAD_AUTH step needed. Both paths are valid.
 - ICMP, HEAD, and TCP all run when conditions are met
 - Order: ICMP first, then HEAD (uncontested connection), then TCP
 - Status derives from ICMP + TCP only — HEAD is latency-only
-- DEBUG log: "Health check: responsive (ICMP 4ms, TCP 2ms, HTTP HEAD 10ms, 0 bytes)"
+- DEBUG log (steady state; INFO on a status change): "Health check
+  [MODEL]: responsive — ICMP 4.0ms, TCP 2.0ms, HTTP HEAD 10.0ms"
 
 ---
 
@@ -1077,7 +1302,8 @@ responds at L3.
 
 - `health_status == DEGRADED`
 - Modem is network-reachable but TCP listen path is unhappy
-- WARNING log: "Health check: degraded (ICMP OK, TCP timeout)"
+- WARNING log (on the transition into degraded): "Health check [MODEL]:
+  degraded — ICMP OK, TCP timeout"
 - HEAD failure alone (when TCP succeeds) does **not** produce DEGRADED
   — application-layer issues surface via the next slow-poll instead
 
@@ -1646,6 +1872,62 @@ sequenceDiagram
 
 ---
 
+### UC-81a: Four signals reach the auth-stop announcement; three share one message
+
+**Preconditions:** UC-81's trigger, read as a class rather than as the
+single wrong-password path it documents. `SignalPolicy.apply` collapses
+four distinct signals into `ConnectionStatus.AUTH_FAILED`, so the
+consumer cannot tell the routes apart from the status alone.
+
+| Route | Signal | How the breaker opens | Where it lands | Is the description true? |
+|-------|--------|----------------------|----------------|-------------------------|
+| Credentials rejected (UC-87) | `AUTH_FAILED` | Immediately, on the first occurrence | Reauth prompt | Yes, unless the login was judged by a criterion (UC-87c) |
+| Firmware lockout (UC-12) | `AUTH_LOCKOUT` | Immediately, on the first occurrence | Notification | n/a — routed away |
+| Session refused six times (UC-13, UC-17) | `LOAD_AUTH` | At the threshold | Reauth prompt | Only if the strategy never verified the login (UC-17a) |
+| Stub page six times (UC-19a) | `LOAD_INTEGRITY` | At the threshold | Reauth prompt | No — a stub is not a credential verdict |
+
+**Assertions:**
+
+- `snapshot.collector_signal` carries the distinction on the poll that
+  fails, but a blocked poll is built before collection runs and reports
+  `OK`, so the consumer reads `diagnostics().circuit_trip_signal`, which
+  latches until the orchestrator is rebuilt
+- The three prompt routes land on the same form, whose description reads
+  "The modem rejected your credentials. Please re-enter them."
+- HA supplies a third statement above ours, `Authentication expired
+  for {name}`, which frames the same event as a session expiry. That
+  string is HA's, not this integration's
+- The error slot on that form is signal-aware — `classify_error`
+  refines `LOAD_AUTH` and `LOAD_INTEGRITY` per UC-17a — but it renders
+  only *after* a resubmit. The description and the title are static
+- Submitting the form calls `validate_connection`, a real login. The
+  config flow is stateless by design (UC-86), so the open breaker does
+  not stop it
+
+**The AUTH_LOCKOUT route was the harmful one.** Immediate stop exists to
+keep login attempts off a modem that has already begun refusing them
+for making too many. Prompting the user to re-enter credentials invited
+exactly those attempts, by hand, at the moment the protection engaged.
+Evidence for the cost is #117: an Arris S33v2 rebooting every day or
+two under per-poll logins, the report `ARCHITECTURE_DECISIONS.md`
+§ Session reuse across polls and `RUNTIME_POLLING_SPEC.md` both cite.
+
+That route now fires a persistent notification once per open breaker.
+It names the lockout, gives the remedy in the order it has to happen
+(wait or power cycle, then reload — waiting alone never resumes polling,
+because the breaker clears only by orchestrator reconstruction), points
+at the diagnostics download, and says nothing about credentials in
+either direction.
+
+> **Status:** Implemented for `AUTH_LOCKOUT`. The three remaining routes
+> still share one static description, which asserts a credential
+> rejection that only the first of them reliably is. Recorded here so
+> the four surfaces — trigger, title, description, error slot — are read
+> together rather than fixed one at a time, which is how the
+> contradiction survived three fixes.
+
+---
+
 ## SSL / TLS
 
 ### UC-82: HTTPS modem with self-signed certificate
@@ -1828,7 +2110,7 @@ sequenceDiagram
 - No duplicate entities — deferred creation is one-shot
 - Deferred listener does not fire after unsubscribe
 - If consumer unloads before modem recovers, listener is cleaned up
-- Transition logged: "Status transition: unreachable to online"
+- Transition logged: "Status transition [MODEL]: unreachable → online"
 - Equivalent to UC-34 at orchestrator level, but consumer handles entity lifecycle
 - Health recovery listener bounds recovery latency to the health check interval
   (not the scan interval) — orchestrator clears connectivity backoff when health
@@ -1872,6 +2154,53 @@ reach the orchestrator.
 
 ---
 
+### UC-86a: Setup — the wrong variant reads as a login failure
+
+**Preconditions:** The chosen model has more than one variant (an
+HTTPS build, an ISP-specific firmware, a hardware revision). The user
+picks one without knowing which their unit is. Credentials are
+correct; the variant is not.
+
+| Step | Action | State change | Observable |
+|------|--------|-------------|------------|
+| 1 | User picks a variant at Step 2, enters host and credentials at Step 3 | | Connection form names the selected variant |
+| 2 | Step 4 validates against that variant's `modem.yaml` | | |
+| 3 | Login fails because the config is wrong — wrong endpoint, wrong strategy, wrong success criterion | | |
+| 4 | Signal is `AUTH_FAILED`, mapped to `invalid_auth` | No entry created | "Login failed. Check: username… password…" |
+| 5 | The connection form returns carrying that error and an inline variant switch | | |
+| 6 | User switches variant; host and credentials carry across | selected variant replaced | |
+| 7 | If the new variant exposes credential fields the previous one lacked, the form re-renders before validating | | Username and password fields appear |
+
+**Assertions:**
+
+- Every validation failure returns to the connection form. The flow
+  never dead-ends, and the user never restarts Add Integration to try
+  another variant
+- The variant switch appears only when there is a choice — more than
+  one variant exists
+- The connection form always names the variant being configured, so
+  the user can track what they have already tried
+- The error text is chosen by signal alone. `_SIGNAL_ERROR_MAP` maps
+  `AUTH_FAILED` to `invalid_auth` with no knowledge of whether the
+  credential or the config was wrong
+- One login attempt per submission, per UC-86. Switching variants and
+  resubmitting is a new attempt against the modem
+
+**The cause class.** This is the third member of a family: *our*
+config being wrong, reported to the user as *their* password being
+wrong. The other two are UC-87c, where a success criterion the entry
+declared rejects the landing, and UC-87d, where the login never
+produced a verdict at all. The remedy shipped here is navigational —
+it lets the user escape a wrong guess — and it does not change what
+the message asserts.
+
+**Evidence:** Discussion #175 and #176 (Arris SB8200 v7). Shipped in
+3.14.0-beta.12. Auto-detecting the variant was considered and left out
+of 3.14: an earlier attempt was fragile, and probing costs login
+attempts at firmware that locks up after a few.
+
+---
+
 ### UC-87: Runtime — stored credentials invalidated
 
 **Preconditions:** Integration running normally for weeks/months. User
@@ -1881,23 +2210,31 @@ HA are now wrong. Current session in memory may still be valid.
 | Poll | What happens | Streak | Status |
 |------|-------------|--------|--------|
 | N | Session still valid → reuse → OK | 0 | ONLINE |
-| N+K | Session expires → re-auth → wrong password | 1 | AUTH_FAILED |
-| N+K+1 | Circuit trips immediately → trigger reauth | 1 | AUTH_FAILED |
+| N+K | Session expires → re-auth → wrong password. Streak 0→1 and the breaker trips in the same poll → trigger reauth | 1 | AUTH_FAILED |
+| N+K+1 | Breaker blocks the poll — no collection (UC-15) | 1 | AUTH_FAILED |
 
 **Target behavior:**
 
-- First AUTH_FAILED → circuit breaker trips (threshold=1 for
-  credential failures)
+- First AUTH_FAILED → circuit breaker trips. `_trip_circuit_breaker`
+  does not read `auth_failure_threshold` at all; there is no
+  credential-failure threshold to configure. The threshold is
+  `LOAD_AUTH`/`LOAD_INTEGRITY`'s alone (UC-13)
 - Polling stops immediately — no further login attempts
 - HA triggers reauth flow (UC-81) — user sees notification to
   re-enter credentials
 - After successful reauth → back to normal (UC-16)
 - Zero risk of triggering modem anti-brute-force lockout
 
-**Scope.** UC-87 is the 401/403 case: the modem examined the credential
-and rejected it. A login that answers 5xx never reaches this use case —
-the modem declined to serve the request without judging the credential,
-which is UC-87a. A 404 is UC-87b.
+**Scope.** UC-87 is the case where the modem examined the credential and
+rejected it. The status code is not what identifies it: HNAP answers a
+rejected login with HTTP 200 and `LoginResult: "FAILED"`. `AUTH_FAILED`
+is the collector's default for any failed login that is not a 5xx, so
+the siblings below are carved out by cause, not by status code. A login
+answering 5xx is UC-87a — the modem declined to serve the request
+without judging the credential. A 404 is UC-87b. A login
+answered under HTTP 400 whose landing fails a declared `success:`
+criterion is UC-87c. A login that failed before the modem judged
+anything is UC-87d.
 
 **Why not retry?** AUTH_FAILED means the modem explicitly rejected the
 credentials. Unlike CONNECTIVITY (network glitch) or LOAD_AUTH (stale
@@ -2003,87 +2340,135 @@ firmware moved the login endpoint. The login answers 404.
 > the orchestrator's blocked-poll branch reads
 > `circuit_trip_status_code`.
 
-### UC-88: Reboot-signal trigger
+---
 
-**Preconditions:** Integration polling normally. The ISP pushes new
-firmware, the user power-cycles the modem, or the modem reboots
-itself from watchdog. No HA-layer restart was issued. The modem
-returns to answering polls before the user's next scheduled poll
-(otherwise the connectivity trigger would catch it instead — see
-UC-49).
+### UC-87c: Runtime — login answered, success criterion rejected the landing
 
-| Poll | What happens | `recovery_active` | Coordinator interval |
-|------|-------------|-------------------|---------------------|
-| N    | Normal poll — counters = (500, 50), docsis = Operational | False | user-configured (e.g., 15 min) |
-| N+1  | Successful poll: counters = (0, 0), docsis = Denied. Reboot-signal check matches (counter reset + transitional docsis = 2 of 3); recovery opens a window with reason `reboot_signals:counter_reset+transitional_docsis`. Observer fires. | **True** | Switches to recovery cadence (e.g., 30 s) |
-| N+2..k | Polls run at recovery cadence. Snapshots reflect actual modem state (ranging → operational). Window is NOT closed by operational snapshot — it runs its full duration. | True | recovery cadence |
-| N+k+1 | `Recovery.WINDOW_SECONDS` elapsed; window closes. Observer fires. | False | Restored to user-configured |
+**Preconditions:** Modem uses `strategy: form` with a `success:` block.
+The login POST answers under HTTP 400, so the transport-level login
+succeeded, but the landing does not match the declared criterion. Nine
+catalog entries declare a criterion as of 3.14.0-beta.20, all of them
+`redirect`.
 
-**Core behavior:** The reboot-signal check runs inside
-`Recovery.evaluate_snapshot()` on every successful poll. It's a
-2-of-3 vote over counter reset, uptime drop, transitional docsis
-and returns a trigger reason or None. Recovery opens a window when
-the reason is non-None and no window is already active. See
-ORCHESTRATION_SPEC § Reboot-Signal Trigger for the signal set.
+| Step | Action | State change | Observable |
+|------|--------|-------------|------------|
+| 1 | Collector: session invalid → authenticate | | |
+| 2 | FormAuthManager: POST to `action`, following redirects | | |
+| 3 | `_check_success`: status < 400 passes the HTTP guard; criterion compared against the landing → mismatch | | |
+| 4 | Returns `AuthResult(success=False)` naming which criterion failed and what was observed | | WARNING log: "Auth failed [model] strategy=form — Login redirect mismatch: expected path containing '...', got '...'" with request, response status, body snippet |
+| 5 | Collector: status is not 5xx → `ModemResult(signal=AUTH_FAILED, auth_status_code=<login status>)` | | |
+| 6 | Policy: AUTH_FAILED trips the breaker on the first occurrence | streak 0→1, circuit=True | ERROR log: "Auth circuit breaker OPEN [MODEL] — 1 consecutive auth failures. Polling stopped. Reconfigure credentials to resume." |
+| 7 | Later polls short-circuit | No collection | Snapshot error: "Circuit breaker open — credentials rejected" |
 
-**HA behavior:** The observer fires the `recovery_state_changed`
-dispatcher signal. Listeners respond:
+**Current behavior:**
 
-1. The data coordinator's `update_interval` switches to the
-   recovery cadence on entry, restores on exit. On entry, HA calls
-   `async_request_refresh()` so the first fast-cadence poll happens
-   immediately.
-2. The restart button's enabled state re-evaluates.
+- Identical to UC-87 from step 5 on: immediate trip, no retry, HA starts
+  the reauth flow (UC-81)
+- `auth_status_code` is the login response's own status, so it is 2xx or
+  3xx here. Only 404 changes the blocked-poll message (UC-87b)
+- Config flow shows `invalid_auth`. `_SIGNAL_ERROR_MAP` maps
+  `AUTH_FAILED` unconditionally; the `session_rejected` refinement
+  applies to `LOAD_AUTH` and `LOAD_INTEGRITY` only, so it never sees
+  this signal (`CONFIG_FLOW_SPEC.md` § Step 4: Validate, the
+  signal-to-error-key table)
+- The mismatch detail reaches the WARNING log and nothing the user sees
 
-**Status sensor is not special-cased.** It renders the snapshot's
-actual status throughout — Operational / Denied / Not Locked /
-Unreachable / whatever. No synthetic "Restarting…" label fires
-from recovery state.
+**Distinguishing this from UC-87.** UC-87 is the modem's own verdict on
+the credential. Here the modem returned success and the criterion
+supplied the verdict, so the same signal covers two different states: a
+wrong password, and a correct password landing somewhere the entry never
+captured. Nothing downstream separates them.
 
-**False positives are bounded-harm.** If the reboot-signal check
-misfires on a firmware stats-clear or signal anomaly, the only
-consequence is polling faster for `Recovery.WINDOW_SECONDS`.
-Dashboard state is unaffected (it always reflects truth). No stalls,
-no timeouts, no misleading UX.
+**What this use case does not establish.** Whether a criterion
+discriminates a refused login from an accepted one is a per-entry
+evidence question, not a Core behavior. `_check_success` compares the
+landing against what the entry declares; a firmware that answers its
+success landing regardless of credentials never reaches this path, and
+the refusal reads as success instead. No committed fixture captures a
+refused login for any of the nine entries — every captured login POST is
+an accepted one — so for those entries the criterion is observed to
+accept, and not observed to reject.
 
-**Modems without the relevant fields** simply don't trigger from
-the reboot-signal check. Their reboots surface through normal
-polling via UC-49 instead. That's fine — the signal check is an
-enhancement, not a requirement.
+**Evidence:** #189 (Netgear CM2050V, 3.14.0-beta.20). The login answers
+200 at `/ErrorMsg.htm` where the entry declares `/index.htm`, producing
+`AUTH_FAILED` with "Login redirect mismatch: expected path containing
+'/index.htm', got '/ErrorMsg.htm'". The reporter states the credential
+is known good, and the committed captures for the same firmware land on
+`/index.htm`, so the landing varies on this hardware — but the cause is
+not established, which is why this use case documents the signal and not
+a diagnosis.
 
-**Interaction with commanded restart:** if a restart command is
-issued and recovery is already open from a signal-check trigger, the
-command is refused (UC-42). If the command is issued first, any
-subsequent reboot-signal match during the command's window is a no-op
-(window is already open; re-entry does nothing).
+> **Status:** Implemented. `_check_success` applies the criterion after
+> the HTTP-error guard; the collector maps the failure to `AUTH_FAILED`.
+> **Open decision:** what `AUTH_FAILED` should tell the user when the
+> criterion, not the modem, rejected the login. Tracked as journal task
+> `decide-what-auth-failed-should-tell-the-user-when-a-success`; the
+> message is unchanged until it is settled.
 
 ---
 
-### UC-89: Restart refused by the modem
+### UC-87d: Runtime — the login failed before the modem judged anything
 
-**Preconditions:** `actions.restart` is declared. The user presses
-restart. Nothing raises: the modem answers, but it answers no.
+**Preconditions:** The login flow gave up before the modem judged the
+credential. What is missing is a verdict, not necessarily a response —
+the modem may have answered every request it was sent, and answered
+them well. Four shapes reach here:
 
-Two ways this arrives, both returning `ActionResult(success=False)`
-rather than an exception:
+| Shape | Example | Where |
+|-------|---------|-------|
+| The login page did not carry what the strategy needs | "Login page missing myIv or mySalt JS variables" | `form_sjcl` |
+| A value the page carried failed validation | `myIv` is not valid hex; AES-CCM decryption failed | `form_sjcl` |
+| The handshake response omitted a required field | HNAP challenge missing `Challenge` or `PublicKey`; `url_token` inject with an empty body | `hnap`, `url_token` |
+| An environment problem, not a modem one | the `cryptography` package is absent | `form_sjcl`, `form_cbn` |
 
-| Step | Action | Observable |
-|------|--------|-----------|
-| 1 | `actions.restart` declares `action_auth` and the per-action login is refused (bad or missing credentials → HTTP 401). The command is never sent. | `Restart command failed [MODEL]: Per-action auth failed: Login returned HTTP 401` |
-| 2 | Or the command itself is sent and the modem answers 4xx/5xx. | `Restart command failed [MODEL]: Action refused with status 401` |
+A login page answering `>= 400` is not one of them. That is an HTTP
+failure carrying a status worth reading, so it classifies from that
+status like any other login failure and a 5xx is UC-87a. Only a page
+answering **under** 400 reaches here: the wrong device at the address,
+or firmware that moved the variables.
+
+| Step | Action | State change | Observable |
+|------|--------|-------------|------------|
+| 1 | Collector: session invalid → authenticate | | |
+| 2 | Auth returns `AuthResult(success=False)`, attaching the response wherever one exists | | WARNING log naming the strategy and the specific error |
+| 3 | Collector: `auth_status_code` is `None` or a 2xx, so the 5xx test cannot match | | |
+| 4 | `ModemResult(signal=AUTH_FAILED)` | | |
+| 5 | Policy: `AUTH_FAILED` trips the breaker on the first occurrence | streak 0→1, circuit=True | ERROR log: "Auth circuit breaker OPEN [MODEL] — 1 consecutive auth failures. Polling stopped. Reconfigure credentials to resume." |
+| 6 | HA starts the reauth flow (UC-81a) | | "The modem rejected your credentials. Please re-enter them." |
 
 **Assertions:**
 
-- `restart()` returns `success=False`, `error="command_failed"`
-- **No recovery window opens** — there is no reboot to poll through
-- **The collector session is not cleared** — the reason to clear it is
-  firmware invalidating it during a reboot, and no reboot happened
-- The consumer surfaces the failure. HA raises `HomeAssistantError`
-  from the button press, so the user sees it rather than a success
-  notification for a modem that never restarted
+- `auth_status_code` carries no verdict: `None` where the flow stopped
+  before any response, a 2xx where the modem served one the strategy
+  could not use. The `AUTH_UNAVAILABLE` classification tests
+  `500 <= status < 600`, and neither value matches, so both fall through
+  to `AUTH_FAILED` — the accusing branch is the default
+- Immediate trip, no retry, identical to UC-87 from step 4 on
+- The blocked-poll message says reconfigure credentials, because only
+  404 changes it (UC-87b)
+- The specific error survives in the WARNING log and reaches nothing
+  the user sees
 
-**Why this is its own case.** A modem with no monitoring auth but a
-credentialed restart (`auth.strategy: none` + `action_auth`) has a
-config-entry state where monitoring works perfectly and restart cannot
-work at all: no password was ever stored, because nothing needed one.
-Silence here reads as success to the only person who can fix it (#82).
+**Why this is its own case.** UC-87 is the modem's verdict on the
+credential. UC-87c is our declared criterion's verdict on the landing.
+Here there is no verdict at all — the flow stopped before a credential
+was judged, and in the `form_sjcl` shape often before one was even
+sent. Retyping the password cannot resolve any of these, and for the
+environment shape no password exists that would.
+
+**Why the response still matters when there is no status to read.**
+Every failure here carries the response that produced it wherever one
+exists, even though the collector cannot classify from it: the page
+answered under 400, so the status says nothing. The body is what
+distinguishes a wrong device from moved firmware variables, and it is
+the only place that distinction survives. One catalog entry reaches
+this through `form_sjcl` (Arris TG3442DE).
+
+**Not observed in the field.** No ticket reports this class. It is
+enumerated from the failure branches, and it is the same cause family
+as UC-86a and UC-87c: our config, our parsing, or our environment
+being wrong, reported to the user as their password being wrong.
+
+> **Status:** Current behavior. The signal is correct in the sense that
+> the login did fail; what it asserts about *why* is the open question
+> UC-87c also carries.

@@ -778,6 +778,32 @@ class TestStubPageDetection:
         assert result.success is True
         assert result.signal == CollectorSignal.OK
 
+    def test_stub_body_redacts_the_password(self) -> None:
+        """The retained body ships in diagnostics downloads users post publicly.
+
+        Some firmware echoes the submitted credential back inside its own
+        pages, and this body is stored whole, untruncated, and kept across
+        later successful polls so it survives into a bug report.
+        """
+        config = _make_config(auth_type="none")
+        collector = ModemDataCollector(config, MagicMock(), None, "http://localhost", "admin", "s3cr3t-passphrase")
+        modem_data = {"downstream": [], "upstream": [], "system_info": {}}
+        diagnostics = ParseDiagnostics(by_resource={"/status.html": AnchorCount(expected=4, fulfilled=0)})
+        resources = {"/status.html": '{"error":"denied","password":"s3cr3t-passphrase"}'}
+        with (
+            patch.object(collector, "authenticate", return_value=MagicMock(success=True)),
+            patch.object(collector, "_load_resources", return_value=(resources, [])),
+            patch.object(collector, "_parse", return_value=(modem_data, diagnostics)),
+        ):
+            collector.execute()
+
+        stored = collector.last_stub_bodies["/status.html"]
+        assert "s3cr3t-passphrase" not in stored
+        assert "[REDACTED]" in stored
+        # The rest of the body is the diagnostic value — redaction must not
+        # cost us the page shape that tells a stub from a real response.
+        assert "denied" in stored
+
     def test_zero_on_one_of_many_resources_emits_load_integrity(self) -> None:
         """One stub resource among others → still LOAD_INTEGRITY."""
         config = _make_config(auth_type="none")
@@ -1047,9 +1073,15 @@ def _login_failure(status: int | None) -> dict[str, Any]:
     }
 
 
+# Only 5xx is the modem declining to serve the login. Everything else that
+# comes back as a failed AuthResult is a verdict on the credential, whoever
+# reached it — the modem itself, or a declared success criterion.
+#
 # ┌────────┬─────────────────────┬──────────────────────────────────────┐
 # │ status │ expected signal     │ why                                  │
 # ├────────┼─────────────────────┼──────────────────────────────────────┤
+# │ 200    │ AUTH_FAILED         │ criterion rejected the landing       │
+# │        │                     │ (UC-87c); HNAP's LoginResult FAILED  │
 # │ 401    │ AUTH_FAILED         │ credential examined and rejected     │
 # │ 403    │ AUTH_FAILED         │ credential examined and rejected     │
 # │ 404    │ AUTH_FAILED         │ login endpoint absent (UC-87b)       │
@@ -1060,8 +1092,14 @@ def _login_failure(status: int | None) -> dict[str, Any]:
 # │ none   │ AUTH_FAILED         │ no response to inspect               │
 # └────────┴─────────────────────┴──────────────────────────────────────┘
 #
+# The 200 row is not hypothetical: a form entry with a success criterion
+# fails on a 2xx landing, and HNAP answers a rejected credential with 200
+# and LoginResult "FAILED". auth_status_code carries that 2xx through, so
+# only a 404 changes the blocked-poll message (UC-87b).
+#
 # fmt: off
 LOGIN_STATUS_CASES = [
+    (200,  CollectorSignal.AUTH_FAILED,      "200-criterion-rejected"),
     (401,  CollectorSignal.AUTH_FAILED,      "401-rejected"),
     (403,  CollectorSignal.AUTH_FAILED,      "403-rejected"),
     (404,  CollectorSignal.AUTH_FAILED,      "404-absent-endpoint"),

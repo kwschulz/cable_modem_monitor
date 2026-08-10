@@ -192,3 +192,69 @@ class TestAuthFailedTripsImmediately:
         policy.apply(self._auth_failed(404))
         assert policy.circuit_open is True
         assert policy.circuit_trip_status_code == 404
+
+
+# UC-81a. Once the breaker is open, apply() is unreachable — the
+# orchestrator short-circuits before collection — so every later poll
+# carries CollectorSignal.OK and the cause is gone. The trip signal is
+# the only place the reason survives, and it feeds both the diagnostics
+# download and the consumer's reauth decision.
+#
+# ┌────────────────────┬───────────┬──────────────────────────────────┐
+# │ signal             │ repeats   │ trip mode                        │
+# ├────────────────────┼───────────┼──────────────────────────────────┤
+# │ AUTH_FAILED        │ 1         │ immediate                        │
+# │ AUTH_LOCKOUT       │ 1         │ immediate                        │
+# │ LOAD_AUTH          │ threshold │ threshold                        │
+# │ LOAD_INTEGRITY     │ threshold │ threshold                        │
+# └────────────────────┴───────────┴──────────────────────────────────┘
+#
+# fmt: off
+TRIP_SIGNAL_CASES = [
+    (CollectorSignal.AUTH_FAILED,    False, "credentials rejected trips immediately"),
+    (CollectorSignal.AUTH_LOCKOUT,   False, "firmware lockout trips immediately"),
+    (CollectorSignal.LOAD_AUTH,      True,  "stale session trips at the threshold"),
+    (CollectorSignal.LOAD_INTEGRITY, True,  "stub page trips at the threshold"),
+]
+# fmt: on
+
+
+class TestCircuitTripSignalIsRecorded:
+    """Both trip modes record which signal opened the breaker."""
+
+    def test_no_trip_signal_before_the_breaker_opens(self, policy: SignalPolicy) -> None:
+        """A closed breaker has no trip reason to report."""
+        assert policy.circuit_trip_signal is None
+
+    @pytest.mark.parametrize(
+        "signal,needs_threshold,desc",
+        TRIP_SIGNAL_CASES,
+        ids=[c[2] for c in TRIP_SIGNAL_CASES],
+    )
+    def test_trip_records_the_signal(
+        self,
+        policy: SignalPolicy,
+        signal: CollectorSignal,
+        needs_threshold: bool,
+        desc: str,
+    ) -> None:
+        """Whichever signal opened the breaker is the one recorded."""
+        result = ModemResult(success=False, signal=signal)
+        for _ in range(policy._threshold if needs_threshold else 1):
+            policy.apply(result)
+        assert policy.circuit_open is True
+        assert policy.circuit_trip_signal is signal
+
+    def test_below_threshold_leaves_no_trip_signal(self, policy: SignalPolicy) -> None:
+        """A streak that never reaches the threshold has not tripped anything."""
+        result = ModemResult(success=False, signal=CollectorSignal.LOAD_AUTH)
+        for _ in range(policy._threshold - 1):
+            policy.apply(result)
+        assert policy.circuit_open is False
+        assert policy.circuit_trip_signal is None
+
+    def test_a_later_success_does_not_clear_the_trip_signal(self, policy: SignalPolicy) -> None:
+        """clear_streak() resets counters; the breaker and its reason latch."""
+        policy.apply(ModemResult(success=False, signal=CollectorSignal.AUTH_LOCKOUT))
+        policy.clear_streak()
+        assert policy.circuit_trip_signal is CollectorSignal.AUTH_LOCKOUT

@@ -131,14 +131,28 @@ class TestAesCcm:
             cipher2.decrypt(iv, encrypted, b"aad")
 
 
+def _page_response(html: str) -> MagicMock:
+    """Login-page GET mock carrying a real status, which _fetch_page_vars reads."""
+    # A bare MagicMock's status_code is a MagicMock, and how that fails
+    # depends on the comparison. Ordering raises, so `>= 400` is a
+    # TypeError. Equality and truthiness answer silently and wrongly
+    # instead; `!= 200` is True, `== 200` is False, `bool()` is True, and
+    # `%d` renders it as 1. A guard written as an ordering comparison is
+    # therefore the one a mock cannot quietly satisfy, and every response
+    # mock here carries the shape the code under test branches on.
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.text = html
+    return resp
+
+
 class TestFetchPageVars:
     """JS variable extraction from login page."""
 
     def test_extracts_variables(self) -> None:
         """Extracts myIv, mySalt, currentSessionId from page."""
         session = requests.Session()
-        resp = MagicMock()
-        resp.text = _login_page_html()
+        resp = _page_response(_login_page_html())
         with patch.object(session, "get", return_value=resp):
             result = _fetch_page_vars(session, "http://modem/", 10)
 
@@ -165,8 +179,7 @@ class TestFormSjclAuthManager:
         config = _make_config()
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         login_resp = MagicMock()
         login_resp.status_code = 200
@@ -195,8 +208,7 @@ class TestFormSjclAuthManager:
         config = _make_config()
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         login_resp = MagicMock()
         login_resp.status_code = 200
@@ -219,8 +231,7 @@ class TestFormSjclAuthManager:
         config = _make_config()
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = "<html><script>var mySalt = 'abc';</script></html>"
+        page_resp = _page_response("<html><script>var mySalt = 'abc';</script></html>")
 
         with patch.object(session, "get", return_value=page_resp):
             result = manager.authenticate(session, "http://192.168.0.1", "admin", "password")
@@ -259,8 +270,7 @@ class TestFormSjclAuthManager:
         config = _make_config()
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html(iv=iv_value)
+        page_resp = _page_response(_login_page_html(iv=iv_value))
 
         with patch.object(session, "get", return_value=page_resp):
             result = manager.authenticate(session, "http://192.168.0.1", "admin", "password")
@@ -298,8 +308,7 @@ class TestFormSjclAuthManager:
         config = _make_config(session_validation_endpoint="")
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         login_resp = MagicMock()
         login_resp.status_code = 200
@@ -333,8 +342,7 @@ class TestFormSjclAuthManager:
         config = _make_config()
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         with (
             patch.object(
@@ -351,10 +359,10 @@ class TestFormSjclAuthManager:
         config = _make_config()
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         login_resp = MagicMock()
+        login_resp.status_code = 200
         login_resp.json.side_effect = ValueError("not json")
 
         with (
@@ -371,8 +379,7 @@ class TestFormSjclAuthManager:
         config = _make_config(session_validation_endpoint="")
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         login_resp = MagicMock()
         login_resp.status_code = 200
@@ -422,10 +429,10 @@ class TestFormSjclAuthManager:
         config = _make_config()
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         login_resp = MagicMock()
+        login_resp.status_code = 200
         login_resp.json.return_value = json_value
 
         with (
@@ -443,8 +450,7 @@ class TestFormSjclAuthManager:
         config = _make_config()
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         login_resp = MagicMock()
         login_resp.status_code = 200
@@ -467,8 +473,7 @@ class TestFormSjclAuthManager:
         config = _make_config(session_validation_endpoint="")
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         login_resp = MagicMock()
         login_resp.status_code = 200
@@ -491,8 +496,7 @@ class TestFormSjclAuthManager:
         config = _make_config()
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         login_resp = MagicMock()
         login_resp.status_code = 200
@@ -516,8 +520,7 @@ class TestFormSjclAuthManager:
         config = _make_config()
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         login_resp = MagicMock()
         login_resp.status_code = 200
@@ -543,8 +546,7 @@ class TestFormSjclAuthManager:
         config = _make_config()
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         login_resp = MagicMock()
         login_resp.status_code = 200
@@ -564,8 +566,7 @@ class TestFormSjclAuthManager:
         config = _make_config()
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         login_resp = MagicMock()
         login_resp.status_code = 200
@@ -587,8 +588,7 @@ class TestFormSjclAuthManager:
         config = _make_config(csrf_header="")
         manager = FormSjclAuthManager(config)
 
-        page_resp = MagicMock()
-        page_resp.text = _login_page_html()
+        page_resp = _page_response(_login_page_html())
 
         login_resp = MagicMock()
         login_resp.status_code = 200

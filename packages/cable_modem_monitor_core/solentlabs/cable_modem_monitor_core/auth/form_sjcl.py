@@ -108,15 +108,11 @@ class FormSjclAuthManager(BaseAuthManager):
         if isinstance(page_vars, AuthResult):
             return page_vars
 
-        iv_hex = page_vars.get("myIv", "")
-        salt = page_vars.get("mySalt", "")
+        # _fetch_page_vars has already rejected a page missing either of
+        # the two required variables, so it can attach the response.
+        iv_hex = page_vars["myIv"]
+        salt = page_vars["mySalt"]
         session_id = page_vars.get("currentSessionId", "")
-
-        if not iv_hex or not salt:
-            return AuthResult(
-                success=False,
-                error="Login page missing myIv or mySalt JS variables",
-            )
 
         iv_result = _validate_iv(iv_hex)
         if isinstance(iv_result, AuthResult):
@@ -265,14 +261,7 @@ def _fetch_page_vars(
     url: str,
     timeout: int,
 ) -> dict[str, str] | AuthResult:
-    """GET the login page and extract needed JS variable assignments.
-
-    Captures only ``myIv``, ``mySalt``, and ``currentSessionId``
-    from patterns like ``var myIv = 'hexvalue'`` or
-    ``currentSessionId = 'hexvalue'``.
-
-    Returns a dict of variable names to values, or AuthResult on error.
-    """
+    """GET the login page and extract the ``myIv``/``mySalt``/``currentSessionId`` assignments."""
     try:
         resp = session.get(url, timeout=timeout)
     except requests.RequestException as e:
@@ -280,11 +269,33 @@ def _fetch_page_vars(
             raise
         return AuthResult(success=False, error=f"Login page fetch failed: {type(e).__name__}: {e}")
 
+    # An HTTP error is a failed login whatever the body holds, and the
+    # response has to come home with it. The collector reads the attached
+    # status to tell a modem declining to serve (AUTH_UNAVAILABLE, UC-87a)
+    # from a rejected credential; with nothing attached a 503 read as a
+    # wrong password and tripped the breaker on the first poll.
+    if resp.status_code >= 400:
+        return AuthResult(
+            success=False,
+            error=f"Login page returned HTTP {resp.status_code}",
+            response=resp,
+        )
+
     variables: dict[str, str] = {}
     for match in _VAR_RE.finditer(resp.text):
         name = match.group(1)
         if name in _WANTED_VARS:
             variables[name] = match.group(2)
+
+    # Answered under 400, but not with the login page this strategy expects:
+    # wrong device at the address, or firmware that moved the variables. The
+    # body is the only thing that distinguishes those, so it rides along.
+    if not variables.get("myIv") or not variables.get("mySalt"):
+        return AuthResult(
+            success=False,
+            error="Login page missing myIv or mySalt JS variables",
+            response=resp,
+        )
 
     return variables
 

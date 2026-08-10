@@ -522,8 +522,10 @@ User presses "Restart Modem"
  │     shows a flakey state.
  │
  ├─ 4. Send persistent notification:
- │     success → "Restart command sent"
- │     failure → "Restart command failed: <error>"
+ │     success → "Restart Command Sent [MODEL]" / "<model> restart
+ │               command dispatched in <N.N> seconds."
+ │     failure → "Modem Restart Failed [MODEL]" / "<model> restart did
+ │               not dispatch: <error>"
  │
  └─ 5. Trigger one immediate data refresh so the dashboard reacts to
        the post-dispatch state (typically UNREACHABLE while the modem
@@ -863,8 +865,24 @@ Two defences, both required:
 
 ## Reauth Flow
 
-When Core's auth circuit breaker opens (6 consecutive auth failures),
-the adapter triggers HA's native reauthentication flow.
+When Core's auth circuit breaker opens, the adapter triggers HA's
+native reauthentication flow. Two mechanisms open it: `AUTH_FAILED` and
+`AUTH_LOCKOUT` trip it on the first occurrence, while `LOAD_AUTH` and
+`LOAD_INTEGRITY` accumulate and trip it at 6 consecutive failures
+(`ORCHESTRATION_SPEC.md` § Auth Circuit Breaker). The policy collapses
+all four signals to `AUTH_FAILED`, so the adapter reads
+`circuit_trip_signal` to tell the routes apart (UC-81a).
+
+**`AUTH_LOCKOUT` is routed away from this flow.** Submitting the reauth
+form calls `validate_connection`, a real login, and the config flow is
+stateless by design (UC-86), so an open breaker does not stop it.
+Prompting a locked-out user invites hand-fed attempts at a modem that
+locked itself to stop them (#117). That route fires a persistent
+notification instead — `_notify_auth_lockout`, once per open breaker,
+with the wait-then-reload remedy and no mention of credentials. The
+Status sensor remains the standing indicator.
+
+The three remaining routes reach the flow below.
 
 ```text
 Circuit breaker opens
@@ -873,6 +891,7 @@ Circuit breaker opens
  │
  ├─ 2. Adapter detects: snapshot.connection_status == AUTH_FAILED
  │     AND orchestrator.diagnostics().circuit_breaker_open == True
+ │     AND circuit_trip_signal is not AUTH_LOCKOUT
  │
  ├─ 3. Trigger: entry.async_start_reauth(hass)
  │     HA shows "Reauthentication required" notification
@@ -919,6 +938,9 @@ included automatically when new diagnostics are added to the model.
 - `poll_duration` — last poll wall-clock time in seconds
 - `auth_failure_streak` — consecutive auth failures (0 = healthy)
 - `circuit_breaker_open` — whether polling is stopped
+- `circuit_trip_signal` — which signal opened the breaker (null while
+  closed). The blocked polls that follow a trip report `ok`, so this
+  is the only field in the download that says why polling stopped
 - `session_is_valid` — auth manager session state
 - `auth_strategy` — auth strategy name from modem config
 - `connectivity_streak` — consecutive connectivity failures

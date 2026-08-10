@@ -324,8 +324,9 @@ ARCHITECTURE_DECISIONS.md § Post-login 401 is read per auth strategy.
 `auth_signals` is config-flow-local: it selects `PermissionError` over
 `RuntimeError`, and both carry the same encoded error key, so membership
 changes nothing a user sees. HA's reauth prompt is started on the runtime path
-instead (`_start_reauth_on_lockout` — `ConnectionStatus.AUTH_FAILED` plus an
-open circuit breaker).
+instead (`_announce_auth_stop` — `ConnectionStatus.AUTH_FAILED` plus an open
+circuit breaker, minus the `AUTH_LOCKOUT` trip, which gets a notification
+rather than a form it must not invite the user to submit).
 
 Reauth matters most here. An already configured modem that starts refusing
 data trips the auth streak, opens the breaker, and prompts for
@@ -436,10 +437,14 @@ complete matrix and interval limits.
 
 ## Reauthentication Flow
 
-When the modem rejects credentials 6 times consecutively, the
-integration triggers HA's native reauth flow. The user re-enters
-credentials via `async_step_reauth` (reusing the Step 3 connection
-form). Validation runs identically to Step 4.
+When Core's auth circuit breaker opens, the integration triggers HA's
+native reauth flow. Two mechanisms open it, and either one gets here: a
+rejected credential (`AUTH_FAILED`) or a firmware lockout
+(`AUTH_LOCKOUT`) trips it on the first occurrence, while a
+session-shaped failure (`LOAD_AUTH`, `LOAD_INTEGRITY`) accumulates and
+trips it at 6 consecutive failures. The user re-enters credentials via
+`async_step_reauth` (reusing the Step 3 connection form). Validation
+runs identically to Step 4.
 
 See [HA_ADAPTER_SPEC.md](HA_ADAPTER_SPEC.md#reauth-flow) for the
 full orchestrator state machine and circuit breaker behavior.

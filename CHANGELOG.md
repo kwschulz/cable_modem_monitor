@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.21] - 2026-08-10
+
+### Added
+
+- **Diagnostics now say why polling stopped.** When repeated auth
+  failures stop polling, the download reported that the circuit breaker
+  was open and nothing about the cause, so a firmware lockout, a wrong
+  password and six consecutive refused sessions all produced the same
+  payload. A new `circuit_trip_signal` field records which signal opened
+  the breaker and survives the blocked polls that follow, which report no
+  signal of their own. Additive: no existing diagnostics key changed, so
+  files already collected stay comparable.
+
+### Fixed
+
+- **Your password can no longer reach a diagnostics download.**
+  When a modem returns an unusable page, the whole page is saved into the
+  diagnostics file so the failure can be diagnosed after the fact — and
+  that file is what users are asked to attach to a public issue. The page
+  was saved exactly as received, while every other saved response already
+  had the password stripped. Some firmware echoes the submitted password
+  back inside its own pages, so the combination could publish a working
+  modem login. The page is now stripped at the moment it is saved.
+
+- **The auth-failure warning now says why the login failed.** It carried
+  the request, the response status and a body snippet, but discarded the
+  one sentence naming the reason — so a login the modem accepted before
+  sending us somewhere unrecognized logged the landing address as a bare
+  URL, with nothing to say that was the problem or what was expected. The
+  reason now leads the line. No new data is collected; it was already
+  gathered and dropped at the last step.
+
+- **A modem locked out by its own firmware no longer asks you to
+  re-enter your password.** Firmware that locks out logins after too
+  many attempts raised the same "Authentication expired" prompt as a
+  wrong password, and submitting that form is itself a login attempt —
+  so the remedy on offer was the one thing that keeps a locked-out modem
+  locked out. A lockout now raises a notification instead, naming the
+  lockout and the remedy that works: wait for the modem to clear it or
+  power cycle it, then reload the integration. Blocked polls stop saying
+  "reconfigure credentials" for the same reason. A wrong password still
+  prompts for credentials exactly as before.
+
+- **A modem that is busy or erroring during login is no longer reported
+  as a wrong password.** Two auth strategies did not read the HTTP status
+  of the login they had just sent. `form_nonce` judged the outcome purely
+  from the response body, so a 401 or a 503 whose body happened not to
+  carry the firmware's error prefix was treated as a successful login.
+  `form_sjcl` fetched the login page without checking its status and
+  discarded the response, so every HTTP error arrived as an empty set of
+  JavaScript variables and surfaced as "Login page missing myIv or mySalt"
+  — stopping polling on the first attempt and telling the user to fix
+  their credentials. Both now treat a login answering 400 or above as
+  failed and keep the response, so a busy modem reports as unreachable
+  and retries on the next poll instead of demanding a password. Affects
+  the Arris SB6190 auth-required variant and the Arris TG3442DE; no
+  change for a modem whose login answers normally.
+
 ## [3.14.0-beta.20] - 2026-08-07
 
 ### Fixed

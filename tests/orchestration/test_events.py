@@ -31,6 +31,7 @@ from solentlabs.cable_modem_monitor_core.orchestration.events import (
     ZeroChannelsNoSystemInfo,
 )
 from solentlabs.cable_modem_monitor_core.orchestration.logging import log_event
+from solentlabs.cable_modem_monitor_core.orchestration.signals import CollectorSignal
 
 from .event_capture import assert_event_emitted, capture_events
 
@@ -68,7 +69,7 @@ def test_event_level_values_match_stdlib():
             ),
             EventLevel.WARNING,
         ),
-        (AuthCircuitBreakerOpen(model="SB8200", streak=5), EventLevel.ERROR),
+        (AuthCircuitBreakerOpen(model="SB8200", streak=5, signal=CollectorSignal.AUTH_FAILED), EventLevel.ERROR),
         (ZeroChannelsNoSystemInfo(model="SB8200"), EventLevel.WARNING),
         (
             ResourceFetched(model="SB8200", path="/status.html", status_code=200, size_bytes=1024, elapsed_ms=42.0),
@@ -144,7 +145,7 @@ def test_log_event_calls_logger_log():
 
 def test_log_event_level_matches_event():
     logger = MagicMock(spec=logging.Logger)
-    event = AuthCircuitBreakerOpen(model="SB8200", streak=5)
+    event = AuthCircuitBreakerOpen(model="SB8200", streak=5, signal=CollectorSignal.AUTH_FAILED)
     log_event(logger, event)
     level_arg, _ = logger.log.call_args.args
     assert level_arg == EventLevel.ERROR
@@ -153,7 +154,7 @@ def test_log_event_level_matches_event():
 def test_circuit_breaker_message_default():
     """Without a status code the breaker message points at credentials."""
     logger = MagicMock(spec=logging.Logger)
-    log_event(logger, AuthCircuitBreakerOpen(model="SB8200", streak=1))
+    log_event(logger, AuthCircuitBreakerOpen(model="SB8200", streak=1, signal=CollectorSignal.AUTH_FAILED))
     _, msg = logger.log.call_args.args
     assert "Reconfigure credentials" in msg
 
@@ -161,7 +162,10 @@ def test_circuit_breaker_message_default():
 def test_circuit_breaker_message_endpoint_not_found():
     """HTTP 404 on login is endpoint absence, not credential rejection — wrong device or modem unavailable."""
     logger = MagicMock(spec=logging.Logger)
-    log_event(logger, AuthCircuitBreakerOpen(model="SB8200", streak=1, status_code=404))
+    log_event(
+        logger,
+        AuthCircuitBreakerOpen(model="SB8200", streak=1, signal=CollectorSignal.AUTH_FAILED, status_code=404),
+    )
     _, msg = logger.log.call_args.args
     assert "login endpoint not found" in msg
     assert "Reconfigure credentials" not in msg
@@ -170,7 +174,7 @@ def test_circuit_breaker_message_endpoint_not_found():
 def test_polling_blocked_message_default():
     """Steady-state blocked message points at credentials when the trip was credential rejection."""
     logger = MagicMock(spec=logging.Logger)
-    log_event(logger, CircuitBreakerPollingBlocked(model="SB8200"))
+    log_event(logger, CircuitBreakerPollingBlocked(model="SB8200", signal=CollectorSignal.AUTH_FAILED))
     _, msg = logger.log.call_args.args
     assert "Reconfigure credentials" in msg
 
@@ -178,10 +182,34 @@ def test_polling_blocked_message_default():
 def test_polling_blocked_message_endpoint_not_found():
     """Steady-state blocked message preserves the 404 trip reason — credentials are not the fix."""
     logger = MagicMock(spec=logging.Logger)
-    log_event(logger, CircuitBreakerPollingBlocked(model="SB8200", status_code=404))
+    log_event(
+        logger,
+        CircuitBreakerPollingBlocked(model="SB8200", signal=CollectorSignal.AUTH_FAILED, status_code=404),
+    )
     _, msg = logger.log.call_args.args
     assert "login endpoint not found" in msg
     assert "Reconfigure credentials" not in msg
+
+
+# Both events take their remedy from auth_stop_advice, so a new trip
+# cause cannot be right on one surface and wrong on the other. This is
+# the pair that drifted: the 404 wording was added to one of them first
+# and had to be backfilled into the other (423bf9de, then 0160be2a).
+@pytest.mark.parametrize(
+    "event",
+    [
+        AuthCircuitBreakerOpen(model="SB8200", streak=1, signal=CollectorSignal.AUTH_LOCKOUT),
+        CircuitBreakerPollingBlocked(model="SB8200", signal=CollectorSignal.AUTH_LOCKOUT),
+    ],
+    ids=["breaker opened", "poll blocked"],
+)
+def test_lockout_never_advises_reconfiguring_credentials(event):
+    """A lockout clears by waiting and reloading, never by a new password."""
+    logger = MagicMock(spec=logging.Logger)
+    log_event(logger, event)
+    _, msg = logger.log.call_args.args
+    assert "Wait for the modem to clear the lockout" in msg
+    assert "credentials" not in msg.lower()
 
 
 @pytest.mark.parametrize(
@@ -254,6 +282,30 @@ def test_auth_failed_response_format():
     assert "POST" in msg
     assert "401" in msg
     assert "text/html" in msg
+
+
+def test_auth_failed_response_format_states_why_it_failed():
+    """The reason is the diagnosis; the wire detail is only the evidence for it.
+
+    A criterion mismatch names both sides. Dropping ``error`` left the
+    landing path in the message as a bare request URL, with nothing
+    saying it was the mismatch or what was expected (#189).
+    """
+    logger = MagicMock(spec=logging.Logger)
+    event = AuthFailed(
+        model="SB8200",
+        strategy="form",
+        error="Login redirect mismatch: expected path containing '/index.htm', got '/ErrorMsg.htm'",
+        method="POST",
+        url="http://192.168.100.1/goform/Login",
+        status_code=200,
+        content_type="text/html",
+        response_body="<html>Error</html>",
+    )
+    log_event(logger, event)
+    _, msg = logger.log.call_args.args
+    assert "expected path containing '/index.htm'" in msg
+    assert "got '/ErrorMsg.htm'" in msg
 
 
 # ---------------------------------------------------------------------------

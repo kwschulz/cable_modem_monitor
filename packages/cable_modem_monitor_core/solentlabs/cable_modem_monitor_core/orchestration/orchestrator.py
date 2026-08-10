@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from .auth_stop import auth_stop_advice
 from .events import (
     CircuitBreakerPollingBlocked,
     ConnectivityBackoffReset,
@@ -210,6 +211,7 @@ class Orchestrator:
             poll_duration=self._last_poll_duration,
             auth_failure_streak=self._policy.auth_failure_streak,
             circuit_breaker_open=self._policy.circuit_open,
+            circuit_trip_signal=self._policy.circuit_trip_signal,
             session_is_valid=self._collector.session_is_valid,
             auth_strategy=auth.strategy if auth else "",
             connectivity_streak=self._policy.connectivity_streak,
@@ -292,24 +294,22 @@ class Orchestrator:
         # Circuit breaker
         if self._policy.circuit_open:
             trip_status_code = self._policy.circuit_trip_status_code
+            trip_signal = self._policy.circuit_trip_signal
             log_event(
                 _logger,
                 CircuitBreakerPollingBlocked(
                     model=self._modem_config.model,
                     status_code=trip_status_code,
+                    signal=trip_signal,
                 ),
             )
-            # After a 404 trip, credentials are not the fix — keep the
-            # snapshot error honest about the trip reason.
-            error = (
-                "Circuit breaker open — login endpoint not found"
-                if trip_status_code == 404
-                else "Circuit breaker open — reconfigure credentials"
-            )
+            # Cause and remedy come from one table so this snapshot and
+            # the log line above cannot disagree; see auth_stop.py.
+            advice = auth_stop_advice(trip_signal, trip_status_code)
             return self._make_snapshot(
                 ConnectionStatus.AUTH_FAILED,
                 DocsisStatus.UNKNOWN,
-                error=error,
+                error=f"Circuit breaker open — {advice.cause}",
             )
 
         # Health recovery — clear connectivity backoff if the modem

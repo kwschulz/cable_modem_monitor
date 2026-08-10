@@ -12,11 +12,13 @@ Pre-fetch encoding detection — connectivity vs non-connectivity error handling
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from solentlabs.cable_modem_monitor_core.auth.base import AuthFailureMode
 from solentlabs.cable_modem_monitor_core.catalog_manager import (
     ModemSummary,
     VariantInfo,
@@ -28,9 +30,11 @@ from solentlabs.cable_modem_monitor_core.orchestration.signals import (
 )
 
 from custom_components.cable_modem_monitor.config_flow_helpers import (
+    _POST_LOGIN_SIGNALS,
     _SIGNAL_ERROR_MAP,
     _attempt_validation,
     _detect_and_inject_form_nonce_encoding,
+    _post_login_error_key,
     _raise_validation_failure,
     _run_validation,
     build_model_display_name,
@@ -431,31 +435,38 @@ def test_build_model_options_bucket_single_row():
 # Pure-function helpers — classify_error
 # =====================================================================
 
-# ┌────────────────┬────────────────────┬────────────────┐
-# │ signal         │ expected key       │ description    │
-# ├────────────────┼────────────────────┼────────────────┤
-# │ CONNECTIVITY   │ "cannot_connect"   │ connectivity   │
-# │ AUTH_FAILED    │ "invalid_auth"     │ auth_failed    │
-# │ AUTH_LOCKOUT   │ "invalid_auth"     │ auth_lockout   │
-# │ LOAD_ERROR     │ "cannot_connect"   │ load_error     │
-# │ LOAD_AUTH      │ "invalid_auth"     │ load_auth      │
-# │ LOAD_INTEGRITY │ "invalid_auth"     │ load_integrity │
-# │ PARSE_ERROR    │ "parse_failed"     │ parse_error    │
-# │ OK             │ "unknown"          │ unmapped       │
-# │ None           │ "unknown"          │ no_signal      │
-# └────────────────┴────────────────────┴────────────────┘
+# ┌───────────────────┬────────────────────┬───────────────────┐
+# │ signal            │ expected key       │ description       │
+# ├───────────────────┼────────────────────┼───────────────────┤
+# │ CONNECTIVITY      │ "cannot_connect"   │ connectivity      │
+# │ AUTH_FAILED       │ "invalid_auth"     │ auth_failed       │
+# │ AUTH_UNAVAILABLE  │ "modem_busy"       │ auth_unavailable  │
+# │ AUTH_LOCKOUT      │ "invalid_auth"     │ auth_lockout      │
+# │ LOAD_ERROR        │ "cannot_connect"   │ load_error        │
+# │ LOAD_AUTH         │ "invalid_auth"     │ load_auth         │
+# │ LOAD_INTEGRITY    │ "invalid_auth"     │ load_integrity    │
+# │ PARSE_ERROR       │ "parse_failed"     │ parse_error       │
+# │ OK                │ "unknown"          │ unmapped          │
+# │ None              │ "unknown"          │ no_signal         │
+# └───────────────────┴────────────────────┴───────────────────┘
+#
+# AUTH_UNAVAILABLE is the one auth-phase signal that must not read as a
+# credential problem: the modem declined to serve the login rather than
+# judging it (UC-87a). Its row was missing here while the mapping existed,
+# so the behaviour was implemented and unasserted.
 #
 # fmt: off
 CLASSIFY_ERROR_CASES = [
-    (CollectorSignal.CONNECTIVITY,   "cannot_connect",   "connectivity"),
-    (CollectorSignal.AUTH_FAILED,    "invalid_auth",     "auth_failed"),
-    (CollectorSignal.AUTH_LOCKOUT,   "invalid_auth",     "auth_lockout"),
-    (CollectorSignal.LOAD_ERROR,     "cannot_connect",   "load_error"),
-    (CollectorSignal.LOAD_AUTH,      "invalid_auth",     "load_auth"),
-    (CollectorSignal.LOAD_INTEGRITY, "invalid_auth",     "load_integrity"),
-    (CollectorSignal.PARSE_ERROR,    "parse_failed",     "parse_error"),
-    (CollectorSignal.OK,             "unknown",          "unmapped"),
-    (None,                           "unknown",          "no_signal"),
+    (CollectorSignal.CONNECTIVITY,      "cannot_connect",   "connectivity"),
+    (CollectorSignal.AUTH_FAILED,       "invalid_auth",     "auth_failed"),
+    (CollectorSignal.AUTH_UNAVAILABLE,  "modem_busy",       "auth_unavailable"),
+    (CollectorSignal.AUTH_LOCKOUT,      "invalid_auth",     "auth_lockout"),
+    (CollectorSignal.LOAD_ERROR,        "cannot_connect",   "load_error"),
+    (CollectorSignal.LOAD_AUTH,         "invalid_auth",     "load_auth"),
+    (CollectorSignal.LOAD_INTEGRITY,    "invalid_auth",     "load_integrity"),
+    (CollectorSignal.PARSE_ERROR,       "parse_failed",     "parse_error"),
+    (CollectorSignal.OK,                "unknown",          "unmapped"),
+    (None,                              "unknown",          "no_signal"),
 ]
 # fmt: on
 
@@ -1220,17 +1231,23 @@ class TestValidationReleasesSession:
 class TestPostLoginKeyIsStrategyDependent:
     """A post-login 401 only means "session refused" if the login was verified.
 
-    basic auth never validates a password, and plain form auth accepts
-    any response under HTTP 400, so for those a 401 on the data page is
-    most often the bad password surfacing late. Reporting it as "your
-    password is fine" is what beta.17 got wrong.
+    basic auth never validates a password, and form auth with no
+    ``success:`` criterion accepts any response under HTTP 400, so for
+    those a 401 on the data page is most often the bad password
+    surfacing late. Reporting it as "your password is fine" is what
+    beta.17 got wrong. The discriminator is not the strategy name:
+    ``form`` answers differently depending on whether the entry
+    declares a criterion.
     """
 
     # fmt: off
     _CASES = [
         # (strategy,     auth kwargs,                        expected key,       description)
         ("basic",        {},                                 "invalid_auth",     "never validates"),
-        ("form",         {"action": "/login.htm"},           "invalid_auth",     "accepts any 2xx/3xx"),
+        ("form",         {"action": "/login.htm"},           "invalid_auth",     "no criterion, accepts any 2xx/3xx"),
+        ("form",         {"action": "/login.htm",
+                          "success": {
+                              "redirect": "/index.htm"}},    "session_rejected", "criterion checks the landing"),
         ("form_pbkdf2",  {"login_endpoint": "/l",
                           "pbkdf2_iterations": 1000,
                           "pbkdf2_key_length": 128},         "session_rejected", "verifies via login_success"),
@@ -1247,7 +1264,9 @@ class TestPostLoginKeyIsStrategyDependent:
         config.auth = TypeAdapter(AuthConfig).validate_python({"strategy": strategy, **auth})
         return config
 
-    @pytest.mark.parametrize(("strategy", "auth", "expected", "description"), _CASES, ids=[c[0] for c in _CASES])
+    @pytest.mark.parametrize(
+        ("strategy", "auth", "expected", "description"), _CASES, ids=[f"{c[0]}-{c[3]}" for c in _CASES]
+    )
     @pytest.mark.parametrize("signal", [CollectorSignal.LOAD_AUTH, CollectorSignal.LOAD_INTEGRITY])
     def test_key_follows_auth_strategy(
         self,
@@ -1306,3 +1325,106 @@ class TestSignalErrorMapCoverage:
         produced = set(_SIGNAL_ERROR_MAP.values()) | {"unknown"}
 
         assert produced <= declared, f"missing from strings.json: {produced - declared}"
+
+
+# ---------------------------------------------------------------------------
+# Spec-to-code gate — CONFIG_FLOW_SPEC § Step 4 vs the mapping it documents
+# ---------------------------------------------------------------------------
+
+# The spec table and the code dict are written by different hands and drift
+# apart silently: LOAD_INTEGRITY reached users as "unknown" that way. Neither
+# side is authoritative on its own, so the gate asserts they agree in both
+# directions rather than picking a winner.
+#
+# Deliberately not gated: that a use case cites a test. A citation is
+# satisfied by typing a number into a docstring, which is how UC-10's number
+# came to sit in a test asserting UC-10's opposite. Gate what cannot be faked.
+
+_SPEC_PATH = (
+    Path(__file__).resolve().parents[2] / "custom_components" / "cable_modem_monitor" / "docs" / "CONFIG_FLOW_SPEC.md"
+)
+
+
+def _step4_tables() -> tuple[dict[str, str], dict[str, str]]:
+    """Parse § Step 4's signal table and auth-failure-mode table."""
+    text = _SPEC_PATH.read_text(encoding="utf-8")
+    start = text.index("### Step 4: Validate")
+    # Ends at the next heading of the same level or higher. Search from the
+    # end of Step 4's own heading line, or "^" matches that heading itself.
+    body = text.index("\n", start) + 1
+    nxt = re.search(r"^#{1,3} ", text[body:], re.M)
+    section = text[body : body + nxt.start()] if nxt else text[body:]
+
+    signals: dict[str, str] = {}
+    modes: dict[str, str] = {}
+    target: dict[str, str] | None = None
+
+    for line in section.splitlines():
+        if not line.startswith("|"):
+            # Any non-table line ends the current table, so prose between
+            # two tables cannot leak rows from one into the other.
+            target = None
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if cells[0] == "CollectorSignal":
+            target = signals
+        elif cells[0] == "`auth_failure_mode()`":
+            target = modes
+        elif target is not None and set(cells[0]) - set("-: "):
+            target[cells[0]] = cells[1]
+
+    assert signals, "§ Step 4 signal table not found — did the heading move?"
+    assert modes, "§ Step 4 auth_failure_mode table not found"
+    return signals, modes
+
+
+class TestSpecTableMatchesCode:
+    """CONFIG_FLOW_SPEC § Step 4 documents the mapping; the code implements it."""
+
+    def test_signal_table_agrees_with_signal_error_map(self) -> None:
+        """Every documented signal maps as documented, and none is undocumented."""
+        spec_signals, _ = _step4_tables()
+
+        documented: dict[CollectorSignal, str] = {}
+        strategy_dependent: set[CollectorSignal] = set()
+        for raw_signal, raw_key in spec_signals.items():
+            signal = CollectorSignal[raw_signal.strip("`")]
+            if "strategy-dependent" in raw_key:
+                strategy_dependent.add(signal)
+            else:
+                documented[signal] = raw_key.strip("`")
+
+        assert strategy_dependent == _POST_LOGIN_SIGNALS, (
+            "signals the spec defers to the auth strategy must be exactly the ones "
+            f"the code refines: spec={strategy_dependent}, code={_POST_LOGIN_SIGNALS}"
+        )
+        in_spec = set(documented) | strategy_dependent
+        assert in_spec == set(_SIGNAL_ERROR_MAP), (
+            "spec and code disagree on which signals have a key: "
+            f"spec-only={in_spec - set(_SIGNAL_ERROR_MAP)}, "
+            f"code-only={set(_SIGNAL_ERROR_MAP) - in_spec}"
+        )
+        mismatched = {
+            signal: (key, _SIGNAL_ERROR_MAP[signal])
+            for signal, key in documented.items()
+            if _SIGNAL_ERROR_MAP[signal] != key
+        }
+        assert not mismatched, f"signal: (spec key, code key) disagree: {mismatched}"
+
+    def test_mode_table_agrees_with_post_login_error_key(self) -> None:
+        """Every AuthFailureMode is documented, and produces the documented key."""
+        _, spec_modes = _step4_tables()
+
+        documented = {
+            AuthFailureMode[raw_mode.split("`")[1]]: raw_key.strip("`") for raw_mode, raw_key in spec_modes.items()
+        }
+
+        assert set(documented) == set(AuthFailureMode), (
+            "every mode must be documented — an undocumented one silently takes "
+            f"the invalid_auth fallback: {set(AuthFailureMode) - set(documented)}"
+        )
+        for mode, key in documented.items():
+            with patch(f"{_MODULE}.create_auth_manager") as make_manager:
+                make_manager.return_value.auth_failure_mode.return_value = mode
+                produced = _post_login_error_key(MagicMock())
+            assert produced == key, f"{mode.name}: spec says {key!r}, code produced {produced!r}"

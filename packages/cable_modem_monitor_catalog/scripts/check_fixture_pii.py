@@ -475,6 +475,44 @@ def check_json_file(filepath: Path) -> list[str]:
     return issues
 
 
+# A DOCSIS device certificate is issued to the modem's MAC, so a TLS
+# capture records it as the cert subject. Neither existing pass sees it:
+# har-capture's sanitizer covers cookies, form fields, headers and bodies,
+# and the extract_text walk below only visits text/value/content keys.
+_CERT_IDENTIFIER_PATTERNS = (
+    re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$"),  # colon or dash MAC
+    re.compile(r"^[0-9A-Fa-f]{12}$"),  # bare hex, the form CableLabs subjects use
+)
+
+
+def _is_device_identifier(value: str) -> bool:
+    """True when a cert subject reads as a per-device id rather than a hostname."""
+    # An all-X placeholder is the redacted form, not a finding.
+    if set(value.upper()) <= {"X", ":", "-"}:
+        return False
+    return any(pattern.match(value) for pattern in _CERT_IDENTIFIER_PATTERNS)
+
+
+def check_cert_identifiers(har_data: dict | list) -> list[str]:
+    """Flag TLS certificate fields carrying a per-device identifier."""
+    issues: list[str] = []
+
+    def walk(obj: dict | list) -> None:
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                if key in ("subjectName", "issuer") and isinstance(value, str):
+                    if _is_device_identifier(value):
+                        issues.append(f"  cert_identifier: {value} (in _securityDetails.{key})")
+                else:
+                    walk(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                walk(item)
+
+    walk(har_data)
+    return issues
+
+
 def check_har_file(filepath: Path) -> list[str]:  # noqa: C901
     """Check a HAR file for PII."""
     issues = []
@@ -516,6 +554,7 @@ def check_har_file(filepath: Path) -> list[str]:  # noqa: C901
                 extract_text(item, f"{path}[{i}]")
 
     extract_text(har_data)
+    issues.extend(check_cert_identifiers(har_data))
     return issues
 
 

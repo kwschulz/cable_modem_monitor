@@ -96,7 +96,7 @@ Common causes:
 **What You'll See in Logs:**
 
 ```text
-WARNING: Health check [MB7621]: degraded (ICMP 2ms, HTTP HEAD timeout)
+WARNING: Health check [MB7621]: degraded — ICMP 2.0ms, TCP timeout, HTTP HEAD timeout
 ```
 
 **Recovery Options:**
@@ -290,8 +290,8 @@ counter resets (modem reboot), recovery events.
 **Failures are always visible:**
 
 ```text
-WARNING: Poll failed [MB7621] — signal: connectivity, error: Connection timed out
-WARNING: Health check [MB7621]: degraded (ICMP 2ms, HTTP HEAD timeout)
+WARNING: Connection failure [MB7621] — unreachable (streak: 1, backoff: 1 polls)
+WARNING: Health check [MB7621]: degraded — ICMP 2.0ms, TCP timeout, HTTP HEAD timeout
 ERROR: Circuit breaker OPEN [MB7621] — polling stopped. Reconfigure credentials to resume.
 ```
 

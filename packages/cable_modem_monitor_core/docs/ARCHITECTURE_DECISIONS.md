@@ -708,7 +708,7 @@ harness rejection plus its test is the price of flipping one.
 For `form` the claim is per criterion, and each is tested in both
 directions — a criterion that refused every login would satisfy a
 rejection test while breaking every good password. `redirect` is the one
-that carries the fleet: all 8 catalog entries declaring `success` use it
+that carries the fleet: all 9 catalog entries declaring `success` use it
 and none uses `indicator`.
 
 **Constrains:** The knowledge lives on the strategy, not in an `isinstance`
@@ -839,6 +839,26 @@ on successful polls — it must survive into the next diagnostics
 download even after recovery. Only resources that returned zero
 fulfilled anchors contribute entries; resources that were simply
 absent from the resource dict do not.
+
+**The stored body is scrubbed before it is stored**, on the same rule
+as the auth-failure snippet: literal occurrences of the user's password
+become ``[REDACTED]``. This surface reaches a public GitHub issue more
+reliably than the log does — that is the whole point of the decision
+above — and firmware that echoes the submitted credential inside its own
+pages is observed rather than hypothetical (``technicolor/cga4236``
+returns the submitted password field in its ``/api/v1/`` data
+responses). Scrubbing happens at capture, not at download: the value is
+retained for the runtime, so a body stored with the password still in
+it stays that way.
+
+Derived credential forms are left intact here, as they are in the
+auth-failure snippet and for the same stated reason — see § Auth-failure
+detail via single WARNING log. Note the asymmetry that reasoning now
+carries: on a strategy like ``form_pbkdf2`` the derived value is what
+the modem accepts, so it is a working LAN-side credential and not only a
+protocol artifact. That tradeoff is ratified, not overlooked; revisit it
+with evidence of a derived credential reaching a public issue, not on
+the argument alone.
 
 ### Resource-load failure detail via request-shape log
 
@@ -1686,6 +1706,31 @@ failure is silent.
 never guessed at runtime. The dynamic import resolves a declared
 strategy to its implementation; it does not discover which strategy
 to use.
+
+**A login answering `>= 400` is a failed login, and the response comes
+home attached.** That threshold, not `!= 200`: `form_nonce` and
+`form_cbn` post with `allow_redirects=False`, and `basic`'s challenge
+probe is a `GET` with the same, so a 302 is a normal answer on all
+three. Attaching is what makes `AUTH_UNAVAILABLE` reachable — the
+collector reads the attached status to tell a modem declining to serve
+(UC-87a) from a rejected credential, so a strategy that drops it forces
+a busy modem to read as a wrong password and trip the breaker on the
+first poll. `none` and `basic` are declared exceptions in
+`test_login_5xx_fails_and_attaches_response`, never silent absences.
+
+The `basic` exception holds exactly while no challenge probe is
+configured. `none` issues no request at all, and plain `basic` only sets
+`session.auth`, so neither has a status to read. With
+`challenge_cookie: true` (`netgear/c7000v2`, `netgear/cm1200`'s basic
+variant) `basic` does send a credential-bearing `GET /` and returns
+success whatever it answers. **That is deliberate and unresolved, not an
+oversight:** both entries record the 401 from that probe as the thing
+that sets `XSRF_TOKEN`, so on those modems the refusal is the mechanism
+rather than a verdict, and a status guard there would break the auth it
+is meant to protect. Telling that expected 401 apart from a genuine 5xx
+needs evidence no capture currently holds. Today's behaviour is pinned
+by `test_basic_challenge_probe_status_is_not_read` so a change to it is
+a decision rather than a drift.
 
 **If the strategy pre-fetches a login page, use the response.** Several
 strategies GET a page as part of the auth handshake and extract

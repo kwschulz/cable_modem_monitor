@@ -71,6 +71,7 @@ class SignalPolicy:
         self._auth_failure_streak: int = 0
         self._circuit_open: bool = False
         self._circuit_trip_status_code: int | None = None
+        self._circuit_trip_signal: CollectorSignal | None = None
         self._stale_session_recovery_streak: int = 0
         self._session_reuse_disabled: bool = False
 
@@ -87,6 +88,15 @@ class SignalPolicy:
     def circuit_trip_status_code(self) -> int | None:
         """HTTP status that tripped the breaker, or None for credential/threshold trips."""
         return self._circuit_trip_status_code
+
+    @property
+    def circuit_trip_signal(self) -> CollectorSignal | None:
+        """Signal that opened the breaker, or None while it is closed."""
+        # Every poll after the trip short-circuits before collection, so
+        # its snapshot carries CollectorSignal.OK. This is the only place
+        # the cause survives, for both the diagnostics download and the
+        # consumer's reauth decision (UC-81a).
+        return self._circuit_trip_signal
 
     @property
     def auth_failure_streak(self) -> int:
@@ -190,7 +200,7 @@ class SignalPolicy:
 
         if signal == CollectorSignal.AUTH_FAILED:
             self._auth_failure_streak += 1
-            self._trip_circuit_breaker(status_code=result.auth_status_code)
+            self._trip_circuit_breaker(signal, status_code=result.auth_status_code)
             return ConnectionStatus.AUTH_FAILED
 
         if signal == CollectorSignal.AUTH_UNAVAILABLE:
@@ -205,7 +215,7 @@ class SignalPolicy:
         if signal == CollectorSignal.AUTH_LOCKOUT:
             self._auth_failure_streak += 1
             log_event(_logger, AuthLockoutDetected(model=self._model, streak=self._auth_failure_streak))
-            self._trip_circuit_breaker()
+            self._trip_circuit_breaker(signal)
             return ConnectionStatus.AUTH_FAILED
 
         if signal == CollectorSignal.LOAD_AUTH:
@@ -220,7 +230,7 @@ class SignalPolicy:
                     threshold=self._threshold,
                 ),
             )
-            self._maybe_trip_circuit_breaker()
+            self._maybe_trip_circuit_breaker(signal)
             return ConnectionStatus.AUTH_FAILED
 
         if signal == CollectorSignal.LOAD_INTEGRITY:
@@ -239,7 +249,7 @@ class SignalPolicy:
                     threshold=self._threshold,
                 ),
             )
-            self._maybe_trip_circuit_breaker()
+            self._maybe_trip_circuit_breaker(signal)
             return ConnectionStatus.AUTH_FAILED
 
         if signal == CollectorSignal.CONNECTIVITY:
@@ -280,7 +290,7 @@ class SignalPolicy:
         self._connectivity_streak = 0
         self._connectivity_backoff = 0
 
-    def _trip_circuit_breaker(self, status_code: int | None = None) -> None:
+    def _trip_circuit_breaker(self, signal: CollectorSignal, status_code: int | None = None) -> None:
         """Trip the circuit breaker immediately.
 
         Used for AUTH_FAILED and AUTH_LOCKOUT — credentials are known
@@ -291,20 +301,26 @@ class SignalPolicy:
         """
         self._circuit_open = True
         self._circuit_trip_status_code = status_code
+        self._circuit_trip_signal = signal
         log_event(
             _logger,
             AuthCircuitBreakerOpen(
                 model=self._model,
                 streak=self._auth_failure_streak,
                 status_code=status_code,
+                signal=signal,
             ),
         )
 
-    def _maybe_trip_circuit_breaker(self) -> None:
+    def _maybe_trip_circuit_breaker(self, signal: CollectorSignal) -> None:
         """Trip the circuit breaker if threshold reached.
 
         Used for LOAD_AUTH — session issues that may self-correct.
         """
         if self._auth_failure_streak >= self._threshold:
             self._circuit_open = True
-            log_event(_logger, AuthCircuitBreakerOpen(model=self._model, streak=self._auth_failure_streak))
+            self._circuit_trip_signal = signal
+            log_event(
+                _logger,
+                AuthCircuitBreakerOpen(model=self._model, streak=self._auth_failure_streak, signal=signal),
+            )

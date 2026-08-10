@@ -41,7 +41,12 @@ Step-by-step with explicit encoding at every boundary:
 
 ```text
 1. GET login page (login_page)
+   Status >= 400 fails the login, with the response attached so the
+   collector can classify it (a 5xx is a busy modem, not a credential).
    Parse JS variables: myIv (hex), mySalt (hex), currentSessionId
+   Note: myIv and mySalt are required. A page answering under 400
+   without them fails the login and attaches the page, whose body is
+   the only thing separating a wrong device from moved variables.
 
 2. Derive AES key:
    PBKDF2-HMAC-SHA256(password.utf8, hex_decode(mySalt), iterations, key_len)

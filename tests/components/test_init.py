@@ -17,7 +17,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from homeassistant.exceptions import ConfigEntryError
+from homeassistant.exceptions import ConfigEntryError, HomeAssistantError
 from solentlabs.cable_modem_monitor_core.orchestration.models import (
     ModemIdentity,
     ModemSnapshot,
@@ -29,12 +29,12 @@ from solentlabs.cable_modem_monitor_core.orchestration.signals import (
 )
 
 from custom_components.cable_modem_monitor import (
+    _announce_auth_stop,
     _async_update_listener,
     _check_channel_bond_change,
     _create_core_components,
     _get_package_versions,
     _log_operational_summary,
-    _start_reauth_on_lockout,
     _update_device_registry,
     async_migrate_entry,
     async_remove_entry,
@@ -1302,7 +1302,8 @@ def test_format_interval_includes_hours(seconds, expected, caplog):
 
 
 # -----------------------------------------------------------------------
-# _start_reauth_on_lockout — auth circuit breaker → HA reauth flow (UC-81)
+# _announce_auth_stop — auth circuit breaker → reauth prompt, or a
+# lockout notification when the prompt would be harmful (UC-81, UC-81a)
 # -----------------------------------------------------------------------
 
 
@@ -1310,14 +1311,21 @@ def _reauth_inputs(
     *,
     status: ConnectionStatus = ConnectionStatus.AUTH_FAILED,
     breaker_open: bool = True,
+    trip_signal: CollectorSignal | None = CollectorSignal.AUTH_FAILED,
     active_flows: tuple[Any, ...] = (),
 ) -> tuple[MagicMock, MagicMock, ModemSnapshot, MagicMock]:
     """Build (hass, entry, snapshot, orchestrator) for reauth trigger tests."""
     hass = MagicMock()
+    hass.services.async_call = AsyncMock()
     entry = MagicMock()
     entry.async_get_active_flows.return_value = list(active_flows)
     orchestrator = MagicMock()
-    orchestrator.diagnostics.return_value.circuit_breaker_open = breaker_open
+    diagnostics = orchestrator.diagnostics.return_value
+    diagnostics.circuit_breaker_open = breaker_open
+    # The trip signal is what discriminates the four routes to the
+    # prompt; a bare MagicMock here would silently take the reauth
+    # branch for every one of them.
+    diagnostics.circuit_trip_signal = trip_signal
     snapshot = ModemSnapshot(
         connection_status=status,
         docsis_status=DocsisStatus.UNKNOWN,
@@ -1328,16 +1336,17 @@ def _reauth_inputs(
     return hass, entry, snapshot, orchestrator
 
 
-def test_reauth_started_when_breaker_open():
+async def test_reauth_started_when_breaker_open():
     """AUTH_FAILED with the breaker open starts HA's reauth flow."""
     hass, entry, snapshot, orchestrator = _reauth_inputs()
 
-    _start_reauth_on_lockout(hass, entry, snapshot, orchestrator, "TPS-2000")
+    await _announce_auth_stop(hass, entry, snapshot, orchestrator, "TPS-2000", [False])
 
     entry.async_start_reauth.assert_called_once_with(hass)
+    hass.services.async_call.assert_not_called()
 
 
-def test_no_reauth_on_transient_auth_failure():
+async def test_no_reauth_on_transient_auth_failure():
     """A single AUTH_FAILED poll (breaker still closed) does not prompt.
 
     The breaker debounces single-session collisions and flaky logins;
@@ -1345,27 +1354,83 @@ def test_no_reauth_on_transient_auth_failure():
     """
     hass, entry, snapshot, orchestrator = _reauth_inputs(breaker_open=False)
 
-    _start_reauth_on_lockout(hass, entry, snapshot, orchestrator, "TPS-2000")
+    await _announce_auth_stop(hass, entry, snapshot, orchestrator, "TPS-2000", [False])
 
     entry.async_start_reauth.assert_not_called()
 
 
-def test_no_reauth_when_online():
+async def test_no_reauth_when_online():
     """A healthy poll never starts reauth, whatever the breaker says."""
     hass, entry, snapshot, orchestrator = _reauth_inputs(status=ConnectionStatus.ONLINE)
 
-    _start_reauth_on_lockout(hass, entry, snapshot, orchestrator, "TPS-2000")
+    await _announce_auth_stop(hass, entry, snapshot, orchestrator, "TPS-2000", [False])
 
     entry.async_start_reauth.assert_not_called()
 
 
-def test_no_duplicate_reauth_while_flow_active():
+async def test_no_duplicate_reauth_while_flow_active():
     """An in-progress reauth flow suppresses re-triggering on later polls."""
     hass, entry, snapshot, orchestrator = _reauth_inputs(active_flows=("flow",))
 
-    _start_reauth_on_lockout(hass, entry, snapshot, orchestrator, "TPS-2000")
+    await _announce_auth_stop(hass, entry, snapshot, orchestrator, "TPS-2000", [False])
 
     entry.async_start_reauth.assert_not_called()
+
+
+# UC-81a decision 2. Resubmitting the reauth form calls
+# validate_connection, a real login, and the config flow is stateless by
+# design (UC-86) so the open breaker does not stop it. Prompting a
+# locked-out user invites hand-fed attempts at a modem that locked
+# itself to stop them (#117).
+class TestFirmwareLockoutDoesNotPromptForCredentials:
+    """A lockout gets a notification instead of the reauth form."""
+
+    @staticmethod
+    def _lockout() -> tuple[MagicMock, MagicMock, ModemSnapshot, MagicMock]:
+        return _reauth_inputs(trip_signal=CollectorSignal.AUTH_LOCKOUT)
+
+    async def test_lockout_never_starts_reauth(self):
+        hass, entry, snapshot, orchestrator = self._lockout()
+
+        await _announce_auth_stop(hass, entry, snapshot, orchestrator, "TPS-2000", [False])
+
+        entry.async_start_reauth.assert_not_called()
+
+    async def test_lockout_notifies_with_the_remedy_and_never_the_password(self):
+        """Waiting then reloading is the remedy; credentials are not."""
+        hass, entry, snapshot, orchestrator = self._lockout()
+
+        await _announce_auth_stop(hass, entry, snapshot, orchestrator, "TPS-2000", [False])
+
+        domain, service, data = hass.services.async_call.call_args.args
+        assert (domain, service) == ("persistent_notification", "create")
+        assert "TPS-2000" in data["message"]
+        assert "reload the integration" in data["message"]
+        assert "diagnostics" in data["message"]
+        assert "password" not in data["message"].lower()
+        assert "credential" not in data["message"].lower()
+
+    async def test_notification_fires_once_not_every_poll(self):
+        """A dismissed notification must not be resurrected on the next poll."""
+        hass, entry, snapshot, orchestrator = self._lockout()
+        reported = [False]
+
+        for _ in range(3):
+            await _announce_auth_stop(hass, entry, snapshot, orchestrator, "TPS-2000", reported)
+
+        assert hass.services.async_call.await_count == 1
+
+    async def test_a_failed_notification_is_retried_next_poll(self):
+        """Latching on a call that never landed would be permanent silence."""
+        hass, entry, snapshot, orchestrator = self._lockout()
+        hass.services.async_call.side_effect = [HomeAssistantError("boom"), None]
+        reported = [False]
+
+        with pytest.raises(HomeAssistantError):
+            await _announce_auth_stop(hass, entry, snapshot, orchestrator, "TPS-2000", reported)
+        await _announce_auth_stop(hass, entry, snapshot, orchestrator, "TPS-2000", reported)
+
+        assert hass.services.async_call.await_count == 2
 
 
 async def test_update_data_triggers_reauth_on_breaker_open():
@@ -1375,6 +1440,7 @@ async def test_update_data_triggers_reauth_on_breaker_open():
     mock_orch = MagicMock()
     mock_orch.supports_restart = False
     mock_orch.diagnostics.return_value.circuit_breaker_open = True
+    mock_orch.diagnostics.return_value.circuit_trip_signal = CollectorSignal.AUTH_FAILED
     mock_identity = ModemIdentity(
         manufacturer="Solent Labs",
         model="TPS-2000",

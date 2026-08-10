@@ -502,6 +502,21 @@ MERGE_BEHAVIOR_CASES = [
         {},
         id="empty_discovery_no_effect",
     ),
+    # Credentials are written last, so they win a key collision from either
+    # source. A modem.yaml or a login page that happens to name a field
+    # "username" must not be able to displace the user's credential.
+    pytest.param(
+        {"username": "decoy"},
+        {"csrf_token": "abc123"},
+        {"csrf_token": "abc123", "username": "admin"},
+        id="credentials_override_static",
+    ),
+    pytest.param(
+        {},
+        {"password": "stale-from-page"},
+        {"password": "password"},
+        id="credentials_override_discovered",
+    ),
 ]
 
 
@@ -569,3 +584,35 @@ def test_no_login_page_skips_discovery(session: requests.Session) -> None:
 
         assert result.success is True
         mock_discover.assert_not_called()
+
+
+def test_discovery_reruns_on_every_attempt(session: requests.Session) -> None:
+    """A CSRF token is re-read per login, so a second attempt never posts the first one."""
+    # Discovery lives inside authenticate() rather than manager construction
+    # precisely so single-use tokens stay current. Caching it would make the
+    # second login of a runtime fail on firmware that rotates the token, and
+    # the manager outlives the token by design.
+    entries, modem_config = load_auth_fixture(
+        "har_form_login_with_hidden_fields.json",
+    )
+
+    with HARMockServer(entries, modem_config=modem_config) as server:
+        config = FormAuth(
+            strategy="form",
+            action="/goform/login",
+            login_page="/login.html",
+        )
+        manager = FormAuthManager(config)
+        manager.configure_session(session, {})
+
+        rotating = [{"csrf_token": "first-token"}, {"csrf_token": "second-token"}]
+        with (
+            patch(_DISCOVER_PATCH, side_effect=rotating) as mock_discover,
+            patch.object(session, "request", wraps=session.request) as mock_req,
+        ):
+            for _ in rotating:
+                assert manager.authenticate(session, server.base_url, "admin", "password").success is True
+
+        assert mock_discover.call_count == len(rotating)
+        posted = [c.kwargs["data"]["csrf_token"] for c in mock_req.call_args_list if "data" in c.kwargs]
+        assert posted == ["first-token", "second-token"], f"stale token reposted: {posted}"

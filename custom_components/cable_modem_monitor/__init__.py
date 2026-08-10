@@ -46,6 +46,7 @@ from solentlabs.cable_modem_monitor_core.orchestration.models import (
     ModemSnapshot,
 )
 from solentlabs.cable_modem_monitor_core.orchestration.signals import (
+    CollectorSignal,
     ConnectionStatus,
     HealthStatus,
 )
@@ -209,18 +210,19 @@ def _rebuild_channel_map(
     )
 
 
-def _start_reauth_on_lockout(
+async def _announce_auth_stop(
     hass: HomeAssistant,
     entry: ConfigEntry,
     snapshot: ModemSnapshot,
     orchestrator: Orchestrator,
     model: str,
+    lockout_reported: list[bool],
 ) -> None:
-    """Start HA's reauth flow when the auth circuit breaker opens."""
+    """Tell the user why polling stopped when the auth breaker opens."""
     # Reauth is HA's surface for a credential lockout: a
     # "Reauthentication required" notification with the fix form.
     # https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/reauthentication-flow/
-    # Contract: HA_ADAPTER_SPEC.md § Reauth Flow, UC-81, UC-87.
+    # Contract: HA_ADAPTER_SPEC.md § Reauth Flow, UC-81, UC-81a, UC-87.
     # Core integrations trigger this by raising ConfigEntryAuthFailed,
     # but that also flips every entity unavailable; our Status sensor is
     # the sole outage announcer (#178), so we call the API directly.
@@ -230,7 +232,15 @@ def _start_reauth_on_lockout(
     # definitive credential rejections trip it immediately (UC-87),
     # stale-session failures only after 6 in a row (UC-81), so
     # transient flakes never interrupt the user.
-    if not orchestrator.diagnostics().circuit_breaker_open:
+    diagnostics = orchestrator.diagnostics()
+    if not diagnostics.circuit_breaker_open:
+        return
+    # SignalPolicy.apply collapses four signals into AUTH_FAILED, and
+    # the blocked polls that follow carry no signal at all, so the
+    # latched trip reason is the only thing that tells the routes apart
+    # (UC-81a).
+    if diagnostics.circuit_trip_signal is CollectorSignal.AUTH_LOCKOUT:
+        await _notify_auth_lockout(hass, entry, model, lockout_reported)
         return
     # HA dedupes inside async_start_reauth too; this guard keeps the
     # WARNING to one line per lockout instead of one per poll.
@@ -241,6 +251,48 @@ def _start_reauth_on_lockout(
         model,
     )
     entry.async_start_reauth(hass)
+
+
+async def _notify_auth_lockout(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    model: str,
+    lockout_reported: list[bool],
+) -> None:
+    """Notify about a firmware lockout without inviting a login attempt."""
+    # Never the reauth form: submitting it calls validate_connection, a
+    # real login, and the config flow is stateless by design (UC-86), so
+    # the open breaker does not stop it. Prompting a locked-out user
+    # invites hand-fed attempts at a modem that locked itself to stop
+    # them (#117). The message says nothing about credentials for the
+    # same reason.
+    if lockout_reported[0]:
+        return
+    _LOGGER.warning(
+        "Auth circuit breaker open [%s] — firmware lockout, not prompting for credentials",
+        model,
+    )
+    # Waiting alone never resumes polling: the breaker clears only by
+    # orchestrator reconstruction (ORCHESTRATION_SPEC § Auth Circuit
+    # Breaker, "Recovery paths"), so the reload is part of the remedy.
+    await hass.services.async_call(
+        "persistent_notification",
+        "create",
+        {
+            "title": "Cable Modem Monitor: Modem locked out logins",
+            "message": (
+                f"{model} reported a login lockout, so polling has stopped. "
+                f"Wait for the modem to clear it, or power cycle the modem, "
+                f"then reload the integration to resume polling. If it keeps "
+                f"happening, download diagnostics (Settings > Devices & "
+                f"Services > Cable Modem Monitor > ...) and open an issue."
+            ),
+            "notification_id": f"cable_modem_monitor_auth_lockout_{entry.entry_id}",
+        },
+    )
+    # Latch only after the notification landed — a failed call must be
+    # retried on the next poll, not swallowed into permanent silence.
+    lockout_reported[0] = True
 
 
 def _log_availability_transition(
@@ -453,14 +505,17 @@ async def async_setup_entry(
 
     identity_mode = ChannelIdentity(entry.data.get(CONF_CHANNEL_IDENTITY, ChannelIdentity.ID))
 
-    # Mutable cell so the edge survives across polls (Silver
-    # log-when-unavailable); see _log_availability_transition.
+    # Mutable cells so the edge survives across polls (Silver
+    # log-when-unavailable); see _log_availability_transition. The
+    # lockout cell resets on entry reload, which is also the only thing
+    # that clears the breaker, so it tracks it exactly.
     reported_unavailable = [False]
+    lockout_reported = [False]
 
     async def _async_update_data() -> ModemSnapshot:
         snapshot = await hass.async_add_executor_job(orchestrator.get_modem_data)
         _log_availability_transition(snapshot, model, reported_unavailable)
-        _start_reauth_on_lockout(hass, entry, snapshot, orchestrator, model)
+        await _announce_auth_stop(hass, entry, snapshot, orchestrator, model, lockout_reported)
         _rebuild_channel_map(entry, snapshot, identity_mode)
         await _check_channel_bond_change(hass, entry, snapshot, orchestrator, model)
         hass.bus.async_fire(

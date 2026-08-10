@@ -66,7 +66,7 @@ Fields — `ConnectivityBackoffReset`: `model`
 | `AuthFailed` | WARNING | Auth failed |
 | `AuthLockoutDetected` | WARNING | Lockout detected |
 | `AuthCircuitBreakerOpen` | ERROR | Circuit breaker opened |
-| `CircuitBreakerPollingBlocked` | ERROR | Per-poll guard — breaker is open; credentials must be reconfigured |
+| `CircuitBreakerPollingBlocked` | ERROR | Per-poll guard — breaker is open; the remedy depends on what tripped it |
 | `StaleSessionRecoveryDisabled` | INFO | Stale-session recovery streak hit threshold; session reuse disabled for this runtime |
 
 Fields — `AuthSucceeded`: `model`, `strategy: str`, `status_code: int` (0 when
@@ -88,7 +88,17 @@ when the modem answered. A 404 renders the endpoint-not-found message
 (wrong device at the address, or modem web interface unavailable)
 instead of the credentials one; the stop behavior is identical either
 way — retrying would keep posting credentials at an unknown device.
-Fields — `CircuitBreakerPollingBlocked`: `model`
+`signal: CollectorSignal | None` — which signal opened the breaker.
+Fields — `CircuitBreakerPollingBlocked`: `model`,
+`status_code: int | None`, `signal: CollectorSignal | None`
+
+Both breaker events take their closing remedy sentence from
+`auth_stop_advice()` rather than composing it locally. A trip cause
+whose remedy is not "reconfigure credentials" — a firmware lockout, an
+absent endpoint — is a row in that table, and every surface reporting a
+stopped modem picks it up at once. Composing the remedy per event is
+how the 404 wording came to exist on one of these two events and not
+the other.
 Fields — `StaleSessionRecoveryDisabled`: `model`, `streak: int`
 
 Response-related fields on `AuthFailed` are `None` when auth failed with a
