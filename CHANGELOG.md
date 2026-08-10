@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.21] - 2026-08-10
+
 ### Added
 
 - **Diagnostics now say why polling stopped.** When repeated auth
