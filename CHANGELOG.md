@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Your password can no longer reach a diagnostics download.**
+  When a modem returns an unusable page, the whole page is saved into the
+  diagnostics file so the failure can be diagnosed after the fact — and
+  that file is what users are asked to attach to a public issue. The page
+  was saved exactly as received, while every other saved response already
+  had the password stripped. Some firmware echoes the submitted password
+  back inside its own pages, so the combination could publish a working
+  modem login. The page is now stripped at the moment it is saved.
+
 - **The auth-failure warning now says why the login failed.** It carried
   the request, the response status and a body snippet, but discarded the
   one sentence naming the reason — so a login the modem accepted before

@@ -840,6 +840,26 @@ download even after recovery. Only resources that returned zero
 fulfilled anchors contribute entries; resources that were simply
 absent from the resource dict do not.
 
+**The stored body is scrubbed before it is stored**, on the same rule
+as the auth-failure snippet: literal occurrences of the user's password
+become ``[REDACTED]``. This surface reaches a public GitHub issue more
+reliably than the log does — that is the whole point of the decision
+above — and firmware that echoes the submitted credential inside its own
+pages is observed rather than hypothetical (``technicolor/cga4236``
+returns the submitted password field in its ``/api/v1/`` data
+responses). Scrubbing happens at capture, not at download: the value is
+retained for the runtime, so a body stored with the password still in
+it stays that way.
+
+Derived credential forms are left intact here, as they are in the
+auth-failure snippet and for the same stated reason — see § Auth-failure
+detail via single WARNING log. Note the asymmetry that reasoning now
+carries: on a strategy like ``form_pbkdf2`` the derived value is what
+the modem accepts, so it is a working LAN-side credential and not only a
+protocol artifact. That tradeoff is ratified, not overlooked; revisit it
+with evidence of a derived credential reaching a public issue, not on
+the argument alone.
+
 ### Resource-load failure detail via request-shape log
 
 **Decision:** When a loader (HTTP, HNAP, CBN) raises or warns on a

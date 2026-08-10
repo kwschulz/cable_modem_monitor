@@ -259,7 +259,8 @@ class OrchestratorDiagnostics:
             if no stub-page failure has occurred. Retained until the
             next LOAD_INTEGRITY event — survives successful polls so
             it is present in bug-report diagnostics downloads even after
-            the modem recovers. Full body stored; no truncation.
+            the modem recovers. Full body stored, no truncation, with
+            the user's password scrubbed at capture.
         system_info_fields_missing: Mapped system_info fields no
             configured source produced on the most recent parse.
             Snapshot semantics — recomputed per parse, a healed field

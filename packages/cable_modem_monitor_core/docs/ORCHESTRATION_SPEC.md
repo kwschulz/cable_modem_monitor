@@ -896,7 +896,9 @@ class OrchestratorDiagnostics:
             successful polls so it is present in user-shared diagnostics
             downloads even after the modem recovers. Full body stored;
             no truncation (stub pages are small, and the full body is
-            the diagnostic signal).
+            the diagnostic signal). The user's password is scrubbed at
+            capture — see ARCHITECTURE_DECISIONS § LOAD_INTEGRITY
+            failure detail via diagnostics download.
         system_info_fields_missing: Field names parser.yaml maps in
             system_info whose source key appeared in no configured
             source's response on the most recent completed parse.

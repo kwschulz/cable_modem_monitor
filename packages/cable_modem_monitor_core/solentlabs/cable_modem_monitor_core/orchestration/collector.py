@@ -35,6 +35,7 @@ from .auth_failure import (
     _auth_failure_hint,
     _build_auth_failed_event,
     _build_http_status_error_event,
+    _scrub_password,
     _should_detect_login_pages,
     _strategy_name,
 )
@@ -683,8 +684,16 @@ class ModemDataCollector:
                         anchors_expected=c.expected,
                     ),
                 )
+        # Scrub at capture, not at download: this dict is retained for the
+        # runtime, so a body stored with the password in it stays that
+        # way for as long as the integration runs. It ships
+        # whole in the diagnostics download users attach to public issues,
+        # and firmware echoing the submitted credential inside its own
+        # pages is observed (technicolor/cga4236). Derived forms are
+        # deliberately left intact — ARCHITECTURE_DECISIONS
+        # § LOAD_INTEGRITY failure detail via diagnostics download.
         self._last_stub_bodies = {
-            path: str(body)
+            path: _scrub_password(str(body), self._password)
             for path in diagnostics.zero_fulfillment_resources
             if (body := resources.get(path)) is not None
         }
