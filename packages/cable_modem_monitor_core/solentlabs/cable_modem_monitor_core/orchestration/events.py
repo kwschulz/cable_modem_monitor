@@ -10,6 +10,8 @@ import logging
 from dataclasses import dataclass, field
 from enum import IntEnum
 
+from .signals import CollectorSignal
+
 
 class EventLevel(IntEnum):
     """Log level for orchestration events.
@@ -121,15 +123,22 @@ class AuthCircuitBreakerOpen:
 
     model: str
     streak: int
+    # Required, not defaulted: the remedy this event prints is chosen
+    # from the signal, and a forgotten one would silently print the
+    # credentials advice — the drift auth_stop.py exists to stop.
+    # Nullable only because the policy field it comes from is.
+    signal: CollectorSignal | None
     status_code: int | None = None
     level: EventLevel = field(default=EventLevel.ERROR, init=False)
 
 
 @dataclass
 class CircuitBreakerPollingBlocked:
-    """Poll skipped — circuit breaker is open; status_code preserves the trip reason."""
+    """Poll skipped — circuit breaker is open; status_code and signal preserve the trip reason."""
 
     model: str
+    # Required for the same reason as AuthCircuitBreakerOpen.signal.
+    signal: CollectorSignal | None
     status_code: int | None = None
     level: EventLevel = field(default=EventLevel.ERROR, init=False)
 

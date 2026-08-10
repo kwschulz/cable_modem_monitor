@@ -291,6 +291,7 @@ class TestOrchestratorDiagnostics:
             "poll_duration": None,
             "auth_failure_streak": 0,
             "circuit_breaker_open": False,
+            "circuit_trip_signal": None,
             "session_is_valid": False,
             "auth_strategy": "",
             "connectivity_streak": 0,

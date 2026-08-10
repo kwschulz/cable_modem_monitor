@@ -231,6 +231,11 @@ class OrchestratorDiagnostics:
             count. 0 when healthy.
         circuit_breaker_open: Whether polling is stopped due to
             persistent auth failures.
+        circuit_trip_signal: Signal that opened the breaker, None while
+            it is closed. The blocked polls that follow a trip report
+            CollectorSignal.OK, so this is the only field that says why
+            polling stopped. See ORCHESTRATION_SPEC § Auth Circuit
+            Breaker, "Trip reason is preserved".
         session_is_valid: Current session state from the collector.
         auth_strategy: Auth strategy name from modem config (e.g.,
             "form", "hnap", "none"). Empty string if unknown.
@@ -270,6 +275,7 @@ class OrchestratorDiagnostics:
     auth_failure_streak: int
     circuit_breaker_open: bool
     session_is_valid: bool
+    circuit_trip_signal: CollectorSignal | None = None
     auth_strategy: str = ""
     connectivity_streak: int = 0
     connectivity_backoff_remaining: int = 0
@@ -287,6 +293,7 @@ class OrchestratorDiagnostics:
             "poll_duration": self.poll_duration,
             "auth_failure_streak": self.auth_failure_streak,
             "circuit_breaker_open": self.circuit_breaker_open,
+            "circuit_trip_signal": (self.circuit_trip_signal.value if self.circuit_trip_signal is not None else None),
             "session_is_valid": self.session_is_valid,
             "auth_strategy": self.auth_strategy,
             "connectivity_streak": self.connectivity_streak,

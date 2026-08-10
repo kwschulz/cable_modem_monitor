@@ -192,7 +192,7 @@ only one authenticated session.
 | Step | Action | State change | Observable |
 |------|--------|-------------|------------|
 | 1 | Consumer calls `get_modem_data()` | | |
-| 2 | Collector: auth fails → `AuthResult(success=False)` | | WARNING log: "Auth failed [MODEL] strategy=..." with request, response status, body snippet |
+| 2 | Collector: auth fails → `AuthResult(success=False)` | | WARNING log: "Auth failed [MODEL] strategy=... — " then the reason, with request, response status, body snippet |
 | 3 | Collector returns `ModemResult(success=False, signal=AUTH_FAILED)` | | |
 | 4 | Policy: streak 0→1, then trips the breaker in the same call | streak=1, circuit=True | |
 | 5 | Return `ModemSnapshot(AUTH_FAILED)` | | |
@@ -254,8 +254,16 @@ it trips the breaker on the first occurrence (UC-10).
 
 - `snapshot.connection_status == AUTH_FAILED`
 - `diagnostics().circuit_breaker_open == True`
+- `diagnostics().circuit_trip_signal == AUTH_LOCKOUT`, so a diagnostics
+  download taken after polling stopped tells this apart from a wrong
+  password
+- Blocked polls report "Circuit breaker open — modem locked out further
+  logins". Waiting is the remedy, so the message never says credentials
+- The consumer must not raise a credential prompt on this route: the
+  prompt's form is a real login attempt (UC-81a, UC-86)
 - No further login attempts — polling blocked until the consumer
-  rebuilds the orchestrator (reauth → entry reload, UC-16)
+  rebuilds the orchestrator. Unlike the other trip causes there is no
+  reauth flow to do it, so the reload is the user's own step (UC-16)
 - WARNING log: "Auth lockout [MODEL] — firmware anti-brute-force
   triggered, stopping immediately (streak: 1)"
 - ERROR log: "Auth circuit breaker OPEN [MODEL] — 1 consecutive auth
@@ -1864,52 +1872,59 @@ sequenceDiagram
 
 ---
 
-### UC-81a: Four signals reach the reauth prompt; one message greets them all
+### UC-81a: Four signals reach the auth-stop announcement; three share one message
 
 **Preconditions:** UC-81's trigger, read as a class rather than as the
-single wrong-password path it documents. The consumer starts reauth on
-`connection_status == AUTH_FAILED` **and** `circuit_breaker_open`, and
-reads nothing else. `SignalPolicy.apply` collapses four distinct
-signals into that one status.
+single wrong-password path it documents. `SignalPolicy.apply` collapses
+four distinct signals into `ConnectionStatus.AUTH_FAILED`, so the
+consumer cannot tell the routes apart from the status alone.
 
-| Route | Signal | How the breaker opens | Is the description true? |
-|-------|--------|----------------------|-------------------------|
-| Credentials rejected (UC-87) | `AUTH_FAILED` | Immediately, on the first occurrence | Yes |
-| Firmware lockout (UC-12) | `AUTH_LOCKOUT` | Immediately, on the first occurrence | No — the modem is protecting itself |
-| Session refused six times (UC-13, UC-17) | `LOAD_AUTH` | At the threshold | Only if the strategy never verified the login (UC-17a) |
-| Stub page six times (UC-19a) | `LOAD_INTEGRITY` | At the threshold | No — a stub is not a credential verdict |
+| Route | Signal | How the breaker opens | Where it lands | Is the description true? |
+|-------|--------|----------------------|----------------|-------------------------|
+| Credentials rejected (UC-87) | `AUTH_FAILED` | Immediately, on the first occurrence | Reauth prompt | Yes, unless the login was judged by a criterion (UC-87c) |
+| Firmware lockout (UC-12) | `AUTH_LOCKOUT` | Immediately, on the first occurrence | Notification | n/a — routed away |
+| Session refused six times (UC-13, UC-17) | `LOAD_AUTH` | At the threshold | Reauth prompt | Only if the strategy never verified the login (UC-17a) |
+| Stub page six times (UC-19a) | `LOAD_INTEGRITY` | At the threshold | Reauth prompt | No — a stub is not a credential verdict |
 
 **Assertions:**
 
-- `snapshot.collector_signal` carries the distinction the collector
-  worked to preserve, and the reauth trigger never reads it
-- Every route lands on the same form, whose description reads "The
-  modem rejected your credentials. Please re-enter them."
+- `snapshot.collector_signal` carries the distinction on the poll that
+  fails, but a blocked poll is built before collection runs and reports
+  `OK`, so the consumer reads `diagnostics().circuit_trip_signal`, which
+  latches until the orchestrator is rebuilt
+- The three prompt routes land on the same form, whose description reads
+  "The modem rejected your credentials. Please re-enter them."
 - HA supplies a third statement above ours, `Authentication expired
   for {name}`, which frames the same event as a session expiry. That
   string is HA's, not this integration's
 - The error slot on that form is signal-aware — `classify_error`
   refines `LOAD_AUTH` and `LOAD_INTEGRITY` per UC-17a — but it renders
-  only *after* a resubmit. The description, the title and the trigger
-  are all signal-blind
+  only *after* a resubmit. The description and the title are static
 - Submitting the form calls `validate_connection`, a real login. The
   config flow is stateless by design (UC-86), so the open breaker does
   not stop it
 
-**The AUTH_LOCKOUT route is the harmful one.** Immediate stop exists to
+**The AUTH_LOCKOUT route was the harmful one.** Immediate stop exists to
 keep login attempts off a modem that has already begun refusing them
-for making too many. Prompting the user to re-enter credentials invites
+for making too many. Prompting the user to re-enter credentials invited
 exactly those attempts, by hand, at the moment the protection engaged.
 Evidence for the cost is #117: an Arris S33v2 rebooting every day or
 two under per-poll logins, the report `ARCHITECTURE_DECISIONS.md`
 § Session reuse across polls and `RUNTIME_POLLING_SPEC.md` both cite.
 
-> **Status:** Current behavior. **Settled, not yet implemented:**
-> `AUTH_LOCKOUT` must not raise the reauth prompt. The user is still
-> told something, worded as locked out and needing time, never as a
-> password to retype. Recorded here so the four surfaces — trigger,
-> title, description, error slot — are read together rather than fixed
-> one at a time, which is how the contradiction survived three fixes.
+That route now fires a persistent notification once per open breaker.
+It names the lockout, gives the remedy in the order it has to happen
+(wait or power cycle, then reload — waiting alone never resumes polling,
+because the breaker clears only by orchestrator reconstruction), points
+at the diagnostics download, and says nothing about credentials in
+either direction.
+
+> **Status:** Implemented for `AUTH_LOCKOUT`. The three remaining routes
+> still share one static description, which asserts a credential
+> rejection that only the first of them reliably is. Recorded here so
+> the four surfaces — trigger, title, description, error slot — are read
+> together rather than fixed one at a time, which is how the
+> contradiction survived three fixes.
 
 ---
 
@@ -2340,10 +2355,10 @@ catalog entries declare a criterion as of 3.14.0-beta.20, all of them
 | 1 | Collector: session invalid → authenticate | | |
 | 2 | FormAuthManager: POST to `action`, following redirects | | |
 | 3 | `_check_success`: status < 400 passes the HTTP guard; criterion compared against the landing → mismatch | | |
-| 4 | Returns `AuthResult(success=False)` naming which criterion failed and what was observed | | WARNING log: "Auth failed [model] strategy=form" with request, response status, body snippet |
+| 4 | Returns `AuthResult(success=False)` naming which criterion failed and what was observed | | WARNING log: "Auth failed [model] strategy=form — Login redirect mismatch: expected path containing '...', got '...'" with request, response status, body snippet |
 | 5 | Collector: status is not 5xx → `ModemResult(signal=AUTH_FAILED, auth_status_code=<login status>)` | | |
 | 6 | Policy: AUTH_FAILED trips the breaker on the first occurrence | streak 0→1, circuit=True | ERROR log: "Auth circuit breaker OPEN [MODEL] — 1 consecutive auth failures. Polling stopped. Reconfigure credentials to resume." |
-| 7 | Later polls short-circuit | No collection | Snapshot error: "Circuit breaker open — reconfigure credentials" |
+| 7 | Later polls short-circuit | No collection | Snapshot error: "Circuit breaker open — credentials rejected" |
 
 **Current behavior:**
 

@@ -571,6 +571,15 @@ fix. Background: #98, where a silently absent uptime field was
 indistinguishable from a malformed one without a contributor
 round-trip.
 
+**A stopped modem must say why it stopped.** Once the auth circuit
+breaker opens, polling short-circuits before collection, so nothing in
+the snapshot names the cause and `circuit_breaker_open` alone cannot
+tell a firmware lockout from a wrong password from six consecutive
+refused sessions. The download therefore carries `circuit_trip_signal`
+beside `circuit_breaker_open` — the signal that opened the breaker,
+latched until the orchestrator is rebuilt (`ORCHESTRATION_SPEC`
+§ Auth Circuit Breaker, "Trip reason is preserved").
+
 This data is exposed via HA's integration diagnostics download (JSON).
 The user downloads the file and attaches it to a GitHub issue — no
 log scraping required.

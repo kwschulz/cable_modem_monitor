@@ -11,6 +11,8 @@ import contextvars
 import logging
 from typing import TYPE_CHECKING
 
+from .auth_stop import auth_stop_advice
+
 if TYPE_CHECKING:
     from .events import OrchestratorEvent
 
@@ -118,8 +120,12 @@ def _format(event: OrchestratorEvent) -> str:  # noqa: PLR0911, C901
         body = event.response_body or ""
         if len(body) > _AUTH_BODY_MAX:
             body = body[:_AUTH_BODY_MAX] + "... (truncated)"
+        # The reason leads, as it does on the connection-error branch
+        # above: the wire detail below is evidence for it, not a
+        # substitute. A criterion mismatch names both sides here and
+        # nowhere else the user looks (#189).
         return (
-            f"Auth failed [{event.model}] strategy={event.strategy}"
+            f"Auth failed [{event.model}] strategy={event.strategy} — {event.error}"
             f"\n  request: {event.method} {event.url}"
             f"\n  response: {event.status_code} {event.content_type}"
             f"\n  body: {body}"
@@ -132,6 +138,9 @@ def _format(event: OrchestratorEvent) -> str:  # noqa: PLR0911, C901
         )
 
     if isinstance(event, AuthCircuitBreakerOpen):
+        # The remedy comes from one table so a new trip cause cannot be
+        # right here and wrong on the next surface; see auth_stop.py.
+        remedy = auth_stop_advice(event.signal, event.status_code).remedy
         if event.status_code == 404:
             # Endpoint absence is not a credential rejection — the
             # device at this address has no login page (wrong device,
@@ -139,22 +148,23 @@ def _format(event: OrchestratorEvent) -> str:  # noqa: PLR0911, C901
             return (
                 f"Auth circuit breaker OPEN [{event.model}] — login endpoint not found"
                 " (HTTP 404: wrong device at this address, or modem web interface"
-                " unavailable). Polling stopped. Reload the integration to retry."
+                f" unavailable). Polling stopped. {remedy}"
             )
         return (
             f"Auth circuit breaker OPEN [{event.model}] — {event.streak} consecutive"
-            " auth failures. Polling stopped. Reconfigure credentials to resume."
+            f" auth failures. Polling stopped. {remedy}"
         )
 
     if isinstance(event, CircuitBreakerPollingBlocked):
+        remedy = auth_stop_advice(event.signal, event.status_code).remedy
         if event.status_code == 404:
             # Preserve the trip reason on every blocked poll — after a
             # 404 trip, credentials are not the fix.
             return (
                 f"Circuit breaker OPEN [{event.model}] — login endpoint not found"
-                " (HTTP 404). Polling stopped. Reload the integration to retry."
+                f" (HTTP 404). Polling stopped. {remedy}"
             )
-        return f"Circuit breaker OPEN [{event.model}] — polling stopped. Reconfigure credentials to resume."
+        return f"Circuit breaker OPEN [{event.model}] — polling stopped. {remedy}"
 
     if isinstance(event, StaleSessionRecoveryDisabled):
         return (

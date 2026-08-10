@@ -557,7 +557,85 @@ class TestCircuitBreakerTripReason:
         orch.get_modem_data()  # credential trip
         snapshot = orch.get_modem_data()  # blocked
 
-        assert "reconfigure credentials" in snapshot.error
+        assert "credentials rejected" in snapshot.error
+
+    def test_blocked_error_names_the_lockout_for_a_lockout_trip(self) -> None:
+        """UC-12: waiting is the remedy, so the message must not say credentials."""
+        collector = _mock_collector(_fail_result(CollectorSignal.AUTH_LOCKOUT))
+        orch = _make_orchestrator(collector=collector)
+
+        orch.get_modem_data()  # lockout trip
+        snapshot = orch.get_modem_data()  # blocked
+
+        assert "locked out" in snapshot.error
+        assert "credentials" not in snapshot.error
+
+
+# UC-81a. The blocked-poll snapshot carries CollectorSignal.OK because
+# it is built before collection runs, so a diagnostics download taken
+# after polling stopped cannot name the cause from the snapshot. The
+# trip signal is what makes a stopped modem diagnosable.
+#
+# ┌────────────────────┬───────────┬──────────────────────────────────┐
+# │ signal             │ polls     │ why it opened                    │
+# ├────────────────────┼───────────┼──────────────────────────────────┤
+# │ AUTH_FAILED        │ 1         │ credential verdict               │
+# │ AUTH_LOCKOUT       │ 1         │ firmware protecting itself       │
+# │ LOAD_AUTH          │ 6         │ six refused sessions             │
+# │ LOAD_INTEGRITY     │ 6         │ six stub pages                   │
+# └────────────────────┴───────────┴──────────────────────────────────┘
+#
+# fmt: off
+DIAGNOSTICS_TRIP_SIGNAL_CASES = [
+    (CollectorSignal.AUTH_FAILED,    1, "credential verdict"),
+    (CollectorSignal.AUTH_LOCKOUT,   1, "firmware lockout"),
+    (CollectorSignal.LOAD_AUTH,      6, "six refused sessions"),
+    (CollectorSignal.LOAD_INTEGRITY, 6, "six stub pages"),
+]
+# fmt: on
+
+
+class TestDiagnosticsReportTheTripReason:
+    """A stopped modem's diagnostics download says why polling stopped."""
+
+    def test_no_trip_signal_while_polling_healthy(self) -> None:
+        orch = _make_orchestrator()
+        assert orch.diagnostics().circuit_trip_signal is None
+        assert orch.diagnostics().to_dict()["circuit_trip_signal"] is None
+
+    @pytest.mark.parametrize(
+        "signal,polls,desc",
+        DIAGNOSTICS_TRIP_SIGNAL_CASES,
+        ids=[c[2] for c in DIAGNOSTICS_TRIP_SIGNAL_CASES],
+    )
+    def test_trip_reason_reaches_the_download(
+        self,
+        signal: CollectorSignal,
+        polls: int,
+        desc: str,
+    ) -> None:
+        """The serialized key carries the signal's own value, not the enum."""
+        collector = _mock_collector([_fail_result(signal) for _ in range(polls * 2)])
+        orch = _make_orchestrator(collector=collector)
+
+        for _ in range(polls):
+            orch.get_modem_data()
+
+        diagnostics = orch.diagnostics()
+        assert diagnostics.circuit_breaker_open is True
+        assert diagnostics.circuit_trip_signal is signal
+        assert diagnostics.to_dict()["circuit_trip_signal"] == signal.value
+
+    def test_trip_reason_survives_the_blocked_polls_that_follow(self) -> None:
+        """The blocked-poll snapshot reports OK; the diagnostics field must not."""
+        collector = _mock_collector(_fail_result(CollectorSignal.AUTH_LOCKOUT))
+        orch = _make_orchestrator(collector=collector)
+
+        orch.get_modem_data()  # trip
+        snapshot = orch.get_modem_data()  # blocked
+
+        assert snapshot.collector_signal is CollectorSignal.OK
+        assert orch.diagnostics().circuit_trip_signal is CollectorSignal.AUTH_LOCKOUT
 
 
 class TestLoadAuth:

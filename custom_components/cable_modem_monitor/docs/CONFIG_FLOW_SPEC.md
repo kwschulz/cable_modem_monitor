@@ -324,8 +324,9 @@ ARCHITECTURE_DECISIONS.md § Post-login 401 is read per auth strategy.
 `auth_signals` is config-flow-local: it selects `PermissionError` over
 `RuntimeError`, and both carry the same encoded error key, so membership
 changes nothing a user sees. HA's reauth prompt is started on the runtime path
-instead (`_start_reauth_on_lockout` — `ConnectionStatus.AUTH_FAILED` plus an
-open circuit breaker).
+instead (`_announce_auth_stop` — `ConnectionStatus.AUTH_FAILED` plus an open
+circuit breaker, minus the `AUTH_LOCKOUT` trip, which gets a notification
+rather than a form it must not invite the user to submit).
 
 Reauth matters most here. An already configured modem that starts refusing
 data trips the auth streak, opens the breaker, and prompts for

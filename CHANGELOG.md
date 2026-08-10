@@ -7,7 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Diagnostics now say why polling stopped.** When repeated auth
+  failures stop polling, the download reported that the circuit breaker
+  was open and nothing about the cause, so a firmware lockout, a wrong
+  password and six consecutive refused sessions all produced the same
+  payload. A new `circuit_trip_signal` field records which signal opened
+  the breaker and survives the blocked polls that follow, which report no
+  signal of their own. Additive: no existing diagnostics key changed, so
+  files already collected stay comparable.
+
 ### Fixed
+
+- **The auth-failure warning now says why the login failed.** It carried
+  the request, the response status and a body snippet, but discarded the
+  one sentence naming the reason — so a login the modem accepted before
+  sending us somewhere unrecognized logged the landing address as a bare
+  URL, with nothing to say that was the problem or what was expected. The
+  reason now leads the line. No new data is collected; it was already
+  gathered and dropped at the last step.
+
+- **A modem locked out by its own firmware no longer asks you to
+  re-enter your password.** Firmware that locks out logins after too
+  many attempts raised the same "Authentication expired" prompt as a
+  wrong password, and submitting that form is itself a login attempt —
+  so the remedy on offer was the one thing that keeps a locked-out modem
+  locked out. A lockout now raises a notification instead, naming the
+  lockout and the remedy that works: wait for the modem to clear it or
+  power cycle it, then reload the integration. Blocked polls stop saying
+  "reconfigure credentials" for the same reason. A wrong password still
+  prompts for credentials exactly as before.
 
 - **A modem that is busy or erroring during login is no longer reported
   as a wrong password.** Two auth strategies did not read the HTTP status

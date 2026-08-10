@@ -320,11 +320,15 @@ default log view without requiring DEBUG to be enabled, which is
 what shortens the round-trip on issues like #86, #104, #120.
 
 ```text
-Auth failed [MODEL] strategy=form
+Auth failed [MODEL] strategy=form — Login redirect mismatch: expected path containing '/index.htm', got '/ErrorMsg.htm'
   request: POST http://192.168.100.1/login?<redacted>
   response: 401 text/html
   body: <truncated 500-char snippet, with the user's password replaced by [REDACTED]>
 ```
+
+The reason leads. The wire detail is evidence for it, not a substitute:
+a criterion mismatch names the criterion and what was observed, and
+that sentence exists nowhere else the user or the maintainer looks.
 
 The log fires from the collector's existing failure path, so
 initial setup, reauth, options-flow re-validation, and steady-state
@@ -861,6 +865,11 @@ class OrchestratorDiagnostics:
             count. 0 when healthy.
         circuit_breaker_open: Whether polling is stopped due to
             persistent auth failures.
+        circuit_trip_signal: Signal that opened the breaker, None while
+            it is closed. Every poll after a trip short-circuits before
+            collection, so its snapshot reports CollectorSignal.OK —
+            this is the only field that says why polling stopped. See
+            § Auth Circuit Breaker, "Trip reason is preserved".
         session_is_valid: Current session state from the collector.
         auth_strategy: Auth strategy name from modem config (e.g.,
             "form", "hnap", "none"). Empty string if unknown.
@@ -914,6 +923,7 @@ class OrchestratorDiagnostics:
     auth_failure_streak: int
     circuit_breaker_open: bool
     session_is_valid: bool
+    circuit_trip_signal: CollectorSignal | None = None
     auth_strategy: str = ""
     connectivity_streak: int = 0
     connectivity_backoff_remaining: int = 0
@@ -1250,11 +1260,31 @@ wrong network, modem web UI temporarily down) recover via reload,
 which is acceptable for their frequency. Revisit only with field
 evidence of latched breakers that a reload cannot reasonably cover.
 
-**Trip reason is preserved.** The policy records the HTTP status
-that tripped the breaker (`circuit_trip_status_code`). Every
-subsequent blocked poll logs advice matching the trip cause: a 404
-trip says "login endpoint not found — reload the integration to
-retry," not "reconfigure credentials."
+**Trip reason is preserved.** The policy records both the HTTP status
+that tripped the breaker (`circuit_trip_status_code`) and the signal
+that opened it (`circuit_trip_signal`). Every subsequent blocked poll
+logs advice matching the trip cause: a 404 trip says "login endpoint
+not found — reload the integration to retry," an `AUTH_LOCKOUT` trip
+says the modem locked out further logins, and neither says
+"reconfigure credentials."
+
+This is not redundant with the snapshot. A blocked poll returns before
+collection runs, so `snapshot.collector_signal` is `OK` on every poll
+after the trip and the cause is unrecoverable from it. Both trip fields
+survive on the policy until orchestrator reconstruction, which is what
+makes a stopped modem diagnosable from a diagnostics download, and what
+lets a consumer decide whether the trip warrants a credential prompt
+(UC-81a). Threshold trips record the signal too, so the six-refused-
+sessions case is distinguishable from an immediate credential verdict.
+
+**One table owns what the user is told.** `auth_stop_advice()`
+(`orchestration/auth_stop.py`) maps a trip reason to a cause phrase and
+a remedy. The blocked-poll snapshot error takes the cause; both
+circuit-breaker log events take the remedy. Adding a trip cause is a row
+there, not an edit at every surface.
+
+The default in that table is the commonest cause, not a catch-all: a
+cause with a different remedy earns a row above it.
 
 #### Use Cases
 
@@ -1272,8 +1302,9 @@ Poll N+1: circuit blocks — no collection
 **Root cause detection via logs:**
 
 ```text
-WARNING Poll N: "Auth failed [MODEL] strategy=form" plus the request,
-                response and body lines (see § Auth-Failure Detail Log)
+WARNING Poll N: "Auth failed [MODEL] strategy=form — <reason>" plus the
+                request, response and body lines (see § Auth-Failure
+                Detail Log)
 ERROR   Poll N: "Auth circuit breaker OPEN [MODEL] — 1 consecutive auth
                 failures. Polling stopped. Reconfigure credentials to resume."
 ```
