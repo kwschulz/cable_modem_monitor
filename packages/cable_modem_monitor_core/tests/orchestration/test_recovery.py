@@ -56,12 +56,10 @@ def _modem_data(
 def _make_recovery(
     on_state_change: Any = None,
 ) -> Recovery:
-    """Build a Recovery instance with mocked collector and config."""
-    collector = MagicMock()
+    """Build a Recovery instance with a mocked config."""
     config = MagicMock()
     config.model = "T100"
     return Recovery(
-        collector=collector,
         modem_config=config,
         on_state_change=on_state_change,
     )

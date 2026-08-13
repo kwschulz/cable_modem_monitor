@@ -8,13 +8,13 @@ files; this document explains the choices that shaped them.
 
 | Section | What it covers |
 |---------|----------------|
-| [Package Boundaries](#package-boundaries) | Runtime package split, dependency direction, where each piece lives, specs citing the catalog rather than restating its coverage |
+| [Package Boundaries](#package-boundaries) | Runtime package split, dependency direction, where each piece lives, pruning Core's exported surface, specs citing the catalog rather than restating its coverage |
 | [Core Schema Model](#core-schema-model) | What enters Core's schema vs what stays user-side; catalog stores source-faithful strings and maps only observed values, display normalizes; derived and dynamic fields, health as its own structure |
 | [Transport and Constraint Model](#transport-and-constraint-model) | Transport as protocol identifier, generated constraint tables, implicit capabilities, shared protocol primitives, config as parameters |
 | [Auth Architecture](#auth-architecture) | Strategy discreteness, session lifecycle, failure logging, credential reconfiguration as reconstruction |
 | [Parsing Architecture](#parsing-architecture) | Three roles, per-section format selection, parser.py as escape hatch |
 | [Session and Action Model](#session-and-action-model) | Signal/policy separation, session reuse, restart-only actions |
-| [Recovery Architecture](#recovery-architecture) | Restart vs recovery, generic timing, reboot-signal vote, observer callback |
+| [Recovery Architecture](#recovery-architecture) | Restart vs recovery, generic timing, reboot-signal vote, observer callback, no session preservation |
 | [Testing Strategy](#testing-strategy) | HAR replay, conformance gates every modem, greenfield from specs, fresh-context capture |
 | [Onboarding](#onboarding) | MCP for deterministic steps, catalog_tools owns the spec, inference vs assembly, no fallback |
 | [Config Flow](#config-flow) | Cross-directory grouping, variant label design |
@@ -182,6 +182,37 @@ operate on catalog YAML files at authoring time (fleet scanning,
 trial parsing, normalization) live in `catalog_tools`. Catalog's
 runtime package never grows a second top-level symbol without a
 decision update.
+
+### Core's exported surface is pruned toward stability
+
+**Decision:** Core is published to PyPI, and today the HA integration
+in this repo is its only consumer. That is a reason to remove unused
+API, not to preserve it. Parameters nothing reads, exports nothing
+imports, and hooks nothing calls are deleted when found.
+
+**Rationale:** Sole consumership is a window, not a permanent state.
+Every unused parameter or export is interface that a future consumer
+could bind to and that we would then owe compatibility on, in
+exchange for no present benefit. Removing one now costs a single
+commit and a test sweep; removing it after an external consumer
+exists costs a deprecation cycle. Pruning while it is free is what
+produces a surface worth calling stable.
+
+**Constrains:** Dead API is removed, not deprecated, while we remain
+the sole consumer. This covers everything the repo holds and can
+sweep in one commit — Python signatures, module exports, Core's data
+schema, catalog YAML. We own those, and a breaking change to them is
+a migration we perform ourselves.
+
+The exception is not ownership but recoverability: state already
+written to a user's machine, such as config entries holding
+credentials we cannot re-derive. Breaking those costs the user, not
+us. The test for doing it anyway is whether the break reaches a base
+we do not expect to break again — a one-time migration that ends the
+churn can be worth the disruption, the same disruption spent on a
+change we may revisit cannot. A break of that kind belongs before a
+stable release rather than after one. When an external consumer of
+Core appears, the first paragraph needs revisiting too.
 
 ### Pydantic is a Core runtime dep
 
@@ -1384,6 +1415,32 @@ pattern, not shared mutable state or HA-side polling. Observer
 callbacks must be safe to call from the Core poll thread. Any
 "check until condition" loops triggered by Core state live in HA
 using its native scheduling primitives.
+
+### Recovery does not preserve sessions
+
+**Decision:** Polls inside a recovery window handle sessions exactly
+as any other poll does. On modems with `actions.logout` the
+collector logs out and clears the session after each successful
+poll, so every window poll re-authenticates. `Recovery` holds no
+collector reference and has no say in session lifecycle.
+
+**Rationale:** `actions.logout` is the sole indicator of
+single-session discipline (see § Session concurrency — SSOT via
+`actions.logout`), where holding a session open between polls is a
+lockout footgun that also blocks the user's own web UI. A window
+polls faster, so preserving a session inside one is that same
+footgun at a higher rate.
+
+Firmware behaviour agrees. The MB7621 expires sessions server-side
+in about ten minutes, shorter than its poll interval, so its logout
+exists to release the session and a preserved one would be dropped
+anyway. Sustained login/fetch/logout at its normal cadence draws no
+lockout.
+
+**Constrains:** Recovery owns cadence, nothing else. Anything
+proposing to vary auth or session behavior because a window is open
+is out of scope for this module and needs its own decision here
+first.
 
 ---
 

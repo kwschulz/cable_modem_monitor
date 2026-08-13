@@ -2150,10 +2150,11 @@ While `recovery.active` is True:
 - Polls run normally — no short-circuit, no special guard. The
   orchestrator doesn't know it's in a recovery window when it
   returns a snapshot.
-- The collector preserves its session across polls (implemented via
-  `skip_logout=True` on `collector.execute()`). Rapid polling
-  without logout + re-auth avoids hammering firmware anti-brute-force
-  thresholds.
+- Session handling is exactly what a normal poll does. On modems
+  with `actions.logout` the collector logs out and clears the
+  session after each successful poll, so every window poll
+  re-authenticates (see ARCHITECTURE_DECISIONS § Recovery
+  Architecture → Recovery does not preserve sessions).
 - If the session dies mid-window (LOAD_AUTH observed), the normal
   signal policy kicks in — session is cleared, next poll
   re-authenticates fresh. The window continues.
@@ -2269,7 +2270,6 @@ outages still enter recovery through their own paths.
 class Recovery:
     def __init__(
         self,
-        collector: ModemDataCollector,
         modem_config: ModemConfig,
         *,
         on_state_change: Callable[[], None] | None = None,
@@ -2277,12 +2277,7 @@ class Recovery:
         """Initialize the recovery module.
 
         Args:
-            collector: Used to pass ``skip_logout=True`` during window
-                polls (the orchestrator controls the actual call; the
-                recovery module only sets a flag the orchestrator
-                reads).
-            modem_config: Read for model name (logging) and for any
-                future per-modem recovery opt-out.
+            modem_config: Read for the model name in log events.
             on_state_change: Callback fired on False→True and True→False
                 transitions. Runs on the poll thread; callbacks must
                 be thread-safe. None disables notification.

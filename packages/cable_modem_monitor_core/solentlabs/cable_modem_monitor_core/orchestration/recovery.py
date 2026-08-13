@@ -36,7 +36,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ..models.modem_config.config import ModemConfig
-    from .collector import ModemDataCollector
     from .models import ModemResult
 
 _logger = logging.getLogger(__name__)
@@ -73,12 +72,10 @@ class Recovery:
 
     def __init__(
         self,
-        collector: ModemDataCollector,
         modem_config: ModemConfig,
         *,
         on_state_change: Callable[[], None] | None = None,
     ) -> None:
-        self._collector = collector
         self._modem_config = modem_config
         self._on_state_change = on_state_change
 

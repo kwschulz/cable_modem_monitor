@@ -15,10 +15,9 @@ from .event_capture import assert_event_emitted, capture_events
 
 
 def _make_recovery(on_state_change=None) -> Recovery:
-    collector = MagicMock()
     modem_config = MagicMock()
     modem_config.model = "MB7621"
-    return Recovery(collector, modem_config, on_state_change=on_state_change)
+    return Recovery(modem_config, on_state_change=on_state_change)
 
 
 # ---------------------------------------------------------------------------
