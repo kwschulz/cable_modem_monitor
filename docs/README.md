@@ -29,6 +29,26 @@ specs, see the indexes in each package's `docs/` directory.
 |----------|--------|
 | [setup/GETTING_STARTED.md](setup/GETTING_STARTED.md) | Setup, daily workflow, troubleshooting (single canonical path: VS Code dev container, WSL2 on Windows) |
 
+## Doc Authoring
+
+Applies to every doc in this repo — project guides, package specs,
+workflow docs, and `ARCHITECTURE_DECISIONS.md`.
+
+- One home per rule. A fact stated in two docs will drift; state it
+  once and link from everywhere else.
+- Docs state the current contract only — no version history, no
+  "previously" narrative, no record of what a design replaced. Git
+  and the commit body carry that.
+- Quote code only as far as the contract requires (public signature,
+  schema); implementation detail stays in code.
+- A decision enters `ARCHITECTURE_DECISIONS.md` only if it constrains
+  future work; alternatives merely considered are omitted. A rejected
+  approach is recorded as the constraint it creates, not as the story
+  of its rejection.
+- Cite as `FILE.md § Section Name` with a relative link. The doc that
+  owns a rule is the link target; consumers point to it with at most
+  one sentence of local context.
+
 ## Package Specs (separate indexes)
 
 | Index | Scope |

@@ -173,9 +173,9 @@ Core's engine. Depends on both Core and Catalog.
 | Diagnostics | Combines Core's `OrchestratorDiagnostics` with HA-side sanitized logs, channel dump, PII checklist |
 | Dashboard generator | Service that generates Lovelace YAML for modem dashboard based on current channels |
 
-No parsing, no auth, no modem-specific knowledge. The Capture button from
-v3.13 was removed — `har-capture` is the tool for collecting raw modem data
-for parser development.
+No parsing, no auth, no modem-specific knowledge. The integration has no
+capture affordance — `har-capture` is the tool for collecting raw modem
+data for parser development.
 
 **Startup example:**
 

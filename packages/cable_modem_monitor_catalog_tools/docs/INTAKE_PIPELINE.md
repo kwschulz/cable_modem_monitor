@@ -128,11 +128,12 @@ SetArrisConfigurationInfo`, `todo: reboot`, `fun: 8`. Reporting "N committed
 modems declare this shape, here they are" alongside the wire evidence gives
 the LLM precedent it can read.
 
-This supersedes an earlier proposal to derive *detection itself* from
-committed configs. That required deciding which `modem.yaml` fields are
-recognition signal and which are runtime behaviour — `action_name` is the
-former, `cookie_name` the latter — a judgment no scan can make and the LLM
-makes for free. As a hint source the distinction stops mattering. Note that
+The scan is a hint source, not a detection source. Deriving *detection
+itself* from committed configs would require deciding which `modem.yaml`
+fields are recognition signal and which are runtime behaviour —
+`action_name` is the former, `cookie_name` the latter — a judgment no scan
+can make and the LLM makes for free. As a hint source the distinction stops
+mattering. Note that
 `scan_fleet()` reads only `parser.yaml`; auth and actions live in
 `modem.yaml`, which pattern extraction never opens.
 

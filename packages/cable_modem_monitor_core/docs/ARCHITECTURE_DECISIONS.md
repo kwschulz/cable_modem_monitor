@@ -630,14 +630,10 @@ a cross-boundary dependency: the auth manager needed session config to
 execute its own login flow, violating the separation it was designed
 to enforce.
 
-v3.12 and v3.13 stored `session_cookie_name` on the auth config
-(`UrlTokenSessionConfig`). The v3.14 spec moved it to a separate
-`session` section for cleaner YAML structure, but this broke
-`url_token` pre-login cookie clearing and body token fallback — two
-protocol behaviors that only surfaced during real-hardware testing
-(SB8200, Issue #81). The move back restores the boundary that
-v3.12/v3.13 got right: auth owns credentials and their artifacts,
-session owns lifecycle.
+Cleaner YAML structure is not sufficient reason to move it. Carrying
+`cookie_name` under `session` breaks `url_token` pre-login cookie
+clearing and body-token fallback — two protocol behaviors that
+surface only against real hardware (SB8200, Issue #81).
 
 Similarly, `token_prefix` is part of the `url_token` auth protocol —
 the auth flow produces a body token, and `token_prefix` describes how
@@ -646,8 +642,7 @@ not session.
 
 **Evidence:** Journal entries 2026-01-16 (resource-loader-architecture)
 and 2026-01-27 (session-cookie-clearing-browser-behavior) document the
-original discovery. The v3.14 gap analysis (2026-04-01) identified the
-regression.
+discovery.
 
 **Constrains:** No `logout_url` or `logout_required` convenience
 fields. `actions.logout` presence drives single-session semantics;
@@ -658,16 +653,16 @@ cookies leave `cookie_name` empty (default).
 ### Session concurrency — SSOT via `actions.logout`
 
 **Decision:** `actions.logout` presence is the single indicator that a modem
-requires single-session discipline. `session.max_concurrent` (present in v3.13
-and earlier) has been removed from `SessionConfig`.
+requires single-session discipline. `SessionConfig` carries no concurrency
+field.
 
-**Rationale:** `max_concurrent: 1` and `actions.logout` always had to travel
-together — one without the other was either dead config (logout without
-`max_concurrent: 1` never fired) or a lockout footgun (`max_concurrent: 1`
-without logout held the session open and blocked the user's web UI between
-polls). Two fields encoding one constraint is redundant and a footgun source.
-The XB10 onboarding gap made this concrete: the intake pipeline had configured
-a logout block without `max_concurrent: 1`, silently disabling logout.
+**Rationale:** A separate `max_concurrent: 1` would always have to travel
+with `actions.logout` — one without the other is either dead config (logout
+that never fires) or a lockout footgun (a session held open, blocking the
+user's web UI between polls). Two fields encoding one constraint is redundant
+and a footgun source: an intake pipeline that writes a logout block without
+the paired field silently disables logout, which is what the XB10 onboarding
+gap surfaced.
 
 **New field:** `HttpAction.requires_session: bool = False` distinguishes
 unauthenticated logout endpoints (`false` — can clear any active server-side
@@ -1287,22 +1282,21 @@ observe the reboot. Anything that happens after the command lands is
 handled by a separate "recovery" module that owns polling cadence
 for a bounded window.
 
-**Rationale:** The earlier design conflated the *command* (send a
-reboot instruction) with the *recovery observation* (watch until the
-modem is operational again). These are separable concerns with
-different contracts. The command is transactional — it either
-dispatches cleanly or it doesn't. Recovery is a polling-cadence
-concern — HOW OFTEN to poll for a while after a disruption. Merging
-them produced a restart method that blocked for three minutes,
-needed cancellation plumbing, owned its own probe loop, and
-duplicated work that external-reboot detection also needed.
+**Rationale:** The *command* (send a reboot instruction) and the
+*recovery observation* (watch until the modem is operational again)
+are separable concerns with different contracts. The command is
+transactional — it either dispatches cleanly or it doesn't. Recovery
+is a polling-cadence concern — HOW OFTEN to poll for a while after a
+disruption. Conflating them produces a restart method that blocks for
+three minutes, needs cancellation plumbing, owns its own probe loop,
+and duplicates work that external-reboot detection also needs.
 
-Splitting them lets each do one thing. Restart becomes ~5 lines.
-Recovery becomes a single module that any trigger (command, observed
-outage, heuristic) can ask to enter a window. The Status sensor
-always reflects real snapshot state (Unreachable → ranging → Operational);
-no synthetic "Restarting…" label. The restart button returns quickly;
-the dashboard tells the user what's actually happening.
+Split, each does one thing. Restart is ~5 lines. Recovery is a single
+module that any trigger (command, observed outage, heuristic) can ask
+to enter a window. The Status sensor always reflects real snapshot
+state (Unreachable → ranging → Operational); no synthetic
+"Restarting…" label. The restart button returns quickly; the
+dashboard tells the user what's actually happening.
 
 **Constrains:** Restart never waits, never times out, never
 cancels. Its only failure mode is `command_failed` (auth or action
@@ -1323,11 +1317,10 @@ with the same behavior.
 **Rationale:** The modem's physical state — "not fully operational,
 expected to return" — is the same regardless of what triggered it.
 Modeling it as one thing with multiple triggers matches reality.
-The earlier design had two implementations (inline wait for
-commanded, flag+observer for detected) running in parallel; they
-shared a deadline constant, differed in everything else, and
-required the orchestrator to arbitrate between them. The unified
-module removes the arbitration.
+Splitting it by trigger would mean two implementations (inline wait
+for commanded, flag plus observer for detected) sharing a deadline
+constant, differing in everything else, and forcing the orchestrator
+to arbitrate between them. One module removes the arbitration.
 
 Triggers differ only in how they recognize "recovery is needed."
 The recovery module's reaction is the same: open a window, let
@@ -1347,9 +1340,8 @@ no knowledge of recovery.
 `Recovery` in `orchestration/recovery.py` (e.g. `WINDOW_SECONDS`).
 Modem YAML and action models carry no timing fields.
 
-**Rationale:** Per-modem tuning was tried in v3.14 alpha and
-removed. "How long a reboot takes" varies by firmware version, CMTS
-load, and DOCSIS ranging — none of which are modem-class
+**Rationale:** "How long a reboot takes" varies by firmware version,
+CMTS load, and DOCSIS ranging — none of which are modem-class
 characteristics. Bench-tuning values per modem doesn't scale:
 firmware updates silently invalidate them, and a value too short or
 too long produces misleading UX or wasted polls.
@@ -1465,10 +1457,9 @@ Unreachable for a full scan interval). Lists of states model
 positions; recovery is a property of a path, and intermediate
 readings the list never anticipated each became a bug. ICMP_BLOCKED
 counts as up because the ICMP contradiction override (UC-59a)
-guarantees every such reading is confirmed by a live TCP handshake —
-this supersedes the "conservative for v1" exclusion from 2026-04-01,
-which predated that guarantee and was recorded only in a test-table
-comment rather than here. Up → up transitions (RESPONSIVE ↔
+guarantees every such reading is confirmed by a live TCP handshake.
+Excluding it would only be defensible without that guarantee.
+Up → up transitions (RESPONSIVE ↔
 ICMP_BLOCKED) are not edges, so ping-filtering networks get backoff
 clearing without spurious forced polls.
 
@@ -1519,10 +1510,10 @@ author minutes; catching it at promotion costs a contributor days.
 **Constrains:**
 
 - A new catalog entry must be conformant on the commit that adds it.
-  Landing drift and cleaning it up at confirmation time is no longer
-  available, and downgrading `status:` no longer exempts an entry.
-- Contributor PRs can now fail on a conformance rule during intake.
-  The failure message names the field, the rule, and the value, and
+  Landing drift and cleaning it up at confirmation time is not an
+  option, and downgrading `status:` does not exempt an entry.
+- Contributor PRs can fail on a conformance rule during intake. The
+  failure message names the field, the rule, and the value, and
   directs to the parser rather than the golden.
 
 ---
@@ -1569,9 +1560,9 @@ the `modem-intake` skill. The user handles approval.
 not dependent on LLM reasoning for correctness. The config constraints
 (transport, auth, format) form the decision framework. Ambiguity is a
 hard stop, not a guess. The split is what matters, not the delivery
-mechanism: an earlier iteration exposed the same steps through an MCP
-server, and carving `catalog_tools` out of Core replaced it with plain
-modules a contributor can also call directly.
+mechanism: `catalog_tools` exposes the steps as plain modules a
+contributor can call directly, and any other front end would have to
+respect the same split.
 
 **Constrains:** HAR validation is a gate — post-auth-only HARs,
 missing auth flows, and ambiguous transports halt analysis. No guessing.

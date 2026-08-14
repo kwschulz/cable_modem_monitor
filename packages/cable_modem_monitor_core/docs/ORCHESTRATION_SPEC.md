@@ -351,8 +351,7 @@ Auth managers must include the ``requests.Response`` on their
 failure ``AuthResult`` so the collector can render the detail.
 
 See ARCHITECTURE_DECISIONS.md § "Auth-failure detail via single
-WARNING log" for the design rationale (replaces an earlier session-
-adapter capture mechanism that was over-engineered for the goal).
+WARNING log" for the design rationale.
 
 #### AuthResult Reuse Contract (success path)
 
@@ -2194,10 +2193,10 @@ render it honestly.
 
 ### Timing
 
-Recovery timing is **generic, not per-modem**. Bench-tuning per
-modem was tried and removed; DOCSIS ranging variance is already
-handled adaptively by polling through the window at a short
-cadence.
+Recovery timing is **generic, not per-modem**. DOCSIS ranging
+variance is handled adaptively by polling through the window at a
+short cadence, which is what bench-tuning per modem would otherwise
+try to approximate.
 
 | Constant | Default | Purpose |
 |----------|---------|---------|

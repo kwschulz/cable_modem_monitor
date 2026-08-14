@@ -2194,10 +2194,9 @@ produced a verdict at all. The remedy shipped here is navigational —
 it lets the user escape a wrong guess — and it does not change what
 the message asserts.
 
-**Evidence:** Discussion #175 and #176 (Arris SB8200 v7). Shipped in
-3.14.0-beta.12. Auto-detecting the variant was considered and left out
-of 3.14: an earlier attempt was fragile, and probing costs login
-attempts at firmware that locks up after a few.
+**Evidence:** Discussion #175 and #176 (Arris SB8200 v7). The variant
+is not auto-detected: probing costs login attempts at firmware that
+locks up after a few.
 
 ---
 
