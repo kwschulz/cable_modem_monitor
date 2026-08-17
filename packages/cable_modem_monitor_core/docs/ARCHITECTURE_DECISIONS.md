@@ -1787,6 +1787,86 @@ cookies, or tokens. The pre-fetch establishes session cookies as a side
 effect, but its primary purpose is reading the data the handshake
 needs. Discarding the response body is a bug.
 
+### How to extend an existing auth strategy
+
+A behaviour a strategy does not yet have is added as a **declared field
+on that strategy**, never as a change to its default path. With the
+field absent, every entry that does not declare it behaves identically
+to before. This is
+[MODEM_YAML_SPEC.md § Principles](MODEM_YAML_SPEC.md#principles)
+applied to code: no modem's configuration affects another, so an
+extension that changes what a modem without the field puts on the
+wire is the wrong shape however well it serves the modem that needed
+it.
+
+1. **Check whether Core already implements the behaviour.** Extraction,
+   interpolation, and pre-fetch patterns exist on both the auth and the
+   action side, and the two sides have needed the same thing before.
+   Reuse means lifting the existing implementation into a shared module
+   and calling it from both — two implementations of one behaviour
+   drift, and the second one usually misses a case the first learned.
+2. **Add the field to the strategy's model** in
+   `models/modem_config/auth.py`. The models set `extra="forbid"`, so
+   the model change is what makes the YAML expressible at all.
+3. **Gate the behaviour on the field** in `auth/{strategy}.py`. The
+   unset path must be the code that ran before.
+4. **Keep the field a parameter, not an implementation** — a keyword
+   Core wraps, not a regex the contributor writes. See
+   [MODEM_YAML_SPEC.md § Config Fields Are Parameters, Not Implementations](MODEM_YAML_SPEC.md#config-fields-are-parameters-not-implementations).
+5. **Document the field** in the strategy's field table in
+   `MODEM_YAML_SPEC.md`, and link the behaviour's owning section when it
+   is shared with actions.
+6. **An opt-in extraction that finds nothing falls back to the static
+   config value and logs an ERROR.** A silent fallback recreates the
+   condition the field exists to fix: the request still goes somewhere,
+   and nothing reports that the declared behaviour did not happen.
+
+**A fleet audit is part of the change, not review feedback on it.**
+Before proposing the field, resolve the behaviour against every entry
+that would reach it — for an auth extension, every `modem*.yaml`
+declaring that strategy, and among those the ones whose config supplies
+the input the behaviour reads. The captures in `test_data/` answer this
+without hardware. Entries that would take a different code path than
+they do today are the blast radius, and they belong in the proposal.
+
+**Test coverage is two assertions, not one.** That the behaviour works
+when declared is the easy half. The half that decides whether the
+change can merge is that the request built *without* the field is the
+request built today, asserted per affected strategy. Patterns:
+[CODE_REVIEW.md § Test File Standards](../../../docs/CODE_REVIEW.md#test-file-standards).
+
+Replay tests substitute for neither. The mock server gates access by
+session state and matches the login route by path only —
+[ARCHITECTURE.md § Test Harness: Same Pipeline, HAR Replay](ARCHITECTURE.md#test-harness-same-pipeline-har-replay)
+states what that does and does not verify.
+
+### Auth extraction sources are named, not flagged
+
+`FormAuth.action_source` names where the login POST URL comes from —
+`config` or `login_page`. The field contract is
+[MODEM_YAML_SPEC.md § form](MODEM_YAML_SPEC.md#form); these are the
+constraints it creates, and they bind any later strategy that reads part
+of its handshake off a page.
+
+- **A new source is a new value, never a second flag.** Paired booleans
+  admit combinations that contradict each other, which is why
+  `893ea7df` retired `session.max_concurrent`. `form_sjcl` already reads
+  auth parameters out of JS assignments, so a source that is a page but
+  not a form element is a shape this fleet can reach.
+- **`form_selector` is the only form-identification mechanism in auth
+  config.** It already scopes hidden-field discovery. A second
+  identifier — keyword, pattern, index — could disagree with it about
+  which form on the page is the login form, and nothing would reconcile
+  them.
+- **An extracted URL resolves against the page it was read from.**
+  Concatenating onto the base URL breaks relative actions, and the
+  fleet has one: `sercomm/dm1000` publishes `action="setup.cgi"` while
+  its config declares `/setup.cgi`.
+- **A declared source that yields nothing logs an ERROR and falls back
+  to the static value.** Failing the login would break modems the
+  static URL still satisfies; silence would hide a config defect for as
+  long as the fallback happened to work.
+
 ### How to add a transport
 
 Add a new loader (new value type), new `BaseParser` implementation(s)

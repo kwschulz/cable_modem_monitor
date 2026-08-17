@@ -921,6 +921,15 @@ the capture:
   every action, and har-capture empties credential bodies to `{}`;
   neither says anything about shape, so neither is indexed.
 
+**What replay does not verify: the request line past method and path.**
+Matching keys on those two, so a query string, a header, or a
+form-encoded field that Core omits or adds is invisible — a login POST
+to `/goform/Login` matches a capture of `/goform/Login?id=1248795675`
+and passes. Where a modem validates something inside the request rather
+than at its path, no capture can fail the test, and the assertion has
+to be written against the request Core builds. See
+ARCHITECTURE_DECISIONS.md § How to extend an existing auth strategy.
+
 The pass criterion follows. `ActionResult.success` now carries the
 response status for HTTP actions, and the runner asserts it, plus the
 status code the result records for transports that report none through

@@ -1,0 +1,15 @@
+{
+  "_description": "Capture holds both a bare and a ?id= login POST; both shapes allowed",
+  "login_path": "/goform/login",
+  "expected_shapes": [[], ["id"]],
+  "_entries": [
+    {
+      "request": { "method": "POST", "url": "http://192.168.100.1/goform/login" },
+      "response": { "status": 302, "headers": [], "content": { "text": "" } }
+    },
+    {
+      "request": { "method": "POST", "url": "http://192.168.100.1/goform/login?id=99" },
+      "response": { "status": 302, "headers": [], "content": { "text": "" } }
+    }
+  ]
+}

@@ -318,6 +318,7 @@ words:
   # Project-specific
   - blindspots
   - CMMT
+  - consumership
   - footgun
   - isoformat
   - lifecycles
@@ -592,6 +593,7 @@ words:
   - addopts
   - aiohttp
   - asynccontextmanager
+  - callspec
   - contextmanager
   - cursorrules
   - freezegun
@@ -603,7 +605,9 @@ words:
   - Makefiles
   - mccabe
   - minversion
+  - modifyitems
   - monkeypatching
+  - originalname
   - Pyflakes
   - pythonpath
   - rootdir
@@ -613,6 +617,7 @@ words:
   - tuln
   - usermod
   - wslconfig
+  - XPASS
 
   # DOCSIS signal/field identifiers and units
   - channelnumber

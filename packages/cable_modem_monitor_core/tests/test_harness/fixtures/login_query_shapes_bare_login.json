@@ -1,0 +1,15 @@
+{
+  "_description": "Static form action: the captured login POST carries no query string",
+  "login_path": "/goform/login",
+  "expected_shapes": [[]],
+  "_entries": [
+    {
+      "request": { "method": "POST", "url": "http://192.168.100.1/goform/login" },
+      "response": {
+        "status": 302,
+        "headers": [{ "name": "Location", "value": "http://192.168.100.1/index.htm" }],
+        "content": { "text": "" }
+      }
+    }
+  ]
+}

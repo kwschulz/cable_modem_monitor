@@ -308,7 +308,8 @@ auth:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `action` | string | required | Form POST URL |
+| `action` | string | required | Form POST URL. Used directly unless `action_source` names another source, and the fallback whenever that source yields nothing. |
+| `action_source` | enum | `config` | Where the POST URL comes from. `config` uses `action`. `login_page` reads the `action` attribute of the form `form_selector` identifies on the pre-fetched page, resolved against that page's URL. Requires `login_page`. |
 | `method` | string | `POST` | HTTP method |
 | `username_field` | string | `"username"` | Form field name for username |
 | `password_field` | string or list | `"password"` | Form field name(s) for password. All fields receive the same encoded password. Use a list when the modem POSTs the password to multiple form fields. |
@@ -328,6 +329,21 @@ modems with dynamic CSRF tokens (e.g., server-generated `webToken`).
 When `login_page` is empty, the POST body is built entirely from
 config: `username_field`, `password_field` entries, and
 `hidden_fields`.
+
+**Dynamic POST URLs:** some firmware publishes a per-page-load value in
+the login form's action (`<form action="/goform/Login?id=1740525841">`)
+and rejects a POST that omits it. `action_source: login_page` reads the
+action off the pre-fetched page instead of `action`, resolving relative
+values against the page URL — the form declaring `action="setup.cgi"`
+posts to `/setup.cgi`, matching what a browser does. `form_selector`
+identifies the form; when unset the first `<form>` on the page is used.
+
+The read is best-effort in one direction only: no form, no matching
+selector, or no `action` attribute logs an ERROR and falls back to
+`action`. It never fails the login, because a modem that accepts the
+static URL must keep working, and it is never silent, because a
+declared source that stopped resolving is a config defect that has to
+surface. Entries leaving `action_source` at `config` are unaffected.
 
 **Success detection:** If `success` is provided, checks `redirect`
 (path substring match) and/or `indicator` (body substring match).

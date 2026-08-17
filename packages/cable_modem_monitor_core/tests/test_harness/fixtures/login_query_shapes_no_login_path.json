@@ -1,0 +1,11 @@
+{
+  "_description": "No login path configured: nothing to collect, enforcement disabled",
+  "login_path": "",
+  "expected_shapes": [],
+  "_entries": [
+    {
+      "request": { "method": "POST", "url": "http://192.168.100.1/goform/login?id=1" },
+      "response": { "status": 302, "headers": [], "content": { "text": "" } }
+    }
+  ]
+}
