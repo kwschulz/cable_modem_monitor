@@ -6,12 +6,17 @@ Coverage breakdown per docs/CODE_REVIEW.md § Test File Standards:
 - _reconnect_engine_socket grace behaviour — table-driven with stubbed
   Desktop/socket probes; asserts when the grace poll runs and when the
   sudo proxy launch is reached (no real Docker state is touched).
+- _wait_for_docker_ready engine-up grace — table-driven with stubbed
+  clock and probes; asserts the deadline extends from engine-up without
+  ever shrinking the original budget, and that docker info keeps being
+  polled while the engine gap persists.
 - _prompt_start_docker_wsl decision flow — scenario table covering the
-  surgical pre-launch reconnect, the stuck-Desktop backend repair, and
-  the cold-start paths, including the slow-cold-boot regression: the
-  readiness wait times out with the engine up but the distro socket
-  missing, and recovery must go through the grace period (grace_wait=True)
-  instead of spending a sudo prompt immediately.
+  surgical pre-launch reconnect, the stuck-Desktop backend repair (with
+  the engine-gap proxy fallback when the repair leaves the socket
+  missing), and the cold-start paths, including the slow-cold-boot
+  regression: the readiness wait grants the provisioning grace from
+  engine-up, so recovery afterwards goes straight to the proxy reconnect
+  (grace_wait=False) instead of stacking a second grace before sudo.
 """
 
 from __future__ import annotations
@@ -130,13 +135,65 @@ def test_reconnect_engine_socket_grace(
 
 
 # ---------------------------------------------------------------------------
+# _wait_for_docker_ready — engine-up grace deadline behaviour
+# ---------------------------------------------------------------------------
+
+# fmt: off
+_WAIT_READY_CASES = [
+    # description, timeout, grace, gap_from_tick, ready_at_tick, expected, expected_ticks
+    ("ready within the plain timeout",           5, 0,  None, 2,    True,  2),
+    ("plain timeout expires",                    5, 0,  None, None, False, 5),
+    ("grace requested, engine never appears",    5, 10, None, None, False, 5),
+    ("early engine keeps the full budget",       5, 2,  1,    4,    True,  4),
+    ("late engine extends the deadline",         5, 10, 4,    8,    True,  8),
+    ("engine-up grace expires",                  5, 3,  4,    None, False, 7),
+    ("daemon reachable while the gap persists",  5, 10, 1,    2,    True,  2),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    ("timeout", "grace", "gap_from", "ready_at", "expected", "ticks"),
+    [(c[1], c[2], c[3], c[4], c[5], c[6]) for c in _WAIT_READY_CASES],
+    ids=[c[0] for c in _WAIT_READY_CASES],
+)
+def test_wait_for_docker_ready_grace(monkeypatch, timeout, grace, gap_from, ready_at, expected, ticks):
+    """The deadline extends from engine-up only; docker info is polled throughout."""
+    tick = {"n": 0}
+
+    class _Result:
+        def __init__(self, returncode):
+            self.returncode = returncode
+
+    def fake_sleep(seconds):
+        tick["n"] += 1
+
+    def fake_run(cmd, **kwargs):
+        ready = ready_at is not None and tick["n"] >= ready_at
+        return _Result(0 if ready else 1)
+
+    monkeypatch.setattr(_mod.time, "sleep", fake_sleep)
+    monkeypatch.setattr(
+        _mod,
+        "_engine_up_but_socket_missing",
+        lambda: gap_from is not None and tick["n"] >= gap_from,
+    )
+    monkeypatch.setattr(_mod.subprocess, "run", fake_run)
+
+    assert _mod._wait_for_docker_ready(timeout, engine_up_grace=grace) is expected
+    assert tick["n"] == ticks
+
+
+# ---------------------------------------------------------------------------
 # _prompt_start_docker_wsl — decision-flow scenarios
 # ---------------------------------------------------------------------------
 
 # Each scenario stubs every Docker/Desktop probe, then asserts the outcome
 # plus the observable side effects: Desktop launches, readiness-wait
-# timeouts, and reconnect grace_wait values (True everywhere — no path may
-# spend a sudo prompt without first offering Desktop the grace period).
+# (timeout, engine_up_grace) arguments, and reconnect grace_wait values.
+# grace_wait is True only where no readiness wait has run yet (the surgical
+# pre-launch reconnect); after a wait, its engine-up grace has already been
+# spent, so recovery goes straight to the proxy (grace_wait=False).
 _FLOW_SCENARIOS = [
     {
         "id": "surgical pre-launch reconnect heals without starting Desktop",
@@ -145,6 +202,8 @@ _FLOW_SCENARIOS = [
         "answer": "y",
         "wait_ready": True,
         "gap_after_launch": False,
+        "repair_ok": True,
+        "gap_after_repair": False,
         "expected": True,
         "exp_popen": 0,
         "exp_waits": [],
@@ -157,7 +216,37 @@ _FLOW_SCENARIOS = [
         "answer": "y",
         "wait_ready": True,
         "gap_after_launch": False,
+        "repair_ok": True,
+        "gap_after_repair": False,
         "expected": True,
+        "exp_popen": 0,
+        "exp_waits": [],
+        "exp_grace": [],
+    },
+    {
+        "id": "stuck Desktop: repair leaves the engine gap, proxy reconnects",
+        "pre_gap": False,
+        "desktop_running": True,
+        "answer": "y",
+        "wait_ready": True,
+        "gap_after_launch": False,
+        "repair_ok": False,
+        "gap_after_repair": True,
+        "expected": True,
+        "exp_popen": 0,
+        "exp_waits": [],
+        "exp_grace": [False],
+    },
+    {
+        "id": "stuck Desktop: repair fails with no engine gap, guidance shown",
+        "pre_gap": False,
+        "desktop_running": True,
+        "answer": "y",
+        "wait_ready": True,
+        "gap_after_launch": False,
+        "repair_ok": False,
+        "gap_after_repair": False,
+        "expected": "handled",
         "exp_popen": 0,
         "exp_waits": [],
         "exp_grace": [],
@@ -169,34 +258,40 @@ _FLOW_SCENARIOS = [
         "answer": "n",
         "wait_ready": True,
         "gap_after_launch": False,
+        "repair_ok": True,
+        "gap_after_repair": False,
         "expected": "handled",
         "exp_popen": 0,
         "exp_waits": [],
         "exp_grace": [],
     },
     {
-        "id": "cold start ready within the 180s wait",
+        "id": "cold start ready within the wait",
         "pre_gap": False,
         "desktop_running": False,
         "answer": "y",
         "wait_ready": True,
         "gap_after_launch": False,
+        "repair_ok": True,
+        "gap_after_repair": False,
         "expected": True,
         "exp_popen": 1,
-        "exp_waits": [180],
+        "exp_waits": [(180, 120)],
         "exp_grace": [],
     },
     {
-        "id": "slow cold start: wait expires, engine up, reconnect with grace",
+        "id": "slow cold start: wait expires with engine up, proxy reconnects",
         "pre_gap": False,
         "desktop_running": False,
         "answer": "y",
         "wait_ready": False,
         "gap_after_launch": True,
+        "repair_ok": True,
+        "gap_after_repair": False,
         "expected": True,
         "exp_popen": 1,
-        "exp_waits": [180],
-        "exp_grace": [True],
+        "exp_waits": [(180, 120)],
+        "exp_grace": [False],
     },
     {
         "id": "cold start fails and engine never appears",
@@ -205,9 +300,11 @@ _FLOW_SCENARIOS = [
         "answer": "y",
         "wait_ready": False,
         "gap_after_launch": False,
+        "repair_ok": True,
+        "gap_after_repair": False,
         "expected": False,
         "exp_popen": 1,
-        "exp_waits": [180],
+        "exp_waits": [(180, 120)],
         "exp_grace": [],
     },
     {
@@ -217,6 +314,8 @@ _FLOW_SCENARIOS = [
         "answer": "n",
         "wait_ready": True,
         "gap_after_launch": False,
+        "repair_ok": True,
+        "gap_after_repair": False,
         "expected": False,
         "exp_popen": 0,
         "exp_waits": [],
@@ -229,17 +328,19 @@ _FLOW_SCENARIOS = [
 def test_prompt_start_docker_wsl_flow(monkeypatch, scenario):
     """Each Docker/Desktop state resolves to the right outcome via the right recovery path."""
     counts = {"popen": 0, "repair": 0}
-    waits: list[int] = []
+    waits: list[tuple[int, int]] = []
     grace: list[bool] = []
-    state = {"launched": False}
+    state = {"launched": False, "repaired": False}
 
     def fake_engine_gap():
+        if state["repaired"]:
+            return scenario["gap_after_repair"]
         if state["launched"]:
             return scenario["gap_after_launch"]
         return scenario["pre_gap"]
 
-    def fake_wait_for_ready(timeout_seconds=60):
-        waits.append(timeout_seconds)
+    def fake_wait_for_ready(timeout_seconds=60, engine_up_grace=0):
+        waits.append((timeout_seconds, engine_up_grace))
         return scenario["wait_ready"]
 
     def fake_reconnect(docker_exe, grace_wait):
@@ -248,7 +349,8 @@ def test_prompt_start_docker_wsl_flow(monkeypatch, scenario):
 
     def fake_repair():
         counts["repair"] += 1
-        return True
+        state["repaired"] = True
+        return scenario["repair_ok"]
 
     class FakePopen:
         def __init__(self, *args, **kwargs):
