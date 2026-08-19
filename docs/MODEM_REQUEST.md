@@ -41,18 +41,31 @@ If your modem requires HTTP Basic Auth, add `--username` and
 [har-capture's CLI reference](https://github.com/solentlabs/har-capture#quick-start)
 for details.
 
-A few cable-modem-specific tips:
+A few cable-modem-specific tips, in the order they happen during the
+capture:
 
-- **During capture**, log in if needed, visit all status pages, and
-  wait 3–5 seconds per page for async data to load before closing the
-  browser. har-capture launches its own controlled chromium instance,
-  so there's no need to use your regular browser's incognito mode —
-  each capture starts from a clean session.
-- **After logging in, let the page your modem sends you to finish
+- **Before logging in, visit one status page directly** by typing its
+  address into the address bar (for example
+  `192.168.100.1/DocsisStatus.htm` — any status page you know works).
+  You'll likely just see the login page again: that's the point. It
+  records how your modem answers a data request without a valid
+  session, which is exactly what the integration sees when its session
+  expires mid-poll.
+- **Log in once with a wrong password on purpose**, then log in with
+  the real one. The rejected attempt teaches the integration how your
+  modem refuses bad credentials — on some modems a failed login looks
+  identical to a success unless you know what to compare, and this
+  evidence can't be reconstructed later. (Your wrong guess is redacted
+  like any other password.)
+- **After the real login, let the page your modem sends you to finish
   loading** before clicking anything else. Many modems answer the login
   with a redirect, and that landing page is how the integration confirms
   the login worked. A capture that moves on before it loads cannot be
   used to test the login.
+- **Visit all status pages**, and wait 3–5 seconds per page for async
+  data to load. har-capture launches its own controlled chromium
+  instance, so there's no need to use your regular browser's incognito
+  mode — each capture starts from a clean session.
 - **Click your modem's Logout link last**, before closing the browser.
   Some modems allow only one login at a time. Without the logout
   request in the capture, the integration cannot learn how to release
@@ -78,9 +91,13 @@ sharing:
   search for a short list of patterns:
   [docs/examples/har-pii-manual-checklist.md](examples/har-pii-manual-checklist.md).
 
-If anything sensitive remains, replace it with `***REDACTED***`, save,
-re-gzip, and note what you redacted in your issue so the sanitizer
-can be improved for future contributors.
+If anything sensitive remains, replace it with `***REDACTED***` in the
+`.sanitized.har`, save, re-gzip (`gzip -kf -9 yourfile.sanitized.har`),
+and note what you redacted in your issue so the sanitizer can be
+improved for future contributors. Running
+`har-capture validate yourfile.sanitized.har --patterns network-device`
+afterwards confirms nothing leaked and that the `.har` and `.har.gz`
+still match.
 
 ## Step 3 — Submit
 
@@ -101,7 +118,7 @@ and:
 | WiFi credentials | Auto-redacted; **verify before sharing** |
 | MAC addresses | Auto-redacted (hashed, format `02:xx:xx:xx:xx:xx`) |
 | Serial numbers | Auto-redacted (hashed, `SERIAL_*` prefix) |
-| Public IPs | Auto-redacted (`240.x.x.x` reserved range) |
+| Public IPs | Auto-redacted (`192.0.2.x` TEST-NET reserved range) |
 | Channel data (power, SNR) | Preserved — needed for parser |
 | Firmware version | Preserved — useful for compatibility |
 | Uptime | Preserved — useful for testing |

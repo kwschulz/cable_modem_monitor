@@ -198,7 +198,8 @@ If `result.valid is False`: stop and address the issues before going
 further. Validation catches structural problems and missing auth flows
 early — there is no point scanning the fleet or running analysis on a
 bad HAR. Common fix: HAR was captured against an existing session
-(post-auth). Recapture in incognito/private browsing.
+(post-auth). Recapture with the login performed inside the capture —
+har-capture's own chromium window starts with no session.
 
 ## Step 3: Scan Fleet Patterns
 

@@ -82,12 +82,10 @@ body:
 
         har-capture launches its own controlled chromium window — your regular browser's cookies and login state don't carry over, so there's nothing to clear beforehand.
 
-        **During capture:**
-        1. Log in if your modem requires authentication
-        2. Visit **all pages** — status, connection, DOCSIS, system info, logs
-        3. **Wait 3-5 seconds on each page** for async data to load
-        4. If your modem requires login, **log out** before closing the browser
-        5. Close the browser when done
+        **During capture**, follow the click sequence in the
+        [Modem Request Guide](https://github.com/solentlabs/cable_modem_monitor/blob/main/docs/MODEM_REQUEST.md#step-1--capture)
+        — it includes two steps that are easy to miss (a pre-login page visit and a
+        deliberate wrong-password login) that make your capture much more useful.
 
         **Before sharing:** Search the `.sanitized.har` file for your WiFi password and any other credentials — the sanitizer is best-effort. See the [Modem Request Guide](https://github.com/solentlabs/cable_modem_monitor/blob/main/docs/MODEM_REQUEST.md#step-2--review-for-pii) for what to check.
 
