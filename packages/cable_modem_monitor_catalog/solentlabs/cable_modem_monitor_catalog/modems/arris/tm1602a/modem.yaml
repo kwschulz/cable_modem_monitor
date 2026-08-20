@@ -35,11 +35,9 @@ notes: |
   Same CGI structure as CM820B: /cgi-bin/status_cgi (channels + uptime)
   and /cgi-bin/vers_cgi (firmware/hardware version). Version info
   parsed from the "System:" blob via parser.yaml label/pattern rules.
-
-# TODO: New HAR capture needed for provisioned speed
-# CM3500B (same CGI family) has /cgi-bin/config_params_cgi with
-# SfMaxTrafficRate service flow values. Current capture does not
-# include that endpoint. Re-capture to confirm TM1602A exposes it too.
+  Provisioned speed is not parsed: the CM3500B (same CGI family) exposes
+  SfMaxTrafficRate at /cgi-bin/config_params_cgi; no TM1602A capture on
+  file visits that endpoint.
 
 references:
   issues:

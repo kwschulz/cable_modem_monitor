@@ -77,11 +77,11 @@ notes: |
   before a same-poll auth retry) instead of holding a session between
   polls. Whether the CM3000 firmware accepts the POST, and the form's
   default nowTime=0, is unverified on this model.
-
-# TODO: New HAR capture needed for provisioned speed
-# Same XHR pattern as CM2000/CM2050V — InitProvRateTableUpdateView()
-# exists but InitProvRateTableTagValue() data loads via XHR not in
-# current capture. Re-capture with har-capture 0.5.1+ (XHR quiescence).
+  Provisioned speed is not parsed: DocsisStatus.htm's
+  InitProvRateTableUpdateView() reads ds_prov_rate/us_prov_rate, but the
+  InitProvRateTableTagValue() body loads by XHR and no capture on file
+  holds it. A capture taken with the current guide (one Refresh click per
+  status page) would supply it.
 
 references:
   issues:

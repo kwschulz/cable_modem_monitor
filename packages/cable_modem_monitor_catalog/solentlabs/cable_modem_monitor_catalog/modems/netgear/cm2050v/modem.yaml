@@ -51,6 +51,8 @@ attribution:
   contributors:
     - github: https://github.com/Dragon1473
       contribution: "HAR capture and testing (Issue #105)"
+    - github: https://github.com/bfurner
+      contribution: "HTTPS HAR capture, local reproduction, and the dynamic form-action diagnosis (Issue #189)"
 
 isps:
   - Comcast
