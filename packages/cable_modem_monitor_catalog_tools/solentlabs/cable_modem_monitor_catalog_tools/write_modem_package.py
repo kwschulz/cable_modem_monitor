@@ -57,7 +57,7 @@ class WriteResult:
 def write_modem_package(
     output_dir: str,
     modem_yaml: str,
-    parser_yaml: str,
+    parser_yaml: str | None,
     golden_file: dict[str, object],
     har_path: str,
     parser_py: str | None = None,
@@ -100,6 +100,16 @@ def write_modem_package(
         ``WriteResult`` with paths written and skipped.
     """
     result = WriteResult()
+
+    # Refuse before touching disk: a partial package (modem.yaml written,
+    # then a crash) looks half-onboarded and confuses every later step.
+    if not parser_yaml:
+        result.errors.append(
+            "parser.yaml is empty: a catalog package needs a parser, and "
+            "analyze_har found no data sections in this capture (see its "
+            "warnings). Nothing was written."
+        )
+        return result
 
     # Sandbox check — parser.py must be a "pure parser"
     if parser_py is not None and (violations := validate_parser_sandbox(parser_py)):

@@ -139,14 +139,16 @@ def _apply_inferences(
             metadata["default_host"] = "192.168.100.1"
             result.inferred.append("default_host")
 
-    # hardware.docsis_version — OFDM/OFDMA channels → 3.1, else 3.0
+    # hardware.docsis_version: OFDM/OFDMA channels mean 3.1, else 3.0;
+    # no channel sections at all means no inference (stays in `missing`)
     if "hardware" not in metadata:
         metadata["hardware"] = {}
     hw = metadata["hardware"]
     if isinstance(hw, dict) and "docsis_version" not in hw:
         docsis = _infer_docsis_version(analysis)
-        hw["docsis_version"] = docsis
-        result.inferred.append("hardware.docsis_version")
+        if docsis:
+            hw["docsis_version"] = docsis
+            result.inferred.append("hardware.docsis_version")
 
     # status — default to awaiting_verification for new modems
     if "status" not in metadata:
@@ -170,6 +172,11 @@ def _infer_docsis_version(analysis: dict[str, Any]) -> str:
     MODEM_YAML_SPEC § Hardware; first case: technicolor/xb10).
     """
     sections = analysis.get("sections") or {}
+    # Absence of OFDM only means 3.0 when channels were observed; an
+    # unprovisioned modem has no channel sections, and "3.0" would be
+    # a guess. Empty string = cannot infer.
+    if not any(sections.get(name) for name in ("downstream", "upstream")):
+        return ""
     for section_name in ("downstream", "upstream"):
         section = sections.get(section_name) or {}
         channel_type = section.get("channel_type", {})

@@ -319,6 +319,8 @@ For each item in `enrich_result.missing`:
 
 - **hardware.chipset**: web search `"{manufacturer} {model} chipset"`
 - **hardware.docsis_version**: check if OFDM channels detected (= 3.1), else 3.0.
+  With no channel data at all (unprovisioned modem) nothing is inferred —
+  research it from manufacturer specs instead.
   Never conclude 4.0 from channel data alone — D4.0 reuses 3.1's OFDM/OFDMA
   channel types (see MODEM_YAML_SPEC § Hardware for the sourced reference);
   `"4.0"` requires a hardware source — chipset or manufacturer specs

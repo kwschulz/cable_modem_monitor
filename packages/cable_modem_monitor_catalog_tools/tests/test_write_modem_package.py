@@ -39,6 +39,54 @@ def _create_har(tmp_path: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Input guards — refuse incomplete packages before touching disk
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyParserGuard:
+    """A missing parser.yaml refuses the write with nothing on disk.
+
+    The generate stage returns parser_yaml None when analyze_har found
+    no data sections; writing then must fail whole, not leave a partial
+    package (modem.yaml written, then a crash on the parser write).
+    """
+
+    def test_none_parser_refused_before_writing(self, tmp_path: Path) -> None:
+        """parser_yaml=None: legible error, no files, no directories."""
+        har_path = _create_har(tmp_path)
+        out_dir = tmp_path / "modems" / "solentlabs" / "t100"
+
+        result = write_modem_package(
+            output_dir=str(out_dir),
+            modem_yaml=_MODEM_YAML,
+            parser_yaml=None,
+            golden_file=_GOLDEN,
+            har_path=str(har_path),
+        )
+
+        assert result.errors and "no data sections" in result.errors[0]
+        assert result.files_written == []
+        assert not out_dir.exists()
+
+    def test_empty_parser_refused_before_writing(self, tmp_path: Path) -> None:
+        """parser_yaml='': same refusal as None."""
+        har_path = _create_har(tmp_path)
+        out_dir = tmp_path / "modems" / "solentlabs" / "t100"
+
+        result = write_modem_package(
+            output_dir=str(out_dir),
+            modem_yaml=_MODEM_YAML,
+            parser_yaml="",
+            golden_file=_GOLDEN,
+            har_path=str(har_path),
+        )
+
+        assert result.errors and "no data sections" in result.errors[0]
+        assert result.files_written == []
+        assert not out_dir.exists()
+
+
+# ---------------------------------------------------------------------------
 # Happy path — creates full directory structure
 # ---------------------------------------------------------------------------
 

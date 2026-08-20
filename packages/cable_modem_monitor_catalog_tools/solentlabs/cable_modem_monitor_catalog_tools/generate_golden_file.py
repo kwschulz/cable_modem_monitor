@@ -43,7 +43,7 @@ class GenerateGoldenFileResult:
 
 def generate_golden_file(
     har_path: str,
-    parser_yaml_content: str,
+    parser_yaml_content: str | None,
 ) -> GenerateGoldenFileResult:
     """Generate a golden file from HAR response bodies.
 
@@ -58,6 +58,19 @@ def generate_golden_file(
         Result with golden_file dict, channel counts, and any errors.
     """
     errors: list[str] = []
+
+    # generate_config returns parser_yaml None when analyze_har found no
+    # data sections; name that state instead of crashing on the load.
+    if not parser_yaml_content:
+        return GenerateGoldenFileResult(
+            golden_file={},
+            errors=[
+                "parser.yaml is empty: analyze_har found no data sections, so "
+                "there is no parser to run. Recapture with the modem's data "
+                "pages populated, or skip golden generation for an auth-only "
+                "entry."
+            ],
+        )
 
     # Load and validate parser.yaml
     try:

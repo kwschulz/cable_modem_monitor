@@ -290,3 +290,57 @@ class TestSharedAuthEndpoint:
         """No action endpoints invented from UI labels or image paths in page source."""
         assert dm1000_result.actions.logout is None
         assert dm1000_result.actions.restart is None
+
+
+class TestNoDataSections:
+    """A capture with no parseable data pages says so, loudly.
+
+    An unprovisioned modem serves placeholder pages, so auth analyzes
+    cleanly while sections come back empty; without a warning the
+    contributor first learns of it as a crash three tools later.
+    """
+
+    def test_empty_sections_warns(self, tmp_path: Path) -> None:
+        """Auth-only capture gets an explicit no-data-sections warning."""
+        har = {
+            "log": {
+                "entries": [
+                    {
+                        "request": {"method": "GET", "url": "http://host/", "headers": []},
+                        "response": {
+                            "status": 200,
+                            "headers": [],
+                            "content": {
+                                "mimeType": "text/html",
+                                "text": '<form action="/goform/Login">'
+                                '<input type="text" name="loginName">'
+                                '<input type="password" name="loginPassword"></form>',
+                            },
+                        },
+                    },
+                    {
+                        "request": {
+                            "method": "POST",
+                            "url": "http://host/goform/Login",
+                            "headers": [],
+                            "postData": {
+                                "mimeType": "application/x-www-form-urlencoded",
+                                "params": [
+                                    {"name": "loginName", "value": "admin"},
+                                    {"name": "loginPassword", "value": "secret"},
+                                ],
+                            },
+                        },
+                        "response": {
+                            "status": 302,
+                            "headers": [{"name": "Location", "value": "http://host/index.htm"}],
+                            "content": {"size": 0, "text": ""},
+                        },
+                    },
+                ]
+            }
+        }
+        har_file = write_har(tmp_path, har)
+        result = analyze_har(har_file)
+        assert result.sections is None
+        assert any("no parseable data sections" in w for w in result.warnings)
