@@ -66,6 +66,10 @@ capture:
   data to load. har-capture launches its own controlled chromium
   instance, so there's no need to use your regular browser's incognito
   mode — each capture starts from a clean session.
+- **If a status page has a Refresh button, click it once** and wait for
+  the data to reload. On some modems that button fetches the data a
+  different way than the page load did, and the integration can only
+  use what the capture shows.
 - **Click your modem's Logout link last**, before closing the browser.
   Some modems allow only one login at a time. Without the logout
   request in the capture, the integration cannot learn how to release
