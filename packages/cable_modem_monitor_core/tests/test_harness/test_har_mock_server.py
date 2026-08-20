@@ -129,6 +129,39 @@ class TestBuildRoutes:
 
         assert routes[("GET", "/missing.html")].status == 404
 
+    def test_later_exchange_wins_among_non_200(self) -> None:
+        """Two non-200 answers to one key: the later exchange is the route.
+
+        The contributor capture steps put the deliberate wrong-password
+        login before the real one, so a bare-path firmware records two
+        302s under the same key and the first is the refusal.
+        """
+        entries = [
+            {
+                "request": {"method": "POST", "url": "http://192.168.100.1/goform/login"},
+                "response": {"status": 302, "headers": [{"name": "Location", "value": "/Login.htm"}], "content": {}},
+            },
+            {
+                "request": {"method": "POST", "url": "http://192.168.100.1/goform/login"},
+                "response": {"status": 302, "headers": [{"name": "Location", "value": "/index.htm"}], "content": {}},
+            },
+        ]
+        assert build_routes(entries)[("POST", "/goform/login")].headers == [("Location", "/index.htm")]
+
+    def test_200_is_not_displaced_by_a_later_non_200(self) -> None:
+        """A later failure never replaces a captured success for the same key."""
+        entries = [
+            {
+                "request": {"method": "GET", "url": "http://192.168.100.1/status.html"},
+                "response": {"status": 200, "headers": [], "content": {"text": "<html>data</html>"}},
+            },
+            {
+                "request": {"method": "GET", "url": "http://192.168.100.1/status.html"},
+                "response": {"status": 500, "headers": [], "content": {"text": "boom"}},
+            },
+        ]
+        assert build_routes(entries)[("GET", "/status.html")].status == 200
+
     def test_entry_without_a_response_is_not_a_route(self) -> None:
         """A request that never got a response cannot be replayed as one.
 
@@ -1003,6 +1036,64 @@ class TestHARMockServerFormAuth:
             session.cookies.set("session", "mock-session-token")
             data_resp = session.get(f"{server.base_url}/status.html")
             assert data_resp.status_code == 200
+
+
+class TestHARMockServerFormLoginPage:
+    """The form simulator serves the captured login page before any session exists.
+
+    Real firmware hands an unauthenticated client its login page; that
+    page is where Core reads hidden fields and a dynamic form action.
+    Answering the pre-fetch with the 401 challenge instead left replay
+    unable to certify anything read off the page (#189).
+    """
+
+    _FORM = {"strategy": "form", "action": "/goform/login", "login_page": "/", "cookie_name": "session"}
+
+    @pytest.fixture()
+    def entries(self) -> list[dict[str, Any]]:
+        return _load_entries("har_entries_form_login_page.json")
+
+    def test_login_page_served_pre_auth(self, entries: list[dict[str, Any]]) -> None:
+        """GET login_page answers 200 with the captured body, no session required."""
+        with HARMockServer(entries, modem_config=_make_config({"auth": self._FORM})) as server:
+            resp = requests.get(f"{server.base_url}/")
+        assert resp.status_code == 200
+        assert "/goform/login?id=111" in resp.text
+
+    def test_captured_headers_are_not_served(self, entries: list[dict[str, Any]]) -> None:
+        """Only the body is replayed: the firmware's pre-auth cookie must not read as a session."""
+        with HARMockServer(entries, modem_config=_make_config({"auth": self._FORM})) as server:
+            session = requests.Session()
+            page = session.get(f"{server.base_url}/")
+            data = session.get(f"{server.base_url}/status.html")
+        assert "Set-Cookie" not in page.headers
+        assert data.status_code == 401
+
+    def test_data_pages_still_challenged(self, entries: list[dict[str, Any]]) -> None:
+        """Serving the login page opens nothing else."""
+        with HARMockServer(entries, modem_config=_make_config({"auth": self._FORM})) as server:
+            assert requests.get(f"{server.base_url}/status.html").status_code == 401
+
+    def test_undeclared_login_page_is_challenged(self, entries: list[dict[str, Any]]) -> None:
+        """Without login_page in config the page is a data page like any other."""
+        config = _make_config({"auth": {"strategy": "form", "action": "/goform/login"}})
+        with HARMockServer(entries, modem_config=config) as server:
+            assert requests.get(f"{server.base_url}/").status_code == 401
+
+    def test_uncaptured_login_page_is_challenged(self) -> None:
+        """A declared page the capture never recorded is not invented."""
+        entries = _load_entries("har_entries_form_auth.json")
+        with HARMockServer(entries, modem_config=_make_config({"auth": self._FORM})) as server:
+            assert requests.get(f"{server.base_url}/").status_code == 401
+
+    def test_accepted_login_is_the_later_capture(self, entries: list[dict[str, Any]]) -> None:
+        """Refused-then-accepted logins under distinct ?id= keys replay the accepted one."""
+        with HARMockServer(entries, modem_config=_make_config({"auth": self._FORM})) as server:
+            session = requests.Session()
+            login = session.post(f"{server.base_url}/goform/login?id=999", allow_redirects=False)
+            assert login.status_code == 302
+            assert login.headers["Location"].endswith("/index.htm")
+            assert session.get(f"{server.base_url}/status.html").status_code == 200
 
 
 class TestAuthFactoryRestartWiring:

@@ -1836,7 +1836,8 @@ request built today, asserted per affected strategy. Patterns:
 [CODE_REVIEW.md § Test File Standards](../../../docs/CODE_REVIEW.md#test-file-standards).
 
 Replay tests substitute for neither. The mock server gates access by
-session state and matches the login route by path only —
+session state, serves the login page from the capture, and matches the
+login POST by path and query-param names only —
 [ARCHITECTURE.md § Test Harness: Same Pipeline, HAR Replay](ARCHITECTURE.md#test-harness-same-pipeline-har-replay)
 states what that does and does not verify.
 

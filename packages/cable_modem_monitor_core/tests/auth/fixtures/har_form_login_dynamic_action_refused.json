@@ -1,0 +1,40 @@
+{
+  "_description": "Same dynamic-action firmware refusing the credentials: the login 302s back to the login page, discriminated only by the Location target",
+  "_entries": [
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/"},
+      "response": {
+        "status": 200,
+        "headers": [{"name": "Content-Type", "value": "text/html"}],
+        "content": {"text": "<html><body><form name='loginform' method='POST' action='/goform/login?id=111'><input type='hidden' name='loginName' value='admin'><input type='password' name='loginPassword'></form></body></html>"}
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "http://192.168.100.1/goform/login?id=111"},
+      "response": {
+        "status": 302,
+        "headers": [{"name": "Location", "value": "http://192.168.100.1/Login.htm"}],
+        "content": {"text": ""}
+      }
+    },
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/Login.htm"},
+      "response": {
+        "status": 200,
+        "headers": [{"name": "Content-Type", "value": "text/html"}],
+        "content": {"text": "<html><body><form name='loginform' method='POST' action='/goform/login?id=333'></form></body></html>"}
+      }
+    }
+  ],
+  "_modem_config": {
+    "auth": {
+      "strategy": "form",
+      "action": "/goform/login",
+      "action_source": "login_page",
+      "login_page": "/",
+      "username_field": "loginName",
+      "password_field": "loginPassword",
+      "success": {"redirect": "/index.htm"}
+    }
+  }
+}

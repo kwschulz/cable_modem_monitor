@@ -1,0 +1,40 @@
+{
+  "_description": "Form-auth capture following the contributor steps: login page served pre-auth (with the firmware's pre-auth cookie), a refused login first, the accepted login second, then data",
+  "_entries": [
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/"},
+      "response": {
+        "status": 200,
+        "headers": [
+          {"name": "Content-Type", "value": "text/html"},
+          {"name": "Set-Cookie", "value": "session=pre-auth-token; Path=/"}
+        ],
+        "content": {"text": "<html><body><form name='loginform' method='POST' action='/goform/login?id=111'><input type='hidden' name='loginName' value='admin'></form></body></html>"}
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "http://192.168.100.1/goform/login?id=111"},
+      "response": {
+        "status": 302,
+        "headers": [{"name": "Location", "value": "/Login.htm"}],
+        "content": {"text": ""}
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "http://192.168.100.1/goform/login?id=222"},
+      "response": {
+        "status": 302,
+        "headers": [{"name": "Location", "value": "/index.htm"}],
+        "content": {"text": ""}
+      }
+    },
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/index.htm"},
+      "response": {"status": 200, "headers": [], "content": {"text": "<html>home</html>"}}
+    },
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/status.html"},
+      "response": {"status": 200, "headers": [], "content": {"text": "<html>DS data</html>"}}
+    }
+  ]
+}

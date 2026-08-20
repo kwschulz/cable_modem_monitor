@@ -385,7 +385,7 @@ config fields.
 
   | Strategy | Extracts from login page | When |
   |----------|--------------------------|------|
-  | `form` | `<input type="hidden">` fields (CSRF tokens, mode flags) | Every auth attempt |
+  | `form` | `<input type="hidden">` fields (CSRF tokens, mode flags); the form's `action` URL when `action_source: login_page` | Every auth attempt |
   | `form_nonce` | Form structure (credential encoding: plain vs b64-packed) | Setup time only (config flow / test harness) |
   | `form_sjcl` | JS crypto variables (`myIv`, `mySalt`, `currentSessionId`) | Every auth attempt |
   | `form_cbn` | Session token cookie | Every auth attempt |
@@ -727,6 +727,7 @@ class FormAuth(AuthStrategyBase):
     model_config = ConfigDict(extra="forbid")
     strategy: Literal["form"]
     action: str
+    action_source: Literal["config", "login_page"] = "config"
     username_field: str = "username"
     password_field: list[str] = Field(default=["password"])
     encoding: Literal["plain", "base64"] = "plain"
@@ -890,10 +891,29 @@ at all (har-capture writes status `-1` when the modem tore the
 connection down mid-request) becomes no route, because there is
 nothing to replay.
 
+**Where a capture answers one request twice, the later exchange wins,
+and a 200 is never displaced by a failure.** The capture steps ask for
+a deliberate wrong-password login before the real one, so a login
+endpoint routinely carries two recorded answers — under one key on a
+static action, under two on a dynamic `?id=` action. Keeping the first
+would replay the refusal as the login.
+
 **Login, logout and restart are dispatched, not routed.** These three
 carry server-side session state, so the auth handler sees them before
-the route table does. Three rules keep that from drifting away from
+the route table does. These rules keep that from drifting away from
 the capture:
+
+- **The login page is public.** A `form` modem's declared `login_page`
+  is served from the capture before any session exists, because that
+  is the page a real modem hands an unauthenticated client and the
+  page Core reads its hidden fields and dynamic form action from.
+  Behind the 401 challenge, replay could certify only a login built
+  from config. The body is replayed and the framing synthesized: the
+  captured headers carry the firmware's pre-auth cookie, and a cookie
+  by the declared name is what the simulator reads as a session, so
+  replaying them would open every data page without a login POST. A
+  declared page the capture never recorded stays behind the
+  challenge; nothing is invented.
 
 - **The capture answers when it has the exchange.** The handler is
   consulted for the session side effect either way — clearing state,
@@ -921,13 +941,15 @@ the capture:
   every action, and har-capture empties credential bodies to `{}`;
   neither says anything about shape, so neither is indexed.
 
-**What replay does not verify: the request line past method and path.**
-Matching keys on those two, so a query string, a header, or a
-form-encoded field that Core omits or adds is invisible — a login POST
-to `/goform/Login` matches a capture of `/goform/Login?id=1248795675`
-and passes. Where a modem validates something inside the request rather
-than at its path, no capture can fail the test, and the assertion has
-to be written against the request Core builds. See
+**What replay does not verify: the request line past method, path,
+and login query-param names.** A login POST must carry the query-param
+*names* the capture recorded at that path (values are never compared —
+a dynamic `?id=` changes per page load), which is what makes a missing
+parameter fail the replay. Everything else inside the request is
+invisible: a header, a form-encoded field, or a query value that Core
+omits or invents matches the capture regardless. Where a modem
+validates one of those, no capture can fail the test, and the
+assertion has to be written against the request Core builds. See
 ARCHITECTURE_DECISIONS.md § How to extend an existing auth strategy.
 
 The pass criterion follows. `ActionResult.success` now carries the

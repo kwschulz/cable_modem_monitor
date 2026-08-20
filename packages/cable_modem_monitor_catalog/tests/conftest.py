@@ -18,39 +18,6 @@ from solentlabs.cable_modem_monitor_core.test_harness import discover_modem_test
 # Catalog modems root: solentlabs/cable_modem_monitor_catalog/modems/
 CATALOG_MODEMS_PATH = Path(__file__).parent.parent / "solentlabs" / "cable_modem_monitor_catalog" / "modems"
 
-# Replay cases red until FormAuth grows action_source (#189): these
-# captures' login POSTs carry a dynamic ?id= the fleet code does not
-# yet send, and the harness now refuses the bare-path substitute.
-# strict=True makes each marker fail the moment the fix works, forcing
-# its removal — the xfail set cannot silently outlive the bug.
-_KNOWN_DYNAMIC_ACTION_CASES = {
-    "netgear/cm2050v/modem",
-    "netgear/cm2050v/modem-https",
-    "netgear/cm3000/modem",
-}
-
-
-def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Mark known dynamic-action replay cases xfail — the replay test only.
-
-    The marker cannot ride on the ``modem_test_case`` param: other tests
-    share that fixture and pass, and a strict marker turns their pass
-    into an XPASS failure.
-    """
-    for item in items:
-        if getattr(item, "originalname", "") != "test_modem_har_replay":
-            continue
-        # callspec exists on parametrized Function items only; pytest.Item
-        # does not declare it, so read it the same guarded way as originalname.
-        callspec = getattr(item, "callspec", None)
-        if callspec is not None and callspec.id in _KNOWN_DYNAMIC_ACTION_CASES:
-            item.add_marker(
-                pytest.mark.xfail(
-                    reason="#189: login POST needs the form action's dynamic ?id=",
-                    strict=True,
-                )
-            )
-
 
 @pytest.fixture(autouse=True)
 def _allow_sockets(socket_enabled: None) -> None:  # noqa: ARG001

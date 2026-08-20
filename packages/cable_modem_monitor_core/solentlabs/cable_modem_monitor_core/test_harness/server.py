@@ -332,7 +332,10 @@ def _find_route(
     1. Exact match ``(method, route_path)`` — query string included.
     2. Path-only ``(method, path)`` — request has query, route doesn't.
     3. Scan for route whose path portion matches — route has query
-       (e.g. HAR captured ``?status=1``), request doesn't.
+       (e.g. HAR captured ``?status=1``), request doesn't. The later
+       capture wins, as in ``build_routes``: a dynamic login action
+       records each attempt under its own ``?id=``, and the capture
+       steps put the refused attempt first.
 
     Tiers 1-2 handle query-string-specific routes (e.g.
     ``/setup.cgi?todo=X``) and dynamic URL token suffixes.
@@ -365,12 +368,13 @@ def _find_route(
         if route is not None:
             return route
 
-    # Tier 3: route has query, request doesn't — scan by path prefix
+    # Tier 3: route has query, request doesn't — scan by path, later wins
+    matched = None
     for (m, rp), r in routes.items():
         if m == method and rp.split("?", 1)[0] == path:
-            return r
+            matched = r
 
-    return None
+    return matched
 
 
 def _is_login_get(

@@ -34,8 +34,11 @@ def build_routes(
     """Build route table from HAR entries.
 
     Each entry becomes a route keyed by ``(method, normalized_path)``.
-    For duplicate keys, the last successful (status 200) response wins.
-    Non-200 responses are stored only if no 200 exists for that route.
+    For duplicate keys a 200 beats any other status, and among equals
+    the later exchange wins. The capture steps ask for a deliberate
+    wrong-password login before the real one, so a bare-path firmware
+    records two 302s under one key; keeping the first would replay the
+    refusal as the login.
 
     Args:
         har_entries: List of HAR ``log.entries`` dicts.
@@ -79,8 +82,8 @@ def build_routes(
         key = (method, route_path)
         existing = routes.get(key)
 
-        # Prefer 200 responses; for non-200, only store if no entry yet
-        if existing is None or status == 200:
+        # A 200 is never displaced by a later failure; otherwise later wins.
+        if existing is None or status == 200 or existing.status != 200:
             routes[key] = RouteEntry(status=status, headers=headers, body=body)
 
     return routes

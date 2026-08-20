@@ -8,10 +8,13 @@ default_host: "192.168.100.1"
 auth:
   strategy: form
   action: "/goform/Login"
+  action_source: login_page
   login_page: "/"
   username_field: loginName
   password_field: loginPassword
   cookie_name: "XSRF_TOKEN"
+  success:
+    redirect: "/index.htm"
 
 hardware:
   docsis_version: "3.1"
@@ -20,7 +23,10 @@ hardware:
 status: confirmed
 
 sources:
-  auth_config: "[#127 Netgear CM3000](https://github.com/solentlabs/cable_modem_monitor/issues/127)"
+  auth_config:
+    "[#127 Netgear CM3000](https://github.com/solentlabs/cable_modem_monitor/issues/127)
+    — modem.har: login form action /goform/Login?id=N, accepted login
+    302 to /index.htm"
   release_date: "[Netgear press release, March 12, 2024](https://www.businesswire.com/news/home/20240312800246/en/NETGEAR-Unveils-Next-Generation-of-Connectivity-with-the-Nighthawk-DOCSIS-3.1-High-Speed-Internet-Cable-Modem) announcing Nighthawk CM3000 U.S. availability"
 
 attribution:
@@ -41,6 +47,12 @@ notes: |
   XSRF_TOKEN cookie set on first GET, sent with all subsequent requests.
   Login page at /, POST to /goform/Login with loginName/loginPassword.
   md5.js loaded on login page but password sent plaintext.
+  The login form's action carries a per-page-load ?id= (same firmware
+  line as the CM2050V, where #189 showed a bare POST is refused), so
+  action_source reads it off the login page at every login. The
+  success criterion matches the captured accepted login; without one
+  a refused login answering 302 scored as success and surfaced one
+  step later as a login page at the data URL (#127).
 
 # TODO: New HAR capture needed for provisioned speed
 # Same XHR pattern as CM2000/CM2050V — InitProvRateTableUpdateView()
