@@ -71,6 +71,12 @@ capture:
   request in the capture, the integration cannot learn how to release
   the session, and may hold it while you are trying to reach the
   modem's own web page.
+- **Optional, after logout: capture a reboot.** If you want the
+  integration's Restart button to work on your modem, log back in, find
+  its Reboot or Restart control (usually on an admin or settings page),
+  and click it. Your internet drops for a few minutes while the modem
+  restarts; close the browser once the click is sent. Without this, the
+  catalog entry ships without a restart action.
 
 har-capture produces a sanitized, gzipped `.sanitized.har.gz` file —
 that's the artifact to attach in Step 3.
