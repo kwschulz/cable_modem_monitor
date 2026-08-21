@@ -1434,6 +1434,23 @@ def test_get_channel_info_number_mode_filters_unlocked() -> None:
     assert result == [("", 1), ("", 2)]
 
 
+def test_get_channel_info_number_mode_treats_missing_lock_status_as_locked() -> None:
+    """Missing lock_status is treated as locked per CHANNEL_IDENTIFICATION_SPEC §6."""
+    from custom_components.cable_modem_monitor.dev_tools import (
+        _get_channel_info_number_mode,
+    )
+
+    channels = [
+        {"channel_number": 2},
+        {"channel_number": 1, "power": -5.0},
+        {"channel_number": 3, "lock_status": None},
+        {"channel_number": 4, "lock_status": "not_locked"},
+    ]
+    result = _get_channel_info_number_mode(channels)
+    # Missing and explicit-None lock_status included; not_locked excluded
+    assert result == [("", 1), ("", 2), ("", 3)]
+
+
 def test_get_channel_info_number_mode_dispatched_when_identity_is_number() -> None:
     """_get_channel_info routes to _get_channel_info_number_mode when in NUMBER mode."""
     from custom_components.cable_modem_monitor.const import ChannelIdentity
