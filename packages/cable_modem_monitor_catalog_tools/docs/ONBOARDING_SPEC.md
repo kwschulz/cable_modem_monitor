@@ -481,6 +481,11 @@ the parsed JSON response. If the login response body is absent from the
 HAR or encrypted, omit `login_success` and flag for contributor
 verification.
 
+Intake does not emit `login_busy` (`MODEM_YAML_SPEC.md` § `form_pbkdf2`).
+A capture records the browser succeeding, so the busy body is never in
+it; the criterion comes from the firmware's own login JS, where the
+busy branch names the field and value it keys on.
+
 ### Phase 3: Session Detection
 
 Examine post-login requests for session artifacts:

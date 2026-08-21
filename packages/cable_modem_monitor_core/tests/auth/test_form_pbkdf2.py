@@ -243,6 +243,35 @@ _FAILURE_CASES = [
 ]
 # fmt: on
 
+# login_busy is a body criterion checked before login_success. Every case
+# runs with login_success={error: ok}; the three bodies are the three
+# branches of the Technicolor login.js response handler (#120): success,
+# busy, wrong credentials. The busy body's "error" value is unobserved on
+# hardware, so the criterion keys on "message" and the test body omits it.
+#
+# ┌────────────────────────────┬──────────────────────────────┬─────────┬───────┐
+# │ description                │ login_busy / body            │ success │ busy  │
+# ├────────────────────────────┼──────────────────────────────┼─────────┼───────┤
+# │ busy_body_declared         │ declared, body matches       │ False   │ True  │
+# │ busy_body_not_declared     │ {}, same body                │ False   │ False │
+# │ bad_credentials_declared   │ declared, failedAttempts body│ False   │ False │
+# │ success_body_declared      │ declared, {error: ok} body   │ True    │ False │
+# └────────────────────────────┴──────────────────────────────┴─────────┴───────┘
+_BUSY = {"message": "MSG_LOGIN_150"}
+_BUSY_BODY = {"message": "MSG_LOGIN_150"}
+_BAD_CRED_BODY = {"error": "error", "message": "MSG_LOGIN_2", "data": {"failedAttempts": 1}}
+_OK_BODY = {"error": "ok", "message": "MSG_LOGIN_1", "data": {"user": "admin", "uid": "1"}}
+
+# fmt: off
+_BUSY_CASES = [
+    # (description,              login_busy, body,           success, busy,  expected_error)
+    ("busy_body_declared",       _BUSY,      _BUSY_BODY,     False,   True,  "Login busy: MSG_LOGIN_150"),
+    ("busy_body_not_declared",   {},         _BUSY_BODY,     False,   False, "Login rejected: MSG_LOGIN_150"),
+    ("bad_credentials_declared", _BUSY,      _BAD_CRED_BODY, False,   False, "Login rejected: MSG_LOGIN_2"),
+    ("success_body_declared",    _BUSY,      _OK_BODY,       True,    False, ""),
+]
+# fmt: on
+
 
 class TestFormPbkdf2AuthManager:
     """FormPbkdf2AuthManager multi-round-trip auth.
@@ -370,9 +399,23 @@ class TestFormPbkdf2AuthManager:
             result = manager.authenticate(session, "http://192.168.0.1", "admin", "pw")
             assert result.success is True
 
-    def test_login_success_dict_mismatch_fails(self, session: requests.Session) -> None:
-        """login_success={error: ok} does not suppress a different error string."""
-        config = self._make_config(double_hash=False, login_success={"error": "ok"})
+    @pytest.mark.parametrize(
+        "desc,login_busy,body,expect_success,expect_busy,expected_error",
+        _BUSY_CASES,
+        ids=[c[0] for c in _BUSY_CASES],
+    )
+    def test_login_busy_criterion(
+        self,
+        session: requests.Session,
+        desc: str,
+        login_busy: dict[str, Any],
+        body: dict[str, Any],
+        expect_success: bool,
+        expect_busy: bool,
+        expected_error: str,
+    ) -> None:
+        """login_busy marks a declared refusal body busy, and nothing else (UC-87a)."""
+        config = self._make_config(double_hash=False, login_success={"error": "ok"}, login_busy=login_busy)
         manager = FormPbkdf2AuthManager(config)
         manager.configure_session(session, {})
 
@@ -381,12 +424,16 @@ class TestFormPbkdf2AuthManager:
             salt_resp.json.return_value = {"salt": "s"}
             login_resp = MagicMock()
             login_resp.status_code = 200
-            login_resp.json.return_value = {"error": "session_limit", "message": "MSG_LOGIN_150"}
+            login_resp.json.return_value = body
             mock_post.side_effect = [salt_resp, login_resp]
 
             result = manager.authenticate(session, "http://192.168.0.1", "admin", "pw")
-            assert result.success is False
-            assert "MSG_LOGIN_150" in result.error
+
+        assert result.success is expect_success
+        assert result.busy is expect_busy
+        assert expected_error in result.error
+        if not expect_success:
+            assert result.response is login_resp
 
     def test_salt_request_connection_error_propagates(self, session: requests.Session) -> None:
         """ConnectionError on salt request propagates for collector."""

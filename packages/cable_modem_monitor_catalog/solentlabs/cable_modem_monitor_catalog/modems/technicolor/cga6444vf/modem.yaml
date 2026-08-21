@@ -16,6 +16,12 @@ auth:
   salt_trigger: "seeksalthash"
   login_success:
     error: "ok"
+  # Single-session refusal arrives under HTTP 200, so status cannot
+  # classify it. The firmware's login.js branches busy on
+  # message == "MSG_LOGIN_150"; the error value on that body is
+  # unobserved, so the criterion keys on message (#120).
+  login_busy:
+    message: "MSG_LOGIN_150"
 
 session:
   headers:
@@ -64,6 +70,12 @@ sources:
   auth_config:
     "[#120 CGA6444VF](https://github.com/solentlabs/cable_modem_monitor/issues/120)
     — PBKDF2 double-hash auth"
+  login_busy:
+    '[#120 CGA6444VF](https://github.com/solentlabs/cable_modem_monitor/issues/120)
+    — js/login.js in the contributor HAR handles the login response as
+    error == "ok" (success), else message == "MSG_LOGIN_150" (already
+    logged in), else wrong credentials; the reporter''s beta.21 log shows
+    the refusal on the first poll after config-flow validation'
   logout_action:
     "[#120 CGA6444VF](https://github.com/solentlabs/cable_modem_monitor/issues/120)
     — POST /api/v1/session/logout observed in the contributor HAR capture"
@@ -94,9 +106,9 @@ notes: |
   Login semantics (from the firmware's own login JS, #120): success is
   error == "ok" with a session descriptor (uid, Dpd, intf); MSG_LOGIN_1
   is not a failure code. Failures return error != "ok" — MSG_LOGIN_150
-  (session busy) or failedAttempts (bad credentials). login_success
-  mirrors this. The browser's salt POST also sends logout: <bool> to
-  evict a rival session; unimplemented in form_pbkdf2.
+  (session busy) or failedAttempts (bad credentials). login_success and
+  login_busy mirror this. The browser's salt POST also sends
+  logout: <bool> to evict a rival session; unimplemented in form_pbkdf2.
 
 references:
   issues:

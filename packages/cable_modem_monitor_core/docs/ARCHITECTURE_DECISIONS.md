@@ -691,6 +691,33 @@ the current settings; `rg requires_session` over `modems/` is the list.
 single-session. There is no mechanism to configure logout without triggering
 single-session semantics.
 
+### Session-busy is a declared criterion, not a Core error table
+
+**Decision:** When firmware refuses a login without judging the
+credential but does so under a 2xx, the catalog entry declares the
+refusal body (`form_pbkdf2.login_busy`) and the strategy reports
+`AuthResult.busy`. The collector classifies `busy` as
+`AUTH_UNAVAILABLE`, the same signal a 5xx earns (UC-87a). Core holds no
+table of firmware busy codes.
+
+**Rationale:** The status rule cannot see a 200 refusal, and without a
+declared criterion that refusal fails the success check and trips the
+breaker on the first poll (#120: the CGA6444VF's `MSG_LOGIN_150`
+reached the reauth form, whose own validation login caused the next
+refusal). Matching `MSG_LOGIN_150` in Core would encode one modem's
+vocabulary as Core behavior; declaring it keeps the config a parameter
+and the matcher shared with `login_success` (§ Config fields are
+parameters, not implementations).
+
+**Constrains:** The busy check runs before the success check, since
+both are body criteria and the busy body also fails success. A strategy
+that gains busy detection does it through a declared criterion on its
+own model and `AuthResult.busy`, never through a string table; the
+collector branches on the flag and the status, never on the strategy.
+The value is sourced from the firmware's client JS, which is the only
+place the refusal body is observable when every captured login
+succeeded.
+
 ### Post-login 401 is read per auth strategy
 
 **Decision:** `BaseAuthManager.auth_failure_mode()` returns how a 401/403
@@ -1760,10 +1787,10 @@ home attached.** That threshold, not `!= 200`: `form_nonce` and
 `form_cbn` post with `allow_redirects=False`, and `basic`'s challenge
 probe is a `GET` with the same, so a 302 is a normal answer on all
 three. Attaching is what makes `AUTH_UNAVAILABLE` reachable — the
-collector reads the attached status to tell a modem declining to serve
-(UC-87a) from a rejected credential, so a strategy that drops it forces
-a busy modem to read as a wrong password and trip the breaker on the
-first poll. `none` and `basic` are declared exceptions in
+collector reads the attached status, or `AuthResult.busy`, to tell a
+modem declining to serve (UC-87a) from a rejected credential, so a
+strategy that drops it forces a busy modem to read as a wrong password
+and trip the breaker on the first poll. `none` and `basic` are declared exceptions in
 `test_login_5xx_fails_and_attaches_response`, never silent absences.
 
 The `basic` exception holds exactly while no challenge probe is

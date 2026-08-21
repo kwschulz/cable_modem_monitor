@@ -178,12 +178,11 @@ class ModemDataCollector:
             # A 5xx is the modem declining to serve the login, not a verdict
             # on the credential, so it must not reach the circuit breaker.
             # Mirrors the data path, where 401/403 is LOAD_AUTH and every
-            # other status is LOAD_ERROR (RESOURCE_LOADING_SPEC). See UC-87a.
-            signal = (
-                CollectorSignal.AUTH_UNAVAILABLE
-                if status is not None and 500 <= status < 600
-                else CollectorSignal.AUTH_FAILED
-            )
+            # other status is LOAD_ERROR (RESOURCE_LOADING_SPEC). A strategy
+            # marks busy when firmware refuses under 2xx with a body the
+            # entry declares; status cannot see that one. See UC-87a.
+            declined = auth_result.busy or (status is not None and 500 <= status < 600)
+            signal = CollectorSignal.AUTH_UNAVAILABLE if declined else CollectorSignal.AUTH_FAILED
             return ModemResult(
                 success=False,
                 signal=signal,

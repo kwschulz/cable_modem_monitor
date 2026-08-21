@@ -189,7 +189,7 @@ class CollectorSignal(Enum):
 
     OK = "ok"                          # Collection completed — modem_data is populated
     AUTH_FAILED = "auth_failed"        # Wrong credentials or strategy mismatch
-    AUTH_UNAVAILABLE = "auth_unavailable"  # Login answered 5xx: modem busy, not a credential verdict
+    AUTH_UNAVAILABLE = "auth_unavailable"  # Login answered 5xx or a declared busy body: modem busy, not a credential verdict
     AUTH_LOCKOUT = "auth_lockout"      # Firmware anti-brute-force triggered
     CONNECTIVITY = "connectivity"      # Connection refused, timeout, DNS failure
     LOAD_ERROR = "load_error"          # HTTP error on data page (5xx, 404)
@@ -1161,10 +1161,10 @@ def apply(self, result: ModemResult) -> ConnectionStatus:  # SignalPolicy
             return ConnectionStatus.AUTH_FAILED
 
         case CollectorSignal.AUTH_UNAVAILABLE:
-            # UC-87a. The modem answered "try later" (5xx); it did not
-            # judge the credential. No streak, no breaker, no session
-            # clear, at any repetition count — a threshold would only
-            # delay the wrong answer.
+            # UC-87a. The modem answered "try later" (5xx, or a body the
+            # entry declares busy); it did not judge the credential. No
+            # streak, no breaker, no session clear, at any repetition
+            # count — a threshold would only delay the wrong answer.
             return ConnectionStatus.UNREACHABLE
 
         case CollectorSignal.AUTH_LOCKOUT:
@@ -1321,7 +1321,9 @@ attempt, circuit trips immediately. User sees error, opens a GitHub
 issue or reconfigures.
 
 **Transient auth failure:**
-Modem is busy and declines to serve the login (5xx).
+Modem is busy and declines to serve the login: a 5xx, or a response
+body the entry declares busy (`login_busy`, MODEM_YAML_SPEC
+§ `form_pbkdf2`).
 
 ```text
 Poll N:   AUTH_UNAVAILABLE — unreachable (streak unchanged, circuit closed)

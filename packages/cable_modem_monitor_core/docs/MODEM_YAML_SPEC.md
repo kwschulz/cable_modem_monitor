@@ -688,12 +688,15 @@ actions:
 | `csrf_header` | string | `""` | Header name for the CSRF token (e.g., `X-CSRF-TOKEN`). The `form_pbkdf2` strategy fetches the token value (via `csrf_init_endpoint` or login response) and attaches it as this header. Which requests carry the token and how the token is obtained are strategy-specific — other strategies that need CSRF may define their own fields. |
 | `cookie_name` | string | `""` | Session cookie produced by login. Auth owns the cookie it produces — see ARCHITECTURE_DECISIONS.md. |
 | `login_success` | dict | `{}` | When set, login is considered successful only when every key-value pair in this dict matches the response JSON. Values may be string, integer, or boolean — matched by equality against the parsed JSON response. Use when the firmware signals success with a specific field rather than absence of an error (e.g., Technicolor CGA6444VF returns `{"error": "ok", ...}` — set `login_success: {error: "ok"}`). |
+| `login_busy` | dict | `{}` | When set and every key-value pair matches the response JSON, the modem declined to serve the login without judging the credential: Core reports the attempt busy and the collector classifies it `AUTH_UNAVAILABLE`, the same as a 5xx (UC-87a). Same matching rules as `login_success`, checked first. Use when single-session firmware refuses a second login under HTTP 200 (e.g., Technicolor CGA6444VF answers `{"message": "MSG_LOGIN_150", ...}` — set `login_busy: {message: "MSG_LOGIN_150"}`). |
 
 Session-wide headers and logout are declared in their respective
 sections. See [Session](#session) and [Actions](#actions).
 
 **Success detection:** HTTP 401 is always treated as failure. If
-`login_success` is set, login succeeds only when every key-value
+`login_busy` is set and every key-value pair matches the response
+JSON, the login is busy, not failed; see the field above. Otherwise,
+if `login_success` is set, login succeeds only when every key-value
 pair in the dict matches the response JSON; any mismatch is treated
 as failure (the `message` field provides the error detail). If
 `login_success` is empty (the default), any truthy `"error"` field
@@ -1054,9 +1057,11 @@ third-party session the pre-retry logout cannot free means our login
 is refused. Firmware that reports this as 5xx is classified
 `AUTH_UNAVAILABLE` and reports `unreachable`, leaving polling alive so
 recovery happens on its own when the other session ends (explicit
-logout or modem-side timeout).
-That classification is driven by the login's status code, not by
-logout presence, so it applies to any firmware that answers this way.
+logout or modem-side timeout). Firmware that refuses under HTTP 200
+gets the same classification when the entry declares the refusal body
+(`login_busy` on `form_pbkdf2`).
+That classification is driven by the login response, not by logout
+presence, so it applies to any firmware that answers this way.
 See UC-87a.
 
 See RUNTIME_POLLING_SPEC.md for the full session lifecycle.

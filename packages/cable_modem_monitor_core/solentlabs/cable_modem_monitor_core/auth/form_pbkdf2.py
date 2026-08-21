@@ -101,7 +101,15 @@ class FormPbkdf2AuthManager(BaseAuthManager):
             derived = _derive_key(derived, salt_webui, config.pbkdf2_iterations, config.pbkdf2_key_length)
 
         # Step 5: Login with derived hash
-        login_result = _submit_login(session, login_url, username, derived, timeout, login_success=config.login_success)
+        login_result = _submit_login(
+            session,
+            login_url,
+            username,
+            derived,
+            timeout,
+            login_success=config.login_success,
+            login_busy=config.login_busy,
+        )
         if isinstance(login_result, AuthResult):
             return login_result
         response = login_result
@@ -194,6 +202,7 @@ def _submit_login(
     timeout: int,
     *,
     login_success: dict[str, Any] | None = None,
+    login_busy: dict[str, Any] | None = None,
 ) -> requests.Response | AuthResult:
     """POST the derived key and validate the login response.
 
@@ -216,10 +225,21 @@ def _submit_login(
     if isinstance(result_json, AuthResult):
         return result_json
 
+    # Busy before success: single-session firmware refuses the newcomer
+    # under 200 with a body the entry declares (e.g. {"message": "MSG_LOGIN_150"}),
+    # which also fails login_success. Busy is not a credential verdict (UC-87a).
+    if login_busy and _matches(result_json, login_busy):
+        return AuthResult(
+            success=False,
+            busy=True,
+            error=f"Login busy: {result_json.get('message', 'unknown error')}",
+            response=response,
+        )
+
     if login_success:
         # Firmware signals success via a specific key-value pair (e.g. {"error": "ok"}).
         # Fail if any required field is absent or has a different value.
-        if not all(result_json.get(k) == v for k, v in login_success.items()):
+        if not _matches(result_json, login_success):
             return AuthResult(
                 success=False,
                 error=f"Login rejected: {result_json.get('message', 'unknown error')}",
@@ -235,6 +255,11 @@ def _submit_login(
             )
 
     return response
+
+
+def _matches(body: dict[str, Any], criterion: dict[str, Any]) -> bool:
+    """True when every key-value pair of the criterion is present in the body."""
+    return all(body.get(k) == v for k, v in criterion.items())
 
 
 def _derive_key(

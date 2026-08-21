@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A busy single-session modem no longer reads as a wrong password.**
+  Some firmware refuses a second login with a normal HTTP 200 and a
+  message in the body instead of a 5xx. That refusal failed the login
+  check, stopped polling after one failure and opened the
+  re-authentication form, whose own test login took the only session
+  slot and caused the next refusal (#120, Technicolor CGA6444VF). A
+  catalog entry can now declare the refusal body (`login_busy` on
+  `form_pbkdf2`); a matching response is treated like a 5xx, the modem
+  reports unreachable, and polling continues until the slot frees.
+  Modems that do not declare it are unaffected.
+
 ## [3.14.0-beta.21] - 2026-08-10
 
 ### Added

@@ -179,6 +179,7 @@ class FormPbkdf2Auth(AuthStrategyBase):
     csrf_header: str = ""
     cookie_name: str = ""
     login_success: dict[str, Any] = Field(default_factory=dict)
+    login_busy: dict[str, Any] = Field(default_factory=dict)
 
     display_name: ClassVar[str] = "Form Login (PBKDF2)"
     transport: ClassVar[str] = "http"
