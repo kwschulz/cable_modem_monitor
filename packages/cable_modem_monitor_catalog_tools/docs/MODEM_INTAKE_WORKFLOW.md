@@ -132,6 +132,19 @@ never observed on the target hardware, the entry ships as
 Technicolor XB8 (CGM4981COM), issue #101, reconstructed from the XB7
 fixture plus a v3.12.0 diagnostics capture.
 
+When even that diagnostics evidence is missing — the target's own
+capture proves auth and firmware family but its data pages were never
+observed (an unprovisioned bench unit) — a sibling's data-page body
+may be transplanted into the target's real session with no value
+substitution, since no target values exist to substitute. The
+round-trip diffs against the sibling's golden and must match except
+for fields read from pages the target really served. The transplant
+simulates a provisioned unit and certifies nothing about the target's
+data pages; the entry ships `awaiting_verification` and a
+post-provisioning capture replaces the transplanted body and the
+golden. First use: Netgear CM2500, issue #189 — maintainer bench
+session as base, CM3000 DocsisStatus.htm body as template.
+
 **Hybrid (same device, maintainer-declared).** When the evidence for
 one physical device is spread across multiple real captures — e.g.,
 an early capture with intact data endpoints and a later capture of

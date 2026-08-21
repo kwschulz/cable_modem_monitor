@@ -246,6 +246,7 @@ words:
   - channelidup
   - channeltype
   - wantype
+  - apmode
   - cmconfiguration
   - cmconnectionstatus
   - cmstatus
@@ -369,6 +370,7 @@ words:
   - undecoded
   - unitless
   - unparseable
+  - unprovisioned
   - unrecovered
   - unresp
   - unschedules

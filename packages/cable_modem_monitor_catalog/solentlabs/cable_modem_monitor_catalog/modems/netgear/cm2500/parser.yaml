@@ -1,0 +1,220 @@
+downstream:
+  format: javascript
+  resource: "/DocsisStatus.htm"
+  functions:
+    # DOCSIS 3.0 QAM: 32 channels, 9 fields per channel
+    # Layout: channel_num | lock_status | modulation | channel_id |
+    #         frequency | power | snr | corrected | uncorrected
+    - name: "InitDsTableTagValue"
+      delimiter: "|"
+      fields_per_channel: 9
+      channel_type: "qam"
+      fields:
+        - offset: 1
+          field: lock_status
+          type: lock_status
+        - offset: 2
+          field: modulation
+          type: string
+        - offset: 3
+          field: channel_id
+          type: integer
+        - offset: 4
+          field: frequency
+          type: frequency
+          unit: "Hz"
+        - offset: 5
+          field: power
+          type: float
+          unit: "dBmV"
+        - offset: 6
+          field: snr
+          type: float
+          unit: "dB"
+        - offset: 7
+          field: corrected
+          type: integer
+        - offset: 8
+          field: uncorrected
+          type: integer
+      filter:
+        lock_status: "locked"
+      # DOCSIS 3.1 OFDM: 11 fields per channel
+      # Layout: channel_num | lock_status | profile_ids | channel_id |
+      #         frequency | power | snr | active_range |
+      #         unerrored_cw | correctable_cw | uncorrectable_cw
+    - name: "InitDsOfdmTableTagValue"
+      delimiter: "|"
+      fields_per_channel: 11
+      channel_type: "ofdm"
+      fields:
+        - offset: 1
+          field: lock_status
+          type: lock_status
+        - offset: 3
+          field: channel_id
+          type: integer
+        - offset: 4
+          field: frequency
+          type: frequency
+          unit: "Hz"
+        - offset: 5
+          field: power
+          type: float
+          unit: "dBmV"
+        - offset: 6
+          field: snr
+          type: float
+          unit: "dB"
+      filter:
+        lock_status: "locked"
+
+upstream:
+  format: javascript
+  resource: "/DocsisStatus.htm"
+  functions:
+    # DOCSIS 3.0 ATDMA: 7 fields per channel
+    # Layout: channel_num | lock_status | channel_type | channel_id |
+    #         symbol_rate | frequency | power
+    - name: "InitUsTableTagValue"
+      delimiter: "|"
+      fields_per_channel: 7
+      fields:
+        - offset: 1
+          field: lock_status
+          type: lock_status
+        - offset: 2
+          field: channel_type
+          type: string
+          map:
+            "ATDMA": "atdma"
+        - offset: 3
+          field: channel_id
+          type: integer
+        - offset: 4
+          field: symbol_rate
+          type: integer
+          unit: "Ksym/sec"
+        - offset: 5
+          field: frequency
+          type: frequency
+          unit: "Hz"
+        - offset: 6
+          field: power
+          type: float
+          unit: "dBmV"
+      filter:
+        lock_status: "locked"
+      # DOCSIS 3.1 OFDMA: 6 fields per channel
+      # Layout: channel_num | lock_status | profile_ids | channel_id |
+      #         frequency | power
+    - name: "InitUsOfdmaTableTagValue"
+      delimiter: "|"
+      fields_per_channel: 6
+      channel_type: "ofdma"
+      fields:
+        - offset: 1
+          field: lock_status
+          type: lock_status
+        - offset: 3
+          field: channel_id
+          type: integer
+        - offset: 4
+          field: frequency
+          type: frequency
+          unit: "Hz"
+        - offset: 5
+          field: power
+          type: float
+          unit: "dBmV"
+      filter:
+        lock_status: "locked"
+
+system_info:
+  sources:
+    - format: javascript
+      resource: "/DocsisStatus.htm"
+      functions:
+        - name: "InitTagValue"
+          delimiter: "|"
+          fields:
+            - offset: 10
+              field: current_time
+              type: string
+            - offset: 14
+              field: system_uptime
+              type: uptime
+              # Firmware omits "N days " prefix below 24h.
+              format: "[{days} days ]{hours}:{minutes}:{seconds}"
+              # High-level status indicators (green/yellow/red boxes)
+              # Values are numeric codes: 0/1/2 mapped to status strings.
+        - name: "InitCableDiagTagValue"
+          delimiter: "|"
+          fields:
+            - offset: 0
+              field: internet_access
+              type: string
+              map:
+                "0": "Down"
+                "1": "Up"
+            - offset: 1
+              field: ds_power_status
+              type: string
+              map:
+                "0": "Good"
+                "1": "Warning"
+                "2": "Critical"
+            - offset: 2
+              field: ds_snr_status
+              type: string
+              map:
+                "0": "Good"
+                "1": "Warning"
+                "2": "Critical"
+            - offset: 3
+              field: us_power_status
+              type: string
+              map:
+                "0": "Good"
+                "1": "Warning"
+                "2": "Critical"
+            - offset: 4
+              field: ds_partial_service
+              type: string
+              map:
+                "0": "No"
+                "1": "Yes"
+            - offset: 5
+              field: us_partial_service
+              type: string
+              map:
+                "0": "No"
+                "1": "Yes"
+            - offset: 7
+              field: docsis_status
+              type: string
+              map:
+                "0": "Bad"
+                "1": "Operational"
+    - format: javascript
+      resource: "/RouterStatus.htm"
+      functions:
+        - name: "InitTagValue"
+          delimiter: "|"
+          fields:
+            - offset: 0
+              field: hardware_version
+              type: string
+            - offset: 1
+              field: software_version
+              type: string
+
+# DOCSIS 3.1: aggregate QAM-only totals. OFDM LDPC codewords operate
+# at a vastly different scale and are not aggregated.
+aggregate:
+  total_corrected:
+    sum: corrected
+    channels: downstream.qam
+  total_uncorrected:
+    sum: uncorrected
+    channels: downstream.qam

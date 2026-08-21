@@ -62,7 +62,11 @@
 
   "safe_tagvalue_patterns": {
     "_description": "Values that appear in Motorola tagValueList fields and are known-safe (status strings, device types, config values — not credentials).",
+    "_provenance": {
+      "password": "Static help-topic key in the Netgear CM2500 SetPassword_h.htm help page (tagValueList = 'password|0|'). Identical in the pre-sanitization capture, whose recorded login credential is a different value — firmware UI copy, not a credential. Appears in the netgear/cm2500 fixture."
+    },
     "values": [
+      "password",
       "redacted",
       "good",
       "locked",
