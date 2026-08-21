@@ -10,7 +10,7 @@ import contextlib
 import json
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 @dataclass
@@ -34,8 +34,11 @@ def build_routes(
     """Build route table from HAR entries.
 
     Each entry becomes a route keyed by ``(method, normalized_path)``.
-    For duplicate keys, the last successful (status 200) response wins.
-    Non-200 responses are stored only if no 200 exists for that route.
+    For duplicate keys a 200 beats any other status, and among equals
+    the later exchange wins. The capture steps ask for a deliberate
+    wrong-password login before the real one, so a bare-path firmware
+    records two 302s under one key; keeping the first would replay the
+    refusal as the login.
 
     Args:
         har_entries: List of HAR ``log.entries`` dicts.
@@ -79,8 +82,8 @@ def build_routes(
         key = (method, route_path)
         existing = routes.get(key)
 
-        # Prefer 200 responses; for non-200, only store if no entry yet
-        if existing is None or status == 200:
+        # A 200 is never displaced by a later failure; otherwise later wins.
+        if existing is None or status == 200 or existing.status != 200:
             routes[key] = RouteEntry(status=status, headers=headers, body=body)
 
     return routes
@@ -128,6 +131,33 @@ def build_json_body_keys(
         seen[key] = parsed_keys
 
     return {key: value for key, value in seen.items() if key not in multiplexed}
+
+
+def build_login_query_shapes(
+    har_entries: list[dict[str, Any]],
+    login_path: str,
+) -> frozenset[frozenset[str]]:
+    """Query-param name sets the capture recorded on login POSTs to *login_path*.
+
+    Names, never values: a dynamic form action (``?id=NNN``) changes per
+    page load, so value equality against a stale capture would reject
+    correct requests. Empty when no login path is configured or the
+    capture holds no login POST — enforcement needs at least one
+    recorded shape to compare against.
+    """
+    if not login_path:
+        return frozenset()
+    norm = normalize_path(login_path)
+    shapes: set[frozenset[str]] = set()
+    for entry in har_entries:
+        request = entry.get("request", {})
+        if request.get("method", "GET").upper() != "POST":
+            continue
+        parsed = urlparse(request.get("url", ""))
+        if normalize_path(parsed.path) != norm:
+            continue
+        shapes.add(frozenset(parse_qs(parsed.query, keep_blank_values=True)))
+    return frozenset(shapes)
 
 
 def _top_level_keys(text: str) -> frozenset[str] | None:

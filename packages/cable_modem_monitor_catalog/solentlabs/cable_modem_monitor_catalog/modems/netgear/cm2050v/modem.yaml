@@ -8,6 +8,7 @@ default_host: "192.168.100.1"
 auth:
   strategy: form
   action: "/goform/Login"
+  action_source: login_page
   login_page: "/"
   username_field: loginName
   password_field: loginPassword
@@ -18,9 +19,13 @@ auth:
 actions:
   logout:
     type: http
-    method: GET
-    endpoint: "/Logout.htm"
-    requires_session: false
+    method: POST
+    endpoint: "/goform/logout"
+    endpoint_pattern: logout
+    pre_fetch_url: "/Logout.htm"
+    requires_session: true
+    params:
+      nowTime: "0"
 
 hardware:
   docsis_version: "3.1"
@@ -36,7 +41,9 @@ sources:
     — two captures six months apart, both landing on /index.htm"
   logout_action:
     "[#189 CM2050V](https://github.com/solentlabs/cable_modem_monitor/issues/189)
-    — GET /Logout.htm, answering 200, captured at the end of modem-https.har"
+    — Logout.htm captured at the end of modem-https.har: its form posts to
+    /goform/logout?id=N with a hidden nowTime field; the POST itself is not
+    on file (the captured page read unAuth='1' and closed without posting)"
   release_date: "[Netgear press release, September 22, 2020](https://www.businesswire.com/news/home/20200922005367/en/Netgear-Introduces-Industry-first-2.5Gbps-DOCSIS-3.1-Cable-Modems-to-Deliver-Top-Internet-Speeds-to-the-Home) announcing CM2050V availability"
   chipset: "[DSLReports community post](https://www.dslreports.com/forum/r33000298-Netgear-CM2000-vs-Arris-S33-vs-Motorola-MB8611) — same BCM3390 platform as CM2000/CM1200 family"
 
@@ -44,6 +51,8 @@ attribution:
   contributors:
     - github: https://github.com/Dragon1473
       contribution: "HAR capture and testing (Issue #105)"
+    - github: https://github.com/bfurner
+      contribution: "HTTPS HAR capture, local reproduction, and the dynamic form-action diagnosis (Issue #189)"
 
 isps:
   - Comcast
@@ -54,6 +63,9 @@ notes: |
   XSRF_TOKEN cookie set on first GET, sent with all subsequent requests.
   Login page at /, POST to /goform/Login; an accepted login redirects
   to /index.htm, observed in captures six months apart (#105, #189).
+  The login form's action carries a per-page-load ?id= the firmware
+  validates (#189: a bare POST is refused), so action_source reads it
+  off the login page at every login.
   A refused login has not been captured. The success criterion exists
   because without one, any response under HTTP 400 scores as auth
   success, which is how #189 reported working credentials as bad.
@@ -63,6 +75,12 @@ notes: |
   breaker trip. Whether the firmware permits only one login at a time
   is unconfirmed; the declaration is what stops the integration holding
   a session between polls while the question is open.
+  Logout.htm is not the logout: it is an auto-action page whose JS
+  posts its form to /goform/logout?id=N (same per-page id) and, when
+  the page reads unAuth='1', closes the window without posting. Core
+  pre-fetches the page, reads the form action, and posts it. Whether
+  the firmware accepts the form's default nowTime=0 in place of the
+  timestamp the JS would set is unverified on this model.
   Two captures on file. modem.har (#105) is served over plain HTTP on
   port 80; modem-https.har (#189) is the same flow over TLS 1.3 on port
   443, its login redirect naming https://192.168.100.1:443/index.htm.

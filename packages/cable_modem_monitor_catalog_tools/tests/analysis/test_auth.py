@@ -9,6 +9,7 @@ inputs.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from solentlabs.cable_modem_monitor_catalog_tools.analysis import AuthDetail
@@ -597,3 +598,105 @@ class TestFormPbkdf2EmptyGuard:
         assert result.strategy == "form_pbkdf2"
         assert result.confidence == "medium"
         assert not result.fields
+
+
+# =====================================================================
+# Dynamic form action (?id= query on the login POST)
+# =====================================================================
+
+
+def _dynamic_action_entries(*, with_login_page: bool = True) -> list[dict[str, Any]]:
+    """Login POST whose URL carries a per-session query token."""
+    login_page = {
+        "request": {"method": "GET", "url": "http://host/", "headers": []},
+        "response": {
+            "status": 200,
+            "headers": [],
+            "content": {
+                "mimeType": "text/html",
+                "text": '<form action="/goform/Login?id=487192871">'
+                '<input type="text" name="loginName">'
+                '<input type="password" name="loginPassword"></form>',
+            },
+        },
+    }
+    login_post = {
+        "request": {
+            "method": "POST",
+            "url": "http://host/goform/Login?id=487192871",
+            "headers": [{"name": "Content-Type", "value": "application/x-www-form-urlencoded"}],
+            "postData": {
+                "mimeType": "application/x-www-form-urlencoded",
+                "params": [
+                    {"name": "loginName", "value": "admin"},
+                    {"name": "loginPassword", "value": "secret"},
+                ],
+            },
+        },
+        "response": {
+            "status": 302,
+            "headers": [{"name": "Location", "value": "http://host/index.htm"}],
+            "content": {"size": 0, "text": ""},
+        },
+    }
+    return [login_page, login_post] if with_login_page else [login_post]
+
+
+class TestDynamicFormAction:
+    """A query on the login POST is a per-session token, never config.
+
+    The bare path stays in ``action``; whether ``action_source:
+    login_page`` can be emitted depends on the installed Core's FormAuth
+    (#189), so both capability states are pinned here via monkeypatch.
+    """
+
+    def test_emits_action_source_when_core_supports_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Core with action_source: emitted, confidence stays high."""
+        from solentlabs.cable_modem_monitor_catalog_tools.analysis.auth import http as auth_http
+
+        monkeypatch.setattr(auth_http, "_core_supports_action_source", lambda: True)
+        warnings: list[str] = []
+        result = detect_auth(_dynamic_action_entries(), "http", warnings, [], [])
+        assert result.strategy == "form"
+        assert result.fields["action"] == "/goform/Login"
+        assert result.fields["action_source"] == "login_page"
+        assert result.confidence == "high"
+
+    def test_warns_and_downgrades_without_core_support(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Core without action_source: no field, loud warning, medium confidence."""
+        from solentlabs.cable_modem_monitor_catalog_tools.analysis.auth import http as auth_http
+
+        monkeypatch.setattr(auth_http, "_core_supports_action_source", lambda: False)
+        warnings: list[str] = []
+        result = detect_auth(_dynamic_action_entries(), "http", warnings, [], [])
+        assert result.strategy == "form"
+        assert result.fields["action"] == "/goform/Login"
+        assert "action_source" not in result.fields
+        assert result.confidence == "medium"
+        assert any("query" in w and "action_source" in w for w in warnings)
+
+    def test_warns_when_login_page_not_captured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """action_source needs login_page; without one the token is unreachable."""
+        from solentlabs.cable_modem_monitor_catalog_tools.analysis.auth import http as auth_http
+
+        monkeypatch.setattr(auth_http, "_core_supports_action_source", lambda: True)
+        warnings: list[str] = []
+        result = detect_auth(_dynamic_action_entries(with_login_page=False), "http", warnings, [], [])
+        assert result.strategy == "form"
+        assert "action_source" not in result.fields
+        assert result.confidence == "medium"
+        assert any("login page" in w.lower() for w in warnings)
+
+    def test_static_action_unaffected(self) -> None:
+        """A query-free login POST emits neither field nor warning."""
+        entries = _dynamic_action_entries()
+        for entry in entries:
+            entry["request"]["url"] = entry["request"]["url"].split("?", 1)[0]
+        content = entries[0]["response"]["content"]
+        content["text"] = content["text"].replace("?id=487192871", "")
+        warnings: list[str] = []
+        result = detect_auth(entries, "http", warnings, [], [])
+        assert result.strategy == "form"
+        assert "action_source" not in result.fields
+        assert result.confidence == "high"
+        assert not any("action_source" in w for w in warnings)

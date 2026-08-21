@@ -13,6 +13,9 @@ For the integration's core specs, see the
 [Core documentation](../../cable_modem_monitor_core/docs/).
 For the modem data catalog itself, see the
 [Catalog documentation](../../cable_modem_monitor_catalog/docs/).
+Doc-authoring rules — one home per rule, current contract only, how to
+cite another doc — are repo-wide and live in
+[Project docs § Doc Authoring](../../../docs/README.md#doc-authoring).
 
 | Document | Covers |
 | -------- | ------ |

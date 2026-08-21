@@ -132,6 +132,19 @@ never observed on the target hardware, the entry ships as
 Technicolor XB8 (CGM4981COM), issue #101, reconstructed from the XB7
 fixture plus a v3.12.0 diagnostics capture.
 
+When even that diagnostics evidence is missing — the target's own
+capture proves auth and firmware family but its data pages were never
+observed (an unprovisioned bench unit) — a sibling's data-page body
+may be transplanted into the target's real session with no value
+substitution, since no target values exist to substitute. The
+round-trip diffs against the sibling's golden and must match except
+for fields read from pages the target really served. The transplant
+simulates a provisioned unit and certifies nothing about the target's
+data pages; the entry ships `awaiting_verification` and a
+post-provisioning capture replaces the transplanted body and the
+golden. First use: Netgear CM2500, issue #189 — maintainer bench
+session as base, CM3000 DocsisStatus.htm body as template.
+
 **Hybrid (same device, maintainer-declared).** When the evidence for
 one physical device is spread across multiple real captures — e.g.,
 an early capture with intact data endpoints and a later capture of
@@ -198,7 +211,8 @@ If `result.valid is False`: stop and address the issues before going
 further. Validation catches structural problems and missing auth flows
 early — there is no point scanning the fleet or running analysis on a
 bad HAR. Common fix: HAR was captured against an existing session
-(post-auth). Recapture in incognito/private browsing.
+(post-auth). Recapture with the login performed inside the capture —
+har-capture's own chromium window starts with no session.
 
 ## Step 3: Scan Fleet Patterns
 
@@ -318,6 +332,8 @@ For each item in `enrich_result.missing`:
 
 - **hardware.chipset**: web search `"{manufacturer} {model} chipset"`
 - **hardware.docsis_version**: check if OFDM channels detected (= 3.1), else 3.0.
+  With no channel data at all (unprovisioned modem) nothing is inferred —
+  research it from manufacturer specs instead.
   Never conclude 4.0 from channel data alone — D4.0 reuses 3.1's OFDM/OFDMA
   channel types (see MODEM_YAML_SPEC § Hardware for the sourced reference);
   `"4.0"` requires a hardware source — chipset or manufacturer specs

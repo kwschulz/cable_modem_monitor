@@ -59,9 +59,9 @@ def _collector(auth_success: bool = True) -> MagicMock:
     return collector
 
 
-def _recovery(config: MagicMock, collector: MagicMock) -> Recovery:
-    """Build a real Recovery instance bound to the mocks."""
-    return Recovery(collector=collector, modem_config=config)
+def _recovery(config: MagicMock) -> Recovery:
+    """Build a real Recovery instance bound to the mock config."""
+    return Recovery(modem_config=config)
 
 
 def _make_fresh_session_success(token: str = "tok") -> MagicMock:
@@ -86,7 +86,7 @@ def _make_fresh_session_success(token: str = "tok") -> MagicMock:
 def test_raises_when_restart_action_absent() -> None:
     config = _config(has_restart=False)
     collector = _collector()
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     with pytest.raises(RestartNotSupportedError):
         run_restart(collector, config, recovery)
@@ -100,7 +100,7 @@ def test_raises_when_restart_action_absent() -> None:
 def test_success_opens_recovery_window() -> None:
     config = _config()
     collector = _collector()
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     result = run_restart(collector, config, recovery)
 
@@ -113,7 +113,7 @@ def test_success_opens_recovery_window() -> None:
 def test_success_clears_session_once() -> None:
     config = _config()
     collector = _collector()
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     run_restart(collector, config, recovery)
 
@@ -124,7 +124,7 @@ def test_success_clears_session_once() -> None:
 def test_success_authenticates_and_executes_action() -> None:
     config = _config()
     collector = _collector()
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     run_restart(collector, config, recovery)
 
@@ -140,7 +140,7 @@ def test_success_authenticates_and_executes_action() -> None:
 def test_auth_failure_returns_command_failed() -> None:
     config = _config()
     collector = _collector(auth_success=False)
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     result = run_restart(collector, config, recovery)
 
@@ -155,7 +155,7 @@ def test_auth_lockout_returns_command_failed() -> None:
     config = _config()
     collector = _collector()
     collector.authenticate.side_effect = LoginLockoutError("LOCKUP")
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     result = run_restart(collector, config, recovery)
 
@@ -168,7 +168,7 @@ def test_action_exception_returns_command_failed() -> None:
     config = _config()
     collector = _collector()
     collector._session.request.side_effect = RuntimeError("boom")
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     result = run_restart(collector, config, recovery)
 
@@ -181,7 +181,7 @@ def test_clear_session_exception_returns_command_failed() -> None:
     config = _config()
     collector = _collector()
     collector.clear_session.side_effect = RuntimeError("broken")
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     result = run_restart(collector, config, recovery)
 
@@ -201,7 +201,7 @@ def test_restart_while_recovery_active_is_allowed() -> None:
     """
     config = _config()
     collector = _collector()
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     result_first = run_restart(collector, config, recovery)
     assert result_first.success is True
@@ -247,7 +247,7 @@ def test_action_auth_skips_collector_authenticate() -> None:
     """When action_auth is set, collector.authenticate() is never called."""
     config = _config_with_action_auth()
     collector = _collector()
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     with patch(_ACTION_AUTH_PATCH, return_value=_make_fresh_session_success()):
         result = run_restart(collector, config, recovery)
@@ -260,7 +260,7 @@ def test_action_auth_still_clears_collector_session() -> None:
     """Session clear still happens even when action_auth skips collector.authenticate."""
     config = _config_with_action_auth()
     collector = _collector()
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     with patch(_ACTION_AUTH_PATCH, return_value=_make_fresh_session_success()):
         run_restart(collector, config, recovery)
@@ -272,7 +272,7 @@ def test_action_auth_opens_recovery_window() -> None:
     """Per-action auth path still opens a recovery window after success."""
     config = _config_with_action_auth()
     collector = _collector()
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     with patch(_ACTION_AUTH_PATCH, return_value=_make_fresh_session_success()):
         result = run_restart(collector, config, recovery)
@@ -285,7 +285,7 @@ def test_no_action_auth_calls_collector_authenticate() -> None:
     """Without action_auth, collector.authenticate() is called as normal."""
     config = _config()
     collector = _collector()
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     result = run_restart(collector, config, recovery)
 
@@ -312,7 +312,7 @@ def test_action_auth_failure_returns_command_failed() -> None:
     """A refused per-action login never sends the reboot, so the restart failed."""
     config = _config_with_action_auth()
     collector = _collector()
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     with patch(_ACTION_AUTH_PATCH, return_value=_make_fresh_session_login_rejected()):
         result = run_restart(collector, config, recovery)
@@ -331,7 +331,7 @@ def test_action_auth_failure_logs_what_refused_it(caplog: pytest.LogCaptureFixtu
     """
     config = _config_with_action_auth()
     collector = _collector()
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     with (
         patch(_ACTION_AUTH_PATCH, return_value=_make_fresh_session_login_rejected()),
@@ -348,7 +348,7 @@ def test_action_auth_failure_leaves_monitoring_session_intact() -> None:
     """No reboot was dispatched, so there is no stale-cookie risk to clear against."""
     config = _config_with_action_auth()
     collector = _collector()
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     with patch(_ACTION_AUTH_PATCH, return_value=_make_fresh_session_login_rejected()):
         run_restart(collector, config, recovery)
@@ -370,7 +370,7 @@ def test_rejected_restart_request_returns_command_failed() -> None:
     """The modem answering 401 to the reboot POST is a failed restart."""
     config = _config()
     collector = _collector_refusing_the_command()
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     result = run_restart(collector, config, recovery)
 
@@ -383,7 +383,7 @@ def test_rejected_restart_request_logs_the_status(caplog: pytest.LogCaptureFixtu
     """The refusing status reaches the log, where a user can report it."""
     config = _config()
     collector = _collector_refusing_the_command(403)
-    recovery = _recovery(config, collector)
+    recovery = _recovery(config)
 
     with caplog.at_level(logging.ERROR):
         run_restart(collector, config, recovery)

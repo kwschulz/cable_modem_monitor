@@ -86,35 +86,50 @@ def _find_http_action(
     action_name: str,
     warnings: list[str],
 ) -> ActionDetail | None:
-    """Find an HTTP action matching any of the given URL patterns."""
+    """Find an HTTP action matching any of the given URL patterns.
+
+    A POST match outranks an earlier page GET: auto-action pages (a GET
+    whose form JS fires the operative POST) precede that POST in traffic
+    and match the same patterns, but the POST is the action and the page
+    is only its pre-fetch source (Netgear /Logout.htm -> /goform/logout).
+    """
+    first_match: tuple[int, dict[str, Any]] | None = None
     for idx, entry in enumerate(entries):
         req = entry["request"]
-        url = req.get("url", "")
-        method = req.get("method", "")
-        path = path_from_url(url)
+        path = path_from_url(req.get("url", ""))
+        if not any(p.search(path) for p in patterns):
+            continue
+        if first_match is None:
+            first_match = (idx, entry)
+        if req.get("method", "").upper() == "POST":
+            first_match = (idx, entry)
+            break
 
-        if any(p.search(path) for p in patterns):
-            params = parse_form_params(req.get("postData", {}))
-            detail = ActionDetail(
-                type="http",
-                method=method,
-                endpoint=path,
-                params=params,
-            )
-            # A captured page whose form posts to this endpoint is the
-            # pre-fetch source — deterministic, unlike the keyword
-            # suggestion below, which stays warning-only
-            form_page = _find_form_page_for_endpoint(entries, path)
-            if form_page is not None:
-                page_path, form_action = form_page
-                detail.pre_fetch_url = page_path
-                if "?" in form_action:
-                    detail.endpoint_pattern = path.rstrip("/").rsplit("/", 1)[-1]
-            else:
-                _suggest_pre_fetch_url(entries, idx, path, action_name, warnings)
-            return detail
+    if first_match is None:
+        return None
 
-    return None
+    idx, entry = first_match
+    req = entry["request"]
+    path = path_from_url(req.get("url", ""))
+    params = parse_form_params(req.get("postData", {}))
+    detail = ActionDetail(
+        type="http",
+        method=req.get("method", ""),
+        endpoint=path,
+        params=params,
+    )
+    # A captured page whose form posts to this endpoint is the
+    # pre-fetch source; deterministic, unlike the keyword
+    # suggestion below, which stays warning-only
+    form_page = _find_form_page_for_endpoint(entries, path)
+    if form_page is not None:
+        page_path, form_action = form_page
+        detail.pre_fetch_url = page_path
+        if "?" in form_action:
+            detail.endpoint_pattern = path.rstrip("/").rsplit("/", 1)[-1]
+    else:
+        _suggest_pre_fetch_url(entries, idx, path, action_name, warnings)
+    return detail
 
 
 def _find_form_page_for_endpoint(

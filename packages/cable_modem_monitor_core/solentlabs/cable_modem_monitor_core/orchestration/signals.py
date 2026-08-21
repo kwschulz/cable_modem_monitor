@@ -27,7 +27,7 @@ class CollectorSignal(Enum):
 
     OK = "ok"
     AUTH_FAILED = "auth_failed"
-    AUTH_UNAVAILABLE = "auth_unavailable"
+    AUTH_UNAVAILABLE = "auth_unavailable"  # 5xx or a declared busy body; not a credential verdict
     AUTH_LOCKOUT = "auth_lockout"
     CONNECTIVITY = "connectivity"
     LOAD_ERROR = "load_error"

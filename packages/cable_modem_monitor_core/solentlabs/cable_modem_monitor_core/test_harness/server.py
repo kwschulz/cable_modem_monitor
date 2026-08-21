@@ -16,13 +16,19 @@ import threading
 import zlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import TYPE_CHECKING, Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 if TYPE_CHECKING:
     from ..models.modem_config import ModemConfig
 
 from .auth import create_auth_handler
-from .routes import build_json_body_keys, build_routes, normalize_path, unrecorded_body_keys
+from .routes import (
+    build_json_body_keys,
+    build_login_query_shapes,
+    build_routes,
+    normalize_path,
+    unrecorded_body_keys,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -96,7 +102,7 @@ class _MockHandler(BaseHTTPRequestHandler):
         method = lookup_method
         auth = server.auth_handler
 
-        if self._reject_dishonest_request(server, method, path, body):
+        if self._reject_dishonest_request(server, method, path, parsed.query, body):
             return
 
         # Login request — handle auth and serve response
@@ -224,6 +230,7 @@ class _MockHandler(BaseHTTPRequestHandler):
         server: HARMockServer,
         method: str,
         path: str,
+        query: str,
         body: bytes,
     ) -> bool:
         """Fail requests the capture cannot honestly answer; True when one was failed.
@@ -251,6 +258,24 @@ class _MockHandler(BaseHTTPRequestHandler):
                 self._fail_request(
                     f"request body keys not in the capture: {', '.join(sorted(invented))} "
                     f"(captured: {', '.join(sorted(captured_keys))})"
+                )
+                return True
+
+        # A login POST must carry a query shape the capture recorded.
+        # Names, not values — a dynamic form action's id changes per page
+        # load. Tier-3 route lookup would otherwise hand a bare-path POST
+        # the response the firmware only gave the ?id= request, which is
+        # how a missing query parameter stayed green for four months
+        # (#189) — the query-string edition of the #82 body-key rule.
+        if method == "POST" and path == server.login_action and server.login_query_shapes:
+            sent = frozenset(parse_qs(query, keep_blank_values=True))
+            if sent not in server.login_query_shapes:
+                captured = " | ".join(
+                    ",".join(sorted(shape)) or "(none)" for shape in sorted(server.login_query_shapes, key=sorted)
+                )
+                self._fail_request(
+                    f"login POST query params not in the capture: "
+                    f"sent [{','.join(sorted(sent)) or '(none)'}], captured [{captured}]"
                 )
                 return True
 
@@ -307,7 +332,10 @@ def _find_route(
     1. Exact match ``(method, route_path)`` — query string included.
     2. Path-only ``(method, path)`` — request has query, route doesn't.
     3. Scan for route whose path portion matches — route has query
-       (e.g. HAR captured ``?status=1``), request doesn't.
+       (e.g. HAR captured ``?status=1``), request doesn't. The later
+       capture wins, as in ``build_routes``: a dynamic login action
+       records each attempt under its own ``?id=``, and the capture
+       steps put the refused attempt first.
 
     Tiers 1-2 handle query-string-specific routes (e.g.
     ``/setup.cgi?todo=X``) and dynamic URL token suffixes.
@@ -340,12 +368,13 @@ def _find_route(
         if route is not None:
             return route
 
-    # Tier 3: route has query, request doesn't — scan by path prefix
+    # Tier 3: route has query, request doesn't — scan by path, later wins
+    matched = None
     for (m, rp), r in routes.items():
         if m == method and rp.split("?", 1)[0] == path:
-            return r
+            matched = r
 
-    return None
+    return matched
 
 
 def _is_login_get(
@@ -504,6 +533,8 @@ class HARMockServer(HTTPServer):
         self.routes = build_routes(har_entries)
         self.json_body_keys = build_json_body_keys(har_entries)
         self.auth_handler = create_auth_handler(modem_config, har_entries)
+        self.login_action = normalize_path(_extract_login_action(modem_config))
+        self.login_query_shapes = build_login_query_shapes(har_entries, self.login_action)
         self.login_page = _extract_login_page(modem_config)
         self.token_prefix = _extract_token_prefix(modem_config)
         self.post_login_endpoints = _extract_post_login_endpoints(modem_config)
@@ -537,6 +568,14 @@ def _extract_login_page(modem_config: ModemConfig | None) -> str:
     if modem_config is None or modem_config.auth is None:
         return ""
     return getattr(modem_config.auth, "login_page", "") or ""
+
+
+def _extract_login_action(modem_config: ModemConfig | None) -> str:
+    """Return the login POST path (``auth.action`` or ``auth.login_endpoint``)."""
+    if modem_config is None or modem_config.auth is None:
+        return ""
+    auth = modem_config.auth
+    return getattr(auth, "action", "") or getattr(auth, "login_endpoint", "") or ""
 
 
 def _extract_token_prefix(modem_config: ModemConfig | None) -> str:

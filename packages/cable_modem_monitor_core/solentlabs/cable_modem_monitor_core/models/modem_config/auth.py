@@ -81,6 +81,7 @@ class FormAuth(AuthStrategyBase):
     model_config = ConfigDict(extra="forbid")
     strategy: Literal["form"]
     action: str
+    action_source: Literal["config", "login_page"] = "config"
     method: str = "POST"
     username_field: str = "username"
     password_field: list[str] = Field(default=["password"])
@@ -102,6 +103,14 @@ class FormAuth(AuthStrategyBase):
         if isinstance(v, str):
             return [v]
         return v
+
+    @model_validator(mode="after")
+    def _action_source_needs_its_page(self) -> FormAuth:
+        # The source is read off the pre-fetched page; without one there is
+        # nothing to read and every login would take the fallback.
+        if self.action_source == "login_page" and not self.login_page:
+            raise ValueError("action_source: login_page requires login_page")
+        return self
 
 
 class FormNonceAuth(AuthStrategyBase):
@@ -170,6 +179,7 @@ class FormPbkdf2Auth(AuthStrategyBase):
     csrf_header: str = ""
     cookie_name: str = ""
     login_success: dict[str, Any] = Field(default_factory=dict)
+    login_busy: dict[str, Any] = Field(default_factory=dict)
 
     display_name: ClassVar[str] = "Form Login (PBKDF2)"
     transport: ClassVar[str] = "http"

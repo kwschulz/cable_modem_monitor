@@ -1,0 +1,56 @@
+{
+  "_description": "Auto-action logout page: the GET serves a form whose JS fires the operative POST. Both appear in traffic and both match logout patterns; the POST is the logout, the page is its pre-fetch source.",
+  "_entries": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "http://192.168.100.1/Logout.htm",
+        "headers": []
+      },
+      "response": {
+        "status": 200,
+        "headers": [],
+        "content": {
+          "mimeType": "text/html",
+          "text": "<html><body onload=\"doLoad()\"><form name=\"formname\" method=\"POST\" action='/goform/logout?id=1743986852'><input name=\"nowTime\" type=\"hidden\" value=\"0\"></form></body></html>"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "url": "http://192.168.100.1/goform/logout?id=1743986852",
+        "headers": [],
+        "postData": {
+          "mimeType": "application/x-www-form-urlencoded",
+          "params": [
+            {
+              "name": "nowTime",
+              "value": "1700000000000"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 302,
+        "headers": [
+          {
+            "name": "Location",
+            "value": "/Logout.htm"
+          }
+        ]
+      }
+    }
+  ],
+  "_expected_logout": {
+    "type": "http",
+    "method": "POST",
+    "endpoint": "/goform/logout",
+    "params": {
+      "nowTime": "1700000000000"
+    },
+    "pre_fetch_url": "/Logout.htm",
+    "endpoint_pattern": "logout"
+  },
+  "_expected_restart": null
+}

@@ -8,13 +8,13 @@ files; this document explains the choices that shaped them.
 
 | Section | What it covers |
 |---------|----------------|
-| [Package Boundaries](#package-boundaries) | Runtime package split, dependency direction, where each piece lives, specs citing the catalog rather than restating its coverage |
+| [Package Boundaries](#package-boundaries) | Runtime package split, dependency direction, where each piece lives, pruning Core's exported surface, specs citing the catalog rather than restating its coverage |
 | [Core Schema Model](#core-schema-model) | What enters Core's schema vs what stays user-side; catalog stores source-faithful strings and maps only observed values, display normalizes; derived and dynamic fields, health as its own structure |
 | [Transport and Constraint Model](#transport-and-constraint-model) | Transport as protocol identifier, generated constraint tables, implicit capabilities, shared protocol primitives, config as parameters |
 | [Auth Architecture](#auth-architecture) | Strategy discreteness, session lifecycle, failure logging, credential reconfiguration as reconstruction |
 | [Parsing Architecture](#parsing-architecture) | Three roles, per-section format selection, parser.py as escape hatch |
 | [Session and Action Model](#session-and-action-model) | Signal/policy separation, session reuse, restart-only actions |
-| [Recovery Architecture](#recovery-architecture) | Restart vs recovery, generic timing, reboot-signal vote, observer callback |
+| [Recovery Architecture](#recovery-architecture) | Restart vs recovery, generic timing, reboot-signal vote, observer callback, no session preservation |
 | [Testing Strategy](#testing-strategy) | HAR replay, conformance gates every modem, greenfield from specs, fresh-context capture |
 | [Onboarding](#onboarding) | MCP for deterministic steps, catalog_tools owns the spec, inference vs assembly, no fallback |
 | [Config Flow](#config-flow) | Cross-directory grouping, variant label design |
@@ -182,6 +182,37 @@ operate on catalog YAML files at authoring time (fleet scanning,
 trial parsing, normalization) live in `catalog_tools`. Catalog's
 runtime package never grows a second top-level symbol without a
 decision update.
+
+### Core's exported surface is pruned toward stability
+
+**Decision:** Core is published to PyPI, and today the HA integration
+in this repo is its only consumer. That is a reason to remove unused
+API, not to preserve it. Parameters nothing reads, exports nothing
+imports, and hooks nothing calls are deleted when found.
+
+**Rationale:** Sole consumership is a window, not a permanent state.
+Every unused parameter or export is interface that a future consumer
+could bind to and that we would then owe compatibility on, in
+exchange for no present benefit. Removing one now costs a single
+commit and a test sweep; removing it after an external consumer
+exists costs a deprecation cycle. Pruning while it is free is what
+produces a surface worth calling stable.
+
+**Constrains:** Dead API is removed, not deprecated, while we remain
+the sole consumer. This covers everything the repo holds and can
+sweep in one commit — Python signatures, module exports, Core's data
+schema, catalog YAML. We own those, and a breaking change to them is
+a migration we perform ourselves.
+
+The exception is not ownership but recoverability: state already
+written to a user's machine, such as config entries holding
+credentials we cannot re-derive. Breaking those costs the user, not
+us. The test for doing it anyway is whether the break reaches a base
+we do not expect to break again — a one-time migration that ends the
+churn can be worth the disruption, the same disruption spent on a
+change we may revisit cannot. A break of that kind belongs before a
+stable release rather than after one. When an external consumer of
+Core appears, the first paragraph needs revisiting too.
 
 ### Pydantic is a Core runtime dep
 
@@ -599,14 +630,10 @@ a cross-boundary dependency: the auth manager needed session config to
 execute its own login flow, violating the separation it was designed
 to enforce.
 
-v3.12 and v3.13 stored `session_cookie_name` on the auth config
-(`UrlTokenSessionConfig`). The v3.14 spec moved it to a separate
-`session` section for cleaner YAML structure, but this broke
-`url_token` pre-login cookie clearing and body token fallback — two
-protocol behaviors that only surfaced during real-hardware testing
-(SB8200, Issue #81). The move back restores the boundary that
-v3.12/v3.13 got right: auth owns credentials and their artifacts,
-session owns lifecycle.
+Cleaner YAML structure is not sufficient reason to move it. Carrying
+`cookie_name` under `session` breaks `url_token` pre-login cookie
+clearing and body-token fallback — two protocol behaviors that
+surface only against real hardware (SB8200, Issue #81).
 
 Similarly, `token_prefix` is part of the `url_token` auth protocol —
 the auth flow produces a body token, and `token_prefix` describes how
@@ -615,8 +642,7 @@ not session.
 
 **Evidence:** Journal entries 2026-01-16 (resource-loader-architecture)
 and 2026-01-27 (session-cookie-clearing-browser-behavior) document the
-original discovery. The v3.14 gap analysis (2026-04-01) identified the
-regression.
+discovery.
 
 **Constrains:** No `logout_url` or `logout_required` convenience
 fields. `actions.logout` presence drives single-session semantics;
@@ -627,16 +653,16 @@ cookies leave `cookie_name` empty (default).
 ### Session concurrency — SSOT via `actions.logout`
 
 **Decision:** `actions.logout` presence is the single indicator that a modem
-requires single-session discipline. `session.max_concurrent` (present in v3.13
-and earlier) has been removed from `SessionConfig`.
+requires single-session discipline. `SessionConfig` carries no concurrency
+field.
 
-**Rationale:** `max_concurrent: 1` and `actions.logout` always had to travel
-together — one without the other was either dead config (logout without
-`max_concurrent: 1` never fired) or a lockout footgun (`max_concurrent: 1`
-without logout held the session open and blocked the user's web UI between
-polls). Two fields encoding one constraint is redundant and a footgun source.
-The XB10 onboarding gap made this concrete: the intake pipeline had configured
-a logout block without `max_concurrent: 1`, silently disabling logout.
+**Rationale:** A separate `max_concurrent: 1` would always have to travel
+with `actions.logout` — one without the other is either dead config (logout
+that never fires) or a lockout footgun (a session held open, blocking the
+user's web UI between polls). Two fields encoding one constraint is redundant
+and a footgun source: an intake pipeline that writes a logout block without
+the paired field silently disables logout, which is what the XB10 onboarding
+gap surfaced.
 
 **New field:** `HttpAction.requires_session: bool = False` distinguishes
 unauthenticated logout endpoints (`false` — can clear any active server-side
@@ -664,6 +690,33 @@ the current settings; `rg requires_session` over `modems/` is the list.
 **Constrains:** Any modem with `actions.logout` configured is treated as
 single-session. There is no mechanism to configure logout without triggering
 single-session semantics.
+
+### Session-busy is a declared criterion, not a Core error table
+
+**Decision:** When firmware refuses a login without judging the
+credential but does so under a 2xx, the catalog entry declares the
+refusal body (`form_pbkdf2.login_busy`) and the strategy reports
+`AuthResult.busy`. The collector classifies `busy` as
+`AUTH_UNAVAILABLE`, the same signal a 5xx earns (UC-87a). Core holds no
+table of firmware busy codes.
+
+**Rationale:** The status rule cannot see a 200 refusal, and without a
+declared criterion that refusal fails the success check and trips the
+breaker on the first poll (#120: the CGA6444VF's `MSG_LOGIN_150`
+reached the reauth form, whose own validation login caused the next
+refusal). Matching `MSG_LOGIN_150` in Core would encode one modem's
+vocabulary as Core behavior; declaring it keeps the config a parameter
+and the matcher shared with `login_success` (§ Config fields are
+parameters, not implementations).
+
+**Constrains:** The busy check runs before the success check, since
+both are body criteria and the busy body also fails success. A strategy
+that gains busy detection does it through a declared criterion on its
+own model and `AuthResult.busy`, never through a string table; the
+collector branches on the flag and the status, never on the strategy.
+The value is sourced from the firmware's client JS, which is the only
+place the refusal body is observable when every captured login
+succeeded.
 
 ### Post-login 401 is read per auth strategy
 
@@ -1256,22 +1309,21 @@ observe the reboot. Anything that happens after the command lands is
 handled by a separate "recovery" module that owns polling cadence
 for a bounded window.
 
-**Rationale:** The earlier design conflated the *command* (send a
-reboot instruction) with the *recovery observation* (watch until the
-modem is operational again). These are separable concerns with
-different contracts. The command is transactional — it either
-dispatches cleanly or it doesn't. Recovery is a polling-cadence
-concern — HOW OFTEN to poll for a while after a disruption. Merging
-them produced a restart method that blocked for three minutes,
-needed cancellation plumbing, owned its own probe loop, and
-duplicated work that external-reboot detection also needed.
+**Rationale:** The *command* (send a reboot instruction) and the
+*recovery observation* (watch until the modem is operational again)
+are separable concerns with different contracts. The command is
+transactional — it either dispatches cleanly or it doesn't. Recovery
+is a polling-cadence concern — HOW OFTEN to poll for a while after a
+disruption. Conflating them produces a restart method that blocks for
+three minutes, needs cancellation plumbing, owns its own probe loop,
+and duplicates work that external-reboot detection also needs.
 
-Splitting them lets each do one thing. Restart becomes ~5 lines.
-Recovery becomes a single module that any trigger (command, observed
-outage, heuristic) can ask to enter a window. The Status sensor
-always reflects real snapshot state (Unreachable → ranging → Operational);
-no synthetic "Restarting…" label. The restart button returns quickly;
-the dashboard tells the user what's actually happening.
+Split, each does one thing. Restart is ~5 lines. Recovery is a single
+module that any trigger (command, observed outage, heuristic) can ask
+to enter a window. The Status sensor always reflects real snapshot
+state (Unreachable → ranging → Operational); no synthetic
+"Restarting…" label. The restart button returns quickly; the
+dashboard tells the user what's actually happening.
 
 **Constrains:** Restart never waits, never times out, never
 cancels. Its only failure mode is `command_failed` (auth or action
@@ -1292,11 +1344,10 @@ with the same behavior.
 **Rationale:** The modem's physical state — "not fully operational,
 expected to return" — is the same regardless of what triggered it.
 Modeling it as one thing with multiple triggers matches reality.
-The earlier design had two implementations (inline wait for
-commanded, flag+observer for detected) running in parallel; they
-shared a deadline constant, differed in everything else, and
-required the orchestrator to arbitrate between them. The unified
-module removes the arbitration.
+Splitting it by trigger would mean two implementations (inline wait
+for commanded, flag plus observer for detected) sharing a deadline
+constant, differing in everything else, and forcing the orchestrator
+to arbitrate between them. One module removes the arbitration.
 
 Triggers differ only in how they recognize "recovery is needed."
 The recovery module's reaction is the same: open a window, let
@@ -1316,9 +1367,8 @@ no knowledge of recovery.
 `Recovery` in `orchestration/recovery.py` (e.g. `WINDOW_SECONDS`).
 Modem YAML and action models carry no timing fields.
 
-**Rationale:** Per-modem tuning was tried in v3.14 alpha and
-removed. "How long a reboot takes" varies by firmware version, CMTS
-load, and DOCSIS ranging — none of which are modem-class
+**Rationale:** "How long a reboot takes" varies by firmware version,
+CMTS load, and DOCSIS ranging — none of which are modem-class
 characteristics. Bench-tuning values per modem doesn't scale:
 firmware updates silently invalidate them, and a value too short or
 too long produces misleading UX or wasted polls.
@@ -1385,6 +1435,32 @@ callbacks must be safe to call from the Core poll thread. Any
 "check until condition" loops triggered by Core state live in HA
 using its native scheduling primitives.
 
+### Recovery does not preserve sessions
+
+**Decision:** Polls inside a recovery window handle sessions exactly
+as any other poll does. On modems with `actions.logout` the
+collector logs out and clears the session after each successful
+poll, so every window poll re-authenticates. `Recovery` holds no
+collector reference and has no say in session lifecycle.
+
+**Rationale:** `actions.logout` is the sole indicator of
+single-session discipline (see § Session concurrency — SSOT via
+`actions.logout`), where holding a session open between polls is a
+lockout footgun that also blocks the user's own web UI. A window
+polls faster, so preserving a session inside one is that same
+footgun at a higher rate.
+
+Firmware behaviour agrees. The MB7621 expires sessions server-side
+in about ten minutes, shorter than its poll interval, so its logout
+exists to release the session and a preserved one would be dropped
+anyway. Sustained login/fetch/logout at its normal cadence draws no
+lockout.
+
+**Constrains:** Recovery owns cadence, nothing else. Anything
+proposing to vary auth or session behavior because a window is open
+is out of scope for this module and needs its own decision here
+first.
+
 ---
 
 ### Recovery detection derives from `data_path_up`, not state enumeration
@@ -1408,10 +1484,9 @@ Unreachable for a full scan interval). Lists of states model
 positions; recovery is a property of a path, and intermediate
 readings the list never anticipated each became a bug. ICMP_BLOCKED
 counts as up because the ICMP contradiction override (UC-59a)
-guarantees every such reading is confirmed by a live TCP handshake —
-this supersedes the "conservative for v1" exclusion from 2026-04-01,
-which predated that guarantee and was recorded only in a test-table
-comment rather than here. Up → up transitions (RESPONSIVE ↔
+guarantees every such reading is confirmed by a live TCP handshake.
+Excluding it would only be defensible without that guarantee.
+Up → up transitions (RESPONSIVE ↔
 ICMP_BLOCKED) are not edges, so ping-filtering networks get backoff
 clearing without spurious forced polls.
 
@@ -1462,10 +1537,10 @@ author minutes; catching it at promotion costs a contributor days.
 **Constrains:**
 
 - A new catalog entry must be conformant on the commit that adds it.
-  Landing drift and cleaning it up at confirmation time is no longer
-  available, and downgrading `status:` no longer exempts an entry.
-- Contributor PRs can now fail on a conformance rule during intake.
-  The failure message names the field, the rule, and the value, and
+  Landing drift and cleaning it up at confirmation time is not an
+  option, and downgrading `status:` does not exempt an entry.
+- Contributor PRs can fail on a conformance rule during intake. The
+  failure message names the field, the rule, and the value, and
   directs to the parser rather than the golden.
 
 ---
@@ -1512,9 +1587,9 @@ the `modem-intake` skill. The user handles approval.
 not dependent on LLM reasoning for correctness. The config constraints
 (transport, auth, format) form the decision framework. Ambiguity is a
 hard stop, not a guess. The split is what matters, not the delivery
-mechanism: an earlier iteration exposed the same steps through an MCP
-server, and carving `catalog_tools` out of Core replaced it with plain
-modules a contributor can also call directly.
+mechanism: `catalog_tools` exposes the steps as plain modules a
+contributor can call directly, and any other front end would have to
+respect the same split.
 
 **Constrains:** HAR validation is a gate — post-auth-only HARs,
 missing auth flows, and ambiguous transports halt analysis. No guessing.
@@ -1712,10 +1787,10 @@ home attached.** That threshold, not `!= 200`: `form_nonce` and
 `form_cbn` post with `allow_redirects=False`, and `basic`'s challenge
 probe is a `GET` with the same, so a 302 is a normal answer on all
 three. Attaching is what makes `AUTH_UNAVAILABLE` reachable — the
-collector reads the attached status to tell a modem declining to serve
-(UC-87a) from a rejected credential, so a strategy that drops it forces
-a busy modem to read as a wrong password and trip the breaker on the
-first poll. `none` and `basic` are declared exceptions in
+collector reads the attached status, or `AuthResult.busy`, to tell a
+modem declining to serve (UC-87a) from a rejected credential, so a
+strategy that drops it forces a busy modem to read as a wrong password
+and trip the breaker on the first poll. `none` and `basic` are declared exceptions in
 `test_login_5xx_fails_and_attaches_response`, never silent absences.
 
 The `basic` exception holds exactly while no challenge probe is
@@ -1738,6 +1813,87 @@ session-specific state from it — hidden fields, crypto parameters,
 cookies, or tokens. The pre-fetch establishes session cookies as a side
 effect, but its primary purpose is reading the data the handshake
 needs. Discarding the response body is a bug.
+
+### How to extend an existing auth strategy
+
+A behaviour a strategy does not yet have is added as a **declared field
+on that strategy**, never as a change to its default path. With the
+field absent, every entry that does not declare it behaves identically
+to before. This is
+[MODEM_YAML_SPEC.md § Principles](MODEM_YAML_SPEC.md#principles)
+applied to code: no modem's configuration affects another, so an
+extension that changes what a modem without the field puts on the
+wire is the wrong shape however well it serves the modem that needed
+it.
+
+1. **Check whether Core already implements the behaviour.** Extraction,
+   interpolation, and pre-fetch patterns exist on both the auth and the
+   action side, and the two sides have needed the same thing before.
+   Reuse means lifting the existing implementation into a shared module
+   and calling it from both — two implementations of one behaviour
+   drift, and the second one usually misses a case the first learned.
+2. **Add the field to the strategy's model** in
+   `models/modem_config/auth.py`. The models set `extra="forbid"`, so
+   the model change is what makes the YAML expressible at all.
+3. **Gate the behaviour on the field** in `auth/{strategy}.py`. The
+   unset path must be the code that ran before.
+4. **Keep the field a parameter, not an implementation** — a keyword
+   Core wraps, not a regex the contributor writes. See
+   [MODEM_YAML_SPEC.md § Config Fields Are Parameters, Not Implementations](MODEM_YAML_SPEC.md#config-fields-are-parameters-not-implementations).
+5. **Document the field** in the strategy's field table in
+   `MODEM_YAML_SPEC.md`, and link the behaviour's owning section when it
+   is shared with actions.
+6. **An opt-in extraction that finds nothing falls back to the static
+   config value and logs an ERROR.** A silent fallback recreates the
+   condition the field exists to fix: the request still goes somewhere,
+   and nothing reports that the declared behaviour did not happen.
+
+**A fleet audit is part of the change, not review feedback on it.**
+Before proposing the field, resolve the behaviour against every entry
+that would reach it — for an auth extension, every `modem*.yaml`
+declaring that strategy, and among those the ones whose config supplies
+the input the behaviour reads. The captures in `test_data/` answer this
+without hardware. Entries that would take a different code path than
+they do today are the blast radius, and they belong in the proposal.
+
+**Test coverage is two assertions, not one.** That the behaviour works
+when declared is the easy half. The half that decides whether the
+change can merge is that the request built *without* the field is the
+request built today, asserted per affected strategy. Patterns:
+[CODE_REVIEW.md § Test File Standards](../../../docs/CODE_REVIEW.md#test-file-standards).
+
+Replay tests substitute for neither. The mock server gates access by
+session state, serves the login page from the capture, and matches the
+login POST by path and query-param names only —
+[ARCHITECTURE.md § Test Harness: Same Pipeline, HAR Replay](ARCHITECTURE.md#test-harness-same-pipeline-har-replay)
+states what that does and does not verify.
+
+### Auth extraction sources are named, not flagged
+
+`FormAuth.action_source` names where the login POST URL comes from —
+`config` or `login_page`. The field contract is
+[MODEM_YAML_SPEC.md § form](MODEM_YAML_SPEC.md#form); these are the
+constraints it creates, and they bind any later strategy that reads part
+of its handshake off a page.
+
+- **A new source is a new value, never a second flag.** Paired booleans
+  admit combinations that contradict each other, which is why
+  `893ea7df` retired `session.max_concurrent`. `form_sjcl` already reads
+  auth parameters out of JS assignments, so a source that is a page but
+  not a form element is a shape this fleet can reach.
+- **`form_selector` is the only form-identification mechanism in auth
+  config.** It already scopes hidden-field discovery. A second
+  identifier — keyword, pattern, index — could disagree with it about
+  which form on the page is the login form, and nothing would reconcile
+  them.
+- **An extracted URL resolves against the page it was read from.**
+  Concatenating onto the base URL breaks relative actions, and the
+  fleet has one: `sercomm/dm1000` publishes `action="setup.cgi"` while
+  its config declares `/setup.cgi`.
+- **A declared source that yields nothing logs an ERROR and falls back
+  to the static value.** Failing the login would break modems the
+  static URL still satisfies; silence would hide a config defect for as
+  long as the fallback happened to work.
 
 ### How to add a transport
 

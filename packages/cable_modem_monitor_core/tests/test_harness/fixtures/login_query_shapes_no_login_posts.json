@@ -1,0 +1,15 @@
+{
+  "_description": "Other paths and methods do not contribute: GET at the login path, POST elsewhere",
+  "login_path": "/goform/login",
+  "expected_shapes": [],
+  "_entries": [
+    {
+      "request": { "method": "GET", "url": "http://192.168.100.1/goform/login?id=1" },
+      "response": { "status": 200, "headers": [], "content": { "text": "" } }
+    },
+    {
+      "request": { "method": "POST", "url": "http://192.168.100.1/other.cgi?x=1" },
+      "response": { "status": 200, "headers": [], "content": { "text": "" } }
+    }
+  ]
+}

@@ -47,13 +47,12 @@ notes: |
   32 SC-QAM downstream channels plus OFDM (DOCSIS 3.1).
   Provides system uptime and time data (unlike CM600).
   Reboot via RouterStatus.htm with buttonSelect values and dynamic session ID.
+  Provisioned speed is not parsed: DocsisStatus.htm's
+  InitProvRateTableUpdateView() reads ds_prov_rate/us_prov_rate, but the
+  InitProvRateTableTagValue() body loads by XHR and no capture on file
+  holds it. A capture taken with the current guide (one Refresh click per
+  status page) would supply it.
 
-# TODO: New HAR capture needed for provisioned speed
-# /DocsisStatus.htm has InitProvRateTableUpdateView() referencing
-# tagValues["ds_prov_rate"] / tagValues["us_prov_rate"], but the
-# InitProvRateTableTagValue() function is absent — data loads via XHR
-# not captured in the current HAR. Re-capture with har-capture 0.5.1+
-# (XHR quiescence) to pick up the XHR response.
 references:
   issues:
     - "[#38 — [Modem Request] Netgear CM2000](https://github.com/solentlabs/cable_modem_monitor/issues/38)"

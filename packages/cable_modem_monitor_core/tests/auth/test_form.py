@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 from unittest.mock import patch
 
 import pytest
@@ -12,6 +13,7 @@ from solentlabs.cable_modem_monitor_core.auth.form import (
     _check_success,
     _discover_hidden_fields,
     _encode_password,
+    _login_action_from_page,
 )
 from solentlabs.cable_modem_monitor_core.models.modem_config.auth import (
     FormAuth,
@@ -616,3 +618,212 @@ def test_discovery_reruns_on_every_attempt(session: requests.Session) -> None:
         assert mock_discover.call_count == len(rotating)
         posted = [c.kwargs["data"]["csrf_token"] for c in mock_req.call_args_list if "data" in c.kwargs]
         assert posted == ["first-token", "second-token"], f"stale token reposted: {posted}"
+
+
+# ---------------------------------------------------------------------------
+# action_source: login_page — the POST URL is read off the pre-fetched page
+# ---------------------------------------------------------------------------
+
+_DYNAMIC_ACTION_PAGE = (
+    "<html><body>"
+    "<form name='loginform' method='POST' action='/goform/login?id=111'>"
+    "<input type='hidden' name='loginName' value='admin'>"
+    "</form>"
+    "</body></html>"
+)
+
+_RELATIVE_ACTION_PAGE = "<html><body><form action='setup.cgi' method='POST'></form></body></html>"
+
+_TWO_FORMS_WITH_ACTIONS = (
+    "<html><body>"
+    "<form id='search' action='/search'></form>"
+    "<form id='login' action='/goform/login?id=222'></form>"
+    "</body></html>"
+)
+
+_FORM_WITHOUT_ACTION = "<html><body><form name='loginform' method='POST'></form></body></html>"
+
+_FORM_WITH_EMPTY_ACTION = "<html><body><form name='loginform' action=''></form></body></html>"
+
+# ┌────────────────────────────┬────────────────┬─────────────────────────┬──────────────────────────────┐
+# │ page                       │ selector       │ page url                │ resolved action              │
+# ├────────────────────────────┼────────────────┼─────────────────────────┼──────────────────────────────┤
+# │ dynamic action, first form │ ""             │ http://h/               │ http://h/goform/login?id=111 │
+# │ dynamic action, selector   │ form[name=...] │ http://h/               │ http://h/goform/login?id=111 │
+# │ two forms, selector picks  │ #login         │ http://h/               │ http://h/goform/login?id=222 │
+# │ relative action            │ ""             │ http://h/cgi-bin/l.html │ http://h/cgi-bin/setup.cgi   │
+# │ no form on page            │ ""             │ http://h/               │ None                         │
+# │ selector matches nothing   │ #missing       │ http://h/               │ None                         │
+# │ selector matches non-form  │ body           │ http://h/               │ None                         │
+# │ form without action        │ ""             │ http://h/               │ None                         │
+# │ form with empty action     │ ""             │ http://h/               │ None                         │
+# │ empty page                 │ ""             │ http://h/               │ None                         │
+# └────────────────────────────┴────────────────┴─────────────────────────┴──────────────────────────────┘
+
+LOGIN_ACTION_CASES = [
+    pytest.param(_DYNAMIC_ACTION_PAGE, "", "http://h/", "http://h/goform/login?id=111", id="first_form"),
+    pytest.param(
+        _DYNAMIC_ACTION_PAGE, "form[name='loginform']", "http://h/", "http://h/goform/login?id=111", id="selector"
+    ),
+    pytest.param(
+        _TWO_FORMS_WITH_ACTIONS, "#login", "http://h/", "http://h/goform/login?id=222", id="selector_picks_form"
+    ),
+    pytest.param(_RELATIVE_ACTION_PAGE, "", "http://h/cgi-bin/login.html", "http://h/cgi-bin/setup.cgi", id="relative"),
+    pytest.param(_NO_FORMS_PAGE, "", "http://h/", None, id="no_form"),
+    pytest.param(_DYNAMIC_ACTION_PAGE, "#missing", "http://h/", None, id="selector_no_match"),
+    pytest.param(_DYNAMIC_ACTION_PAGE, "body", "http://h/", None, id="selector_not_a_form"),
+    pytest.param(_FORM_WITHOUT_ACTION, "", "http://h/", None, id="no_action_attribute"),
+    pytest.param(_FORM_WITH_EMPTY_ACTION, "", "http://h/", None, id="empty_action"),
+    pytest.param("", "", "http://h/", None, id="empty_page"),
+]
+
+
+@pytest.mark.parametrize("html,selector,page_url,expected", LOGIN_ACTION_CASES)
+def test_login_action_from_page(html: str, selector: str, page_url: str, expected: str | None) -> None:
+    """The form's action resolves against the page URL; anything short of a usable one is None."""
+    assert _login_action_from_page(html, selector, page_url) == expected
+
+
+def _dynamic_config(action_source: str = "login_page") -> FormAuth:
+    return FormAuth(
+        strategy="form",
+        action="/goform/login",
+        action_source=action_source,  # type: ignore[arg-type]  # both literals under test
+        login_page="/",
+        username_field="loginName",
+        password_field="loginPassword",  # type: ignore[arg-type]  # validator normalizes str→list
+        success=FormSuccess(redirect="/index.htm"),
+    )
+
+
+class TestActionSourceLoginPage:
+    """End-to-end through the mock server: the POST goes where the page says."""
+
+    def test_posts_to_the_action_read_from_the_page(self, session: requests.Session) -> None:
+        """The per-page-load ?id= travels from the served page onto the login POST."""
+        entries, modem_config = load_auth_fixture("har_form_login_dynamic_action.json")
+
+        with HARMockServer(entries, modem_config=modem_config) as server:
+            manager = FormAuthManager(_dynamic_config())
+            manager.configure_session(session, {})
+            with patch.object(session, "request", wraps=session.request) as mock_req:
+                result = manager.authenticate(session, server.base_url, "admin", "pw")
+
+        assert result.success is True, result.error
+        assert mock_req.call_args.args[1] == f"{server.base_url}/goform/login?id=111"
+
+    def test_config_source_posts_the_bare_action(self, session: requests.Session) -> None:
+        """Left at config, the same firmware refuses the bare POST — the #189 failure, now visible in replay."""
+        entries, modem_config = load_auth_fixture("har_form_login_dynamic_action.json")
+
+        with HARMockServer(entries, modem_config=modem_config) as server:
+            manager = FormAuthManager(_dynamic_config(action_source="config"))
+            manager.configure_session(session, {})
+            result = manager.authenticate(session, server.base_url, "admin", "pw")
+
+        assert result.success is False
+        assert "500" in result.error
+
+    def test_refused_credentials_are_reported(self, session: requests.Session) -> None:
+        """A 302 back to the login page is a refusal, told apart from success by the Location target alone."""
+        entries, modem_config = load_auth_fixture("har_form_login_dynamic_action_refused.json")
+
+        with HARMockServer(entries, modem_config=modem_config) as server:
+            manager = FormAuthManager(_dynamic_config())
+            manager.configure_session(session, {})
+            result = manager.authenticate(session, server.base_url, "admin", "pw")
+
+        assert result.success is False
+        assert "redirect mismatch" in result.error.lower()
+
+    def test_action_is_reread_on_every_login(self, session: requests.Session) -> None:
+        """The id rotates per page serve, so a second login never reuses the first id."""
+        entries, modem_config = load_auth_fixture("har_form_login_dynamic_action.json")
+        served = [f"{{base}}/goform/login?id={n}" for n in (1, 2)]
+
+        with HARMockServer(entries, modem_config=modem_config) as server:
+            manager = FormAuthManager(_dynamic_config())
+            manager.configure_session(session, {})
+            rotating = [s.format(base=server.base_url) for s in served]
+            with (
+                patch(_ACTION_PATCH, side_effect=rotating) as mock_read,
+                patch.object(session, "request", wraps=session.request) as mock_req,
+            ):
+                for _ in rotating:
+                    assert manager.authenticate(session, server.base_url, "admin", "pw").success is True
+
+        assert mock_read.call_count == len(rotating)
+        posted = [c.args[1] for c in mock_req.call_args_list if c.args[0] == "POST"]
+        assert posted == rotating, f"stale action reposted: {posted}"
+
+
+_ACTION_PATCH = "solentlabs.cable_modem_monitor_core.auth.form._login_action_from_page"
+
+# Each case is a page the source cannot resolve against. The login must
+# still go to the configured action, and the defect must be logged at
+# ERROR: a modem the static URL satisfies keeps working, and a declared
+# source that stopped resolving never does so silently.
+FALLBACK_CASES = [
+    pytest.param(_NO_FORMS_PAGE, "", id="no_form"),
+    pytest.param(_DYNAMIC_ACTION_PAGE, "#missing", id="selector_no_match"),
+    pytest.param(_FORM_WITHOUT_ACTION, "", id="no_action_attribute"),
+]
+
+
+@pytest.mark.parametrize("page,selector", FALLBACK_CASES)
+def test_unresolvable_source_falls_back_to_configured_action(
+    page: str,
+    selector: str,
+    session: requests.Session,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """ERROR plus fallback to ``action``; the login itself is not failed."""
+    entries, modem_config = load_auth_fixture("har_form_login_with_hidden_fields.json")
+
+    with HARMockServer(entries, modem_config=modem_config) as server:
+        config = FormAuth(
+            strategy="form",
+            action="/goform/login",
+            action_source="login_page",
+            login_page="/login.html",
+            form_selector=selector,
+        )
+        manager = FormAuthManager(config)
+        manager.configure_session(session, {})
+
+        prefetch = requests.Response()
+        prefetch.status_code = 200
+        prefetch._content = page.encode()
+        prefetch.url = f"{server.base_url}/login.html"
+        with (
+            patch.object(session, "get", return_value=prefetch),
+            patch.object(session, "request", wraps=session.request) as mock_req,
+            caplog.at_level(logging.ERROR, logger="solentlabs.cable_modem_monitor_core.auth.form"),
+        ):
+            result = manager.authenticate(session, server.base_url, "admin", "pw")
+
+    assert result.success is True, result.error
+    assert mock_req.call_args.args[1] == f"{server.base_url}/goform/login"
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1
+    assert "/login.html" in errors[0].getMessage()
+    assert "/goform/login" in errors[0].getMessage()
+
+
+def test_config_source_never_reads_the_page(session: requests.Session, caplog: pytest.LogCaptureFixture) -> None:
+    """Entries leaving action_source at config are unaffected: no read, no log, even with a form-less page."""
+    entries, modem_config = load_auth_fixture("har_form_login_with_hidden_fields.json")
+
+    with HARMockServer(entries, modem_config=modem_config) as server:
+        config = FormAuth(strategy="form", action="/goform/login", login_page="/login.html")
+        manager = FormAuthManager(config)
+        manager.configure_session(session, {})
+        with (
+            patch(_ACTION_PATCH) as mock_read,
+            caplog.at_level(logging.ERROR),
+        ):
+            result = manager.authenticate(session, server.base_url, "admin", "pw")
+
+    assert result.success is True
+    mock_read.assert_not_called()
+    assert not [r for r in caplog.records if r.levelno == logging.ERROR]

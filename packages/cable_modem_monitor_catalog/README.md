@@ -21,9 +21,9 @@ Auto-generated index of the v3.14 modem catalog.
 
 - `modem.yaml` — Single source of truth (manufacturer, model, hardware, ISPs, status)
 
-**39 modems, 44 configurations** (27 ✅ confirmed, 17 ⏳ awaiting)
+**40 modems, 45 configurations** (27 ✅ confirmed, 18 ⏳ awaiting)
 
-**Auth strategies:** form (14), none (8), hnap (7), basic (5), url_token (3), form_cbn (2), form_pbkdf2 (2), form_nonce (1), form_sjcl (1), bearer (1)
+**Auth strategies:** form (15), none (8), hnap (7), basic (5), url_token (3), form_cbn (2), form_pbkdf2 (2), form_nonce (1), form_sjcl (1), bearer (1)
 
 ## Directory Structure
 
@@ -76,6 +76,7 @@ packages/cable_modem_monitor_catalog/.../modems/
 | Netgear | [CM1200](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/netgear/cm1200/modem.yaml) | 3.1 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | [BCM3390](#bcm3390) | ![none](https://img.shields.io/badge/-none-808080?style=flat-square "No Authentication") | [![COM](https://img.shields.io/badge/-COM-5588aa?style=flat-square "Comcast")](#comcast) [![SPEC](https://img.shields.io/badge/-SPEC-6699aa?style=flat-square "Spectrum (Charter)")](#spectrum) [![COX](https://img.shields.io/badge/-COX-cc9966?style=flat-square "Cox Communications")](#cox) | CM1200 | ⏳ Awaiting |
 | Netgear | [CM2000](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/netgear/cm2000/modem.yaml) | 3.1 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | [BCM3390](#bcm3390) | ![form](https://img.shields.io/badge/-form-4A7FB8?style=flat-square "Form Login") | [![COM](https://img.shields.io/badge/-COM-5588aa?style=flat-square "Comcast")](#comcast) [![COX](https://img.shields.io/badge/-COX-cc9966?style=flat-square "Cox Communications")](#cox) [![SPEC](https://img.shields.io/badge/-SPEC-6699aa?style=flat-square "Spectrum (Charter)")](#spectrum) [![XFI](https://img.shields.io/badge/-XFI-aa7788?style=flat-square "Xfinity")](#comcast) | CM2000 | ⏳ Awaiting |
 | Netgear | [CM2050V](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/netgear/cm2050v/modem.yaml) | 3.1 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | [BCM3390](#bcm3390) | ![form](https://img.shields.io/badge/-form-4A7FB8?style=flat-square "Form Login") | [![COM](https://img.shields.io/badge/-COM-5588aa?style=flat-square "Comcast")](#comcast) [![XFI](https://img.shields.io/badge/-XFI-aa7788?style=flat-square "Xfinity")](#comcast) | CM2050V | ✅ Confirmed |
+| Netgear | [CM2500](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/netgear/cm2500/modem.yaml) | 3.1 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") |  | ![form](https://img.shields.io/badge/-form-4A7FB8?style=flat-square "Form Login") | [![COM](https://img.shields.io/badge/-COM-5588aa?style=flat-square "Comcast")](#comcast) [![COX](https://img.shields.io/badge/-COX-cc9966?style=flat-square "Cox Communications")](#cox) [![SPEC](https://img.shields.io/badge/-SPEC-6699aa?style=flat-square "Spectrum (Charter)")](#spectrum) | CM2500 | ⏳ Awaiting |
 | Netgear | [CM3000](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/netgear/cm3000/modem.yaml) | 3.1 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") |  | ![form](https://img.shields.io/badge/-form-4A7FB8?style=flat-square "Form Login") | [![COM](https://img.shields.io/badge/-COM-5588aa?style=flat-square "Comcast")](#comcast) [![COX](https://img.shields.io/badge/-COX-cc9966?style=flat-square "Cox Communications")](#cox) [![SPEC](https://img.shields.io/badge/-SPEC-6699aa?style=flat-square "Spectrum (Charter)")](#spectrum) [![XFI](https://img.shields.io/badge/-XFI-aa7788?style=flat-square "Xfinity")](#comcast) | CM3000 | ✅ Confirmed |
 | Netgear | [CM600](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/netgear/cm600/modem.yaml) | 3.0 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | [BCM3384](#bcm3384) | ![basic](https://img.shields.io/badge/-basic-C07820?style=flat-square "Basic Authentication") | [![COM](https://img.shields.io/badge/-COM-5588aa?style=flat-square "Comcast")](#comcast) [![COX](https://img.shields.io/badge/-COX-cc9966?style=flat-square "Cox Communications")](#cox) [![SPEC](https://img.shields.io/badge/-SPEC-6699aa?style=flat-square "Spectrum (Charter)")](#spectrum) [![TWC](https://img.shields.io/badge/-TWC-7799aa?style=flat-square "Time Warner Cable")](#twc) | CM600 | ⏳ Awaiting |
 | Sagemcom | [F3896LG-VMB](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems/sagemcom/f3896lg-vmb/modem.yaml) | 3.1 | ![HTML](https://img.shields.io/badge/-HTML-E34C26?style=flat-square "Standard web scraping") | [BCM3390](#bcm3390) | ![none](https://img.shields.io/badge/-none-808080?style=flat-square "No Authentication") | [![VM](https://img.shields.io/badge/-VM-aa4466?style=flat-square "Virgin Media")](#virgin) | F3896LG-VMB<br>Hub 5<br>SuperHub 5 | ✅ Confirmed |
@@ -141,6 +142,7 @@ DOCSIS 3.1
 ├── 2023  Compal      CH8978E    ░░░░░░░░░░░░░░░░████   3yr  Current
 ├── 2023  CommScope   G54        ░░░░░░░░░░░░░░░░████   3yr  Current
 ├── 2023  ARRIS       SB8200     ░░░░░░░░░░░░░░░░████   3yr  Current
+├── 2024  Netgear     CM2500     ░░░░░░░░░░░░░░░░░███   2yr  Current
 ├── 2024  Netgear     CM3000     ░░░░░░░░░░░░░░░░░███   2yr  Current
 └── 2024  Arris       S34        ░░░░░░░░░░░░░░░░░███   2yr  Current
 
@@ -206,4 +208,4 @@ _Scale: 2010-2026 (16 years)_
 
 ---
 
-Generated by `scripts/generate_catalog_index.py` from 45 modem configs ([source](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/scripts/generate_catalog_index.py)).
+Generated by `scripts/generate_catalog_index.py` from 46 modem configs ([source](https://github.com/solentlabs/cable_modem_monitor/blob/main/packages/cable_modem_monitor_catalog/scripts/generate_catalog_index.py)).

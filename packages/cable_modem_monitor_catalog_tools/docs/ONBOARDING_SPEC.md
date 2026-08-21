@@ -435,6 +435,16 @@ Check HAR entries for login flow:
   └── Cannot determine → HARD STOP
 ```
 
+**Dynamic form action.** A query string on the login POST URL is a
+per-session token published in the login form's `action` (Netgear
+`?id=`), never config — `action` always gets the bare path. When the
+capture includes the login page and the installed Core's `FormAuth`
+accepts `action_source` (#189), the analyzer emits
+`action_source: login_page`; otherwise it warns and downgrades
+confidence to `medium`, because the firmware may reject a bare-action
+POST. See `MODEM_YAML_SPEC.md` § `form` (the **Dynamic POST URLs**
+passage) for the runtime contract.
+
 #### `form_pbkdf2` — detecting `login_success`
 
 Most firmware signals a failed login via a truthy `error` field in the
@@ -470,6 +480,11 @@ Values may be string, integer, or boolean — matched by equality against
 the parsed JSON response. If the login response body is absent from the
 HAR or encrypted, omit `login_success` and flag for contributor
 verification.
+
+Intake does not emit `login_busy` (`MODEM_YAML_SPEC.md` § `form_pbkdf2`).
+A capture records the browser succeeding, so the busy body is never in
+it; the criterion comes from the firmware's own login JS, where the
+busy branch names the field and value it keys on.
 
 ### Phase 3: Session Detection
 
@@ -510,6 +525,12 @@ Scan HAR for logout and restart flows:
 | POST with pre-fetch page (extract dynamic endpoint) | Add `pre_fetch_url` and `endpoint_pattern` |
 | HNAP action with logout/session-end semantics | `actions.logout: { type: hnap, action_name: "<name>" }` |
 | No logout visible in HAR | Omit `actions.logout`. Note in the generated YAML that logout behavior could not be confirmed from the HAR. |
+
+An observed POST outranks an earlier observed page GET. Auto-action
+pages — a GET whose form JS fires the operative POST (Netgear
+`/Logout.htm` → `/goform/logout`) — precede that POST in traffic and
+match the same patterns; the POST is the logout, and the page becomes
+its `pre_fetch_url` via the form-evidence rule below.
 
 #### Restart
 
@@ -1185,7 +1206,7 @@ gaps by searching the web using the manufacturer and model as search terms.
 
 | Field | Search strategy | Fallback |
 |-------|----------------|----------|
-| `hardware.docsis_version` | Search "{manufacturer} {model} specifications" or FCC filing. Also infer from HAR: if OFDM/OFDMA channels are present in data pages, the modem is at least DOCSIS 3.1. DOCSIS 4.0 cannot be inferred from wire data — it reuses 3.1's OFDM/OFDMA channel types ([Averna, DOCSIS 4.0 Overview](https://insight.averna.com/en/resources/blog/the-flavors-of-docsis-4-0)) — so set `"4.0"` only from hardware sources (chipset, manufacturer specs). | Infer from channel data if possible; flag if ambiguous |
+| `hardware.docsis_version` | Search "{manufacturer} {model} specifications" or FCC filing. Also infer from HAR: if OFDM/OFDMA channels are present in data pages, the modem is at least DOCSIS 3.1. Inference needs observed channels — a capture with no channel sections (unprovisioned modem) infers nothing and reports the field missing, because "no OFDM" only means 3.0 when channels were seen. DOCSIS 4.0 cannot be inferred from wire data — it reuses 3.1's OFDM/OFDMA channel types ([Averna, DOCSIS 4.0 Overview](https://insight.averna.com/en/resources/blog/the-flavors-of-docsis-4-0)) — so set `"4.0"` only from hardware sources (chipset, manufacturer specs). | Infer from channel data if possible; flag if ambiguous |
 | `hardware.chipset` | Search "{manufacturer} {model} chipset" or "{model} teardown". FCC filings, iFixit teardowns, and DSLReports forums are common sources. | Omit — chipset is optional |
 | `hardware.release_date` | Search "{manufacturer} {model} release" or "{model} launch". Prefer a manufacturer press release or ISP rollout announcement; an FCC grant date or dated manufacturer manual is an acceptable proxy when labeled as such in `sources.release_date`. Feeds the catalog README timeline — entries without it are omitted from that rendering. | Omit and note the gap — never guess a year |
 | `brands` | User-visible brand names from the box or retail listings (e.g., SB8200 → "Surfboard", the CommScope-made G54 → "Arris"). Also check firmware brand fields in the HAR (e.g., `customer`). Brands become manufacturer-dropdown choices and appear in the model line's parenthetical, so entries must be names users actually see, and must be sourced. | Omit if no branding found |
@@ -1341,6 +1362,8 @@ coordinator skips missing hooks.
 | Condition | Message |
 |-----------|---------|
 | No logout flow in HAR | "No logout endpoint observed in HAR. If this modem has single-session limits, a logout action will be needed." |
+| No parseable data sections | "no parseable data sections detected" — auth and actions still analyzed; no parser can be generated (common on unprovisioned modems serving placeholder pages). |
+| Dynamic login action, no Core support | "login POST ... carries a query string" — per-session token; without `action_source` support (#189) the bare-action config may be rejected. Confidence drops to `medium`. |
 | HMAC algorithm uncertain (HNAP) | "HNAP HMAC algorithm cannot be confirmed from HAR. Defaulting to `md5`. Verify with contributor." |
 | Restart not in HAR | "No restart flow observed in HAR. `actions.restart` omitted. Can be added later from modem documentation." |
 | parser.py generated | "parser.py was generated for: [reasons]. Review the post-processing logic for correctness." |
@@ -1562,6 +1585,9 @@ pipeline uses, but against HAR content rather than a live server.
 
 `golden_file_json` is the canonical serialization of `golden_file` (`sort_keys=True`, `indent=2`, `ensure_ascii=False`). Always write this string directly to `modem.expected.json` — never re-serialize `golden_file` yourself, which loses the ordering guarantee.
 
+An empty or absent parser.yaml (analyze_har found no data sections)
+returns a single legible error naming that state — never a traceback.
+
 The channel counts and field lists are returned separately so the LLM can
 sanity-check before writing ("Found 16 downstream, 4 upstream, system
 info has uptime + firmware version — does that look right?").
@@ -1600,6 +1626,11 @@ golden file dict, HAR file path, optional parser.py string
   "errors": []
 }
 ```
+
+**Validation gate — complete package only:** An empty or absent
+parser.yaml refuses the write with an error before anything touches
+disk — a partial package (modem.yaml written, then a crash) looks
+half-onboarded and confuses every later step.
 
 **Validation gate — login_page fixture consistency:** Before writing any
 files, the tool checks that form-auth modems with `login_page` configured

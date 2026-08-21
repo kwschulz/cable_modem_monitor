@@ -943,9 +943,9 @@ and which slipped to stub.
 Anchor counts operate at resource grain. One level down, a parse can
 succeed — anchors fulfilled, channels extracted — while an individual
 `system_info` field that parser.yaml explicitly maps produces nothing.
-That state was previously invisible: an absent source key was skipped
-without logging, and a failed type conversion logged only at DEBUG.
-Field outcomes give it a home in diagnostics.
+Without a record of its own that state is invisible: an absent source
+key is skipped silently, and a failed type conversion reaches only
+DEBUG. Field outcomes give it a home in diagnostics.
 
 For each field mapped in `system_info.sources`, the parse pass
 reports one of three outcomes:

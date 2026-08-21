@@ -78,6 +78,11 @@ class AuthResult:
             sanitized failure detail.
         response_url: URL path the login response corresponds to.
             May differ from the login URL if a redirect occurred.
+        busy: The modem declined to serve the login without judging
+            the credential, signalled in a 2xx body the catalog entry
+            declares (``login_busy``). The collector classifies it
+            ``AUTH_UNAVAILABLE``, as it does a 5xx (UC-87a). Only
+            meaningful with ``success=False``.
 
     **Reuse contract — load-bearing.** ``response`` and ``response_url``
     advertise an auth-response-reuse opportunity to the loader, which
@@ -105,6 +110,7 @@ class AuthResult:
     auth_context: AuthContext = field(default_factory=AuthContext)
     response: requests.Response | None = None
     response_url: str = ""
+    busy: bool = False
 
 
 class BaseAuthManager(abc.ABC):

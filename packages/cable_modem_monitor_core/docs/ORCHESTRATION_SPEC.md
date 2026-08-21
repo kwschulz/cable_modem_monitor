@@ -189,7 +189,7 @@ class CollectorSignal(Enum):
 
     OK = "ok"                          # Collection completed — modem_data is populated
     AUTH_FAILED = "auth_failed"        # Wrong credentials or strategy mismatch
-    AUTH_UNAVAILABLE = "auth_unavailable"  # Login answered 5xx: modem busy, not a credential verdict
+    AUTH_UNAVAILABLE = "auth_unavailable"  # Login answered 5xx or a declared busy body: modem busy, not a credential verdict
     AUTH_LOCKOUT = "auth_lockout"      # Firmware anti-brute-force triggered
     CONNECTIVITY = "connectivity"      # Connection refused, timeout, DNS failure
     LOAD_ERROR = "load_error"          # HTTP error on data page (5xx, 404)
@@ -351,8 +351,7 @@ Auth managers must include the ``requests.Response`` on their
 failure ``AuthResult`` so the collector can render the detail.
 
 See ARCHITECTURE_DECISIONS.md § "Auth-failure detail via single
-WARNING log" for the design rationale (replaces an earlier session-
-adapter capture mechanism that was over-engineered for the goal).
+WARNING log" for the design rationale.
 
 #### AuthResult Reuse Contract (success path)
 
@@ -1162,10 +1161,10 @@ def apply(self, result: ModemResult) -> ConnectionStatus:  # SignalPolicy
             return ConnectionStatus.AUTH_FAILED
 
         case CollectorSignal.AUTH_UNAVAILABLE:
-            # UC-87a. The modem answered "try later" (5xx); it did not
-            # judge the credential. No streak, no breaker, no session
-            # clear, at any repetition count — a threshold would only
-            # delay the wrong answer.
+            # UC-87a. The modem answered "try later" (5xx, or a body the
+            # entry declares busy); it did not judge the credential. No
+            # streak, no breaker, no session clear, at any repetition
+            # count — a threshold would only delay the wrong answer.
             return ConnectionStatus.UNREACHABLE
 
         case CollectorSignal.AUTH_LOCKOUT:
@@ -1322,7 +1321,9 @@ attempt, circuit trips immediately. User sees error, opens a GitHub
 issue or reconfigures.
 
 **Transient auth failure:**
-Modem is busy and declines to serve the login (5xx).
+Modem is busy and declines to serve the login: a 5xx, or a response
+body the entry declares busy (`login_busy`, MODEM_YAML_SPEC
+§ `form_pbkdf2`).
 
 ```text
 Poll N:   AUTH_UNAVAILABLE — unreachable (streak unchanged, circuit closed)
@@ -2150,10 +2151,11 @@ While `recovery.active` is True:
 - Polls run normally — no short-circuit, no special guard. The
   orchestrator doesn't know it's in a recovery window when it
   returns a snapshot.
-- The collector preserves its session across polls (implemented via
-  `skip_logout=True` on `collector.execute()`). Rapid polling
-  without logout + re-auth avoids hammering firmware anti-brute-force
-  thresholds.
+- Session handling is exactly what a normal poll does. On modems
+  with `actions.logout` the collector logs out and clears the
+  session after each successful poll, so every window poll
+  re-authenticates (see ARCHITECTURE_DECISIONS § Recovery
+  Architecture → Recovery does not preserve sessions).
 - If the session dies mid-window (LOAD_AUTH observed), the normal
   signal policy kicks in — session is cleared, next poll
   re-authenticates fresh. The window continues.
@@ -2193,10 +2195,10 @@ render it honestly.
 
 ### Timing
 
-Recovery timing is **generic, not per-modem**. Bench-tuning per
-modem was tried and removed; DOCSIS ranging variance is already
-handled adaptively by polling through the window at a short
-cadence.
+Recovery timing is **generic, not per-modem**. DOCSIS ranging
+variance is handled adaptively by polling through the window at a
+short cadence, which is what bench-tuning per modem would otherwise
+try to approximate.
 
 | Constant | Default | Purpose |
 |----------|---------|---------|
@@ -2269,7 +2271,6 @@ outages still enter recovery through their own paths.
 class Recovery:
     def __init__(
         self,
-        collector: ModemDataCollector,
         modem_config: ModemConfig,
         *,
         on_state_change: Callable[[], None] | None = None,
@@ -2277,12 +2278,7 @@ class Recovery:
         """Initialize the recovery module.
 
         Args:
-            collector: Used to pass ``skip_logout=True`` during window
-                polls (the orchestrator controls the actual call; the
-                recovery module only sets a flag the orchestrator
-                reads).
-            modem_config: Read for model name (logging) and for any
-                future per-modem recovery opt-out.
+            modem_config: Read for the model name in log events.
             on_state_change: Callback fired on False→True and True→False
                 transitions. Runs on the poll thread; callbacks must
                 be thread-safe. None disables notification.

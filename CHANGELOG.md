@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.22] - 2026-08-21
+
+### Added
+
+- **Netgear CM2500 added to the catalog.** Form auth with the
+  per-page-load login-form action, logout, and restart come from
+  maintainer bench captures of an unprovisioned unit and were exercised
+  through Home Assistant on that hardware: the login lands on
+  `/index.htm` and every system-info field parses. The unit never had a
+  plant signal, so channel parsing rides on a declared reconstruction
+  from the CM3000's capture (same firmware family), and the entry is
+  awaiting verification until a provisioned CM2500 owner shares
+  diagnostics. (Related to #189)
+
+### Fixed
+
+- **Netgear CM2050V and CM3000: the integration can log in again.** The
+  firmware publishes a per-page-load `?id=` in its login form's action
+  and refuses a POST without it, so the integration's login was rejected
+  every time while a browser's worked. Polls succeeded only after a
+  browser on the same network had signed in, because this firmware
+  authenticates by source address rather than by cookie (bench-confirmed
+  on a CM2500), which is why every report described "works after I log
+  in, then stops." `form` auth gains `action_source: login_page`, which
+  reads the form's action off the login page at every login; a page with
+  no form, no matching form, or no action attribute logs an error and
+  falls back to the configured action, so entries that do not opt in
+  are unchanged. The CM3000 also gains the success criterion it lacked,
+  so a refused login is reported at the login rather than one step later
+  as a login page at the data URL. Confirmed on a CM2050V by the
+  reporting contributor and on a bench CM2500. (Related to #189)
+
+- **Netgear CM3000 no longer holds a session between polls.** Its entry
+  declared no logout because the original capture never visited the
+  logout page. It now declares the logout its sibling CM2050V's capture
+  shows, the Logout.htm form's POST, sourced as family evidence, which
+  puts it on the single-session path: log out after each poll and before
+  a same-poll retry. Whether the firmware accepts the form's default
+  timestamp is unverified on this model. (Related to #189)
+
+- **Catalog tools: intake handles per-session login tokens and captures
+  from an unprovisioned modem.** A query string on the login POST is
+  emitted as `action_source: login_page` instead of a bare action at
+  high confidence. An observed logout POST outranks the auto-action page
+  that precedes it, which becomes its `pre_fetch_url`. A capture with no
+  data pages gets one terminal state: a warning from analysis, a legible
+  refusal from the golden and package writers, and no partial package
+  left on disk; `docsis_version` is reported missing rather than guessed
+  as 3.0. The replay harness now serves the captured login page before
+  any session exists, so a login that reads that page can be certified,
+  and when a capture records a refused login before the accepted one it
+  replays the later exchange. (Related to #189)
+
+- **A busy single-session modem no longer reads as a wrong password.**
+  Some firmware refuses a second login with a normal HTTP 200 and a
+  message in the body instead of a 5xx. That refusal failed the login
+  check, stopped polling after one failure and opened the
+  re-authentication form, whose own test login took the only session
+  slot and caused the next refusal (#120, Technicolor CGA6444VF). A
+  catalog entry can now declare the refusal body (`login_busy` on
+  `form_pbkdf2`); a matching response is treated like a 5xx, the modem
+  reports unreachable, and polling continues until the slot frees.
+  Modems that do not declare it are unaffected.
+
 ## [3.14.0-beta.21] - 2026-08-10
 
 ### Added

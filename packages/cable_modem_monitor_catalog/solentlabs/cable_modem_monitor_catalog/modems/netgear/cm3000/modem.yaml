@@ -8,10 +8,24 @@ default_host: "192.168.100.1"
 auth:
   strategy: form
   action: "/goform/Login"
+  action_source: login_page
   login_page: "/"
   username_field: loginName
   password_field: loginPassword
   cookie_name: "XSRF_TOKEN"
+  success:
+    redirect: "/index.htm"
+
+actions:
+  logout:
+    type: http
+    method: POST
+    endpoint: "/goform/logout"
+    endpoint_pattern: logout
+    pre_fetch_url: "/Logout.htm"
+    requires_session: true
+    params:
+      nowTime: "0"
 
 hardware:
   docsis_version: "3.1"
@@ -20,7 +34,17 @@ hardware:
 status: confirmed
 
 sources:
-  auth_config: "[#127 Netgear CM3000](https://github.com/solentlabs/cable_modem_monitor/issues/127)"
+  auth_config:
+    "[#127 Netgear CM3000](https://github.com/solentlabs/cable_modem_monitor/issues/127)
+    — modem.har: login form action /goform/Login?id=N, accepted login
+    302 to /index.htm"
+  logout_action:
+    "[#189 CM2050V](https://github.com/solentlabs/cable_modem_monitor/issues/189)
+    — family evidence, not this model's capture: modem.har (#127) ends at
+    /RouterStatus.htm without visiting Logout.htm. Its index.htm links
+    Logout.htm through the same gui_logout() as the CM2050V, whose
+    modem-https.har shows that page posting /goform/logout?id=N with a
+    hidden nowTime field"
   release_date: "[Netgear press release, March 12, 2024](https://www.businesswire.com/news/home/20240312800246/en/NETGEAR-Unveils-Next-Generation-of-Connectivity-with-the-Nighthawk-DOCSIS-3.1-High-Speed-Internet-Cable-Modem) announcing Nighthawk CM3000 U.S. availability"
 
 attribution:
@@ -41,11 +65,23 @@ notes: |
   XSRF_TOKEN cookie set on first GET, sent with all subsequent requests.
   Login page at /, POST to /goform/Login with loginName/loginPassword.
   md5.js loaded on login page but password sent plaintext.
-
-# TODO: New HAR capture needed for provisioned speed
-# Same XHR pattern as CM2000/CM2050V — InitProvRateTableUpdateView()
-# exists but InitProvRateTableTagValue() data loads via XHR not in
-# current capture. Re-capture with har-capture 0.5.1+ (XHR quiescence).
+  The login form's action carries a per-page-load ?id= (same firmware
+  line as the CM2050V, where #189 showed a bare POST is refused), so
+  action_source reads it off the login page at every login. The
+  success criterion matches the captured accepted login; without one
+  a refused login answering 302 scored as success and surfaced one
+  step later as a login page at the data URL (#127).
+  actions.logout is declared from family evidence, not this model's
+  capture: modem.har never visits Logout.htm. The declaration puts the
+  entry on Core's single-session path (logout after each poll, logout
+  before a same-poll auth retry) instead of holding a session between
+  polls. Whether the CM3000 firmware accepts the POST, and the form's
+  default nowTime=0, is unverified on this model.
+  Provisioned speed is not parsed: DocsisStatus.htm's
+  InitProvRateTableUpdateView() reads ds_prov_rate/us_prov_rate, but the
+  InitProvRateTableTagValue() body loads by XHR and no capture on file
+  holds it. A capture taken with the current guide (one Refresh click per
+  status page) would supply it.
 
 references:
   issues:

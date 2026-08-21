@@ -22,7 +22,7 @@ class TestVersion:
         Use: python scripts/release.py <version>
         The script updates const.py, manifest.json, and this file.
         """
-        assert VERSION == "3.14.0-beta.21"
+        assert VERSION == "3.14.0-beta.22"
 
     def test_startup_log_message_format(self):
         """The startup log line includes the version string."""

@@ -1,0 +1,23 @@
+{
+  "_description": "Bare login POST plus a data GET with an incidental query; the GET does not contribute a shape",
+  "login_path": "/goform/login",
+  "expected_shapes": [[]],
+  "_entries": [
+    {
+      "request": { "method": "POST", "url": "http://192.168.100.1/goform/login" },
+      "response": {
+        "status": 302,
+        "headers": [{ "name": "Location", "value": "http://192.168.100.1/index.htm" }],
+        "content": { "text": "" }
+      }
+    },
+    {
+      "request": { "method": "GET", "url": "http://192.168.100.1/status.htm?refresh=1" },
+      "response": {
+        "status": 200,
+        "headers": [],
+        "content": { "text": "<html>ch</html>" }
+      }
+    }
+  ]
+}

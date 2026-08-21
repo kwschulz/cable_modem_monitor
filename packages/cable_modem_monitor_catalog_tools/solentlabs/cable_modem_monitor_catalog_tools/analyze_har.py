@@ -114,6 +114,17 @@ def analyze_har(
     # Phase 5-6: Format detection and field mapping
     sections = detect_sections(entries, transport_result.transport, warnings, hard_stops, fleet=fleet)
 
+    # An unprovisioned modem serves placeholder pages, so auth analyzes
+    # cleanly while sections come back empty; without this warning the
+    # contributor first learns of it as a failure three tools later.
+    if not sections:
+        warnings.append(
+            "WARNING: no parseable data sections detected. The capture's data "
+            "pages are missing or empty (an unprovisioned modem serves "
+            "placeholder pages). Auth and actions were analyzed; a parser "
+            "cannot be generated from this capture."
+        )
+
     # Post-analysis: JS endpoint discovery
     detect_uncaptured_endpoints(entries, warnings)
 

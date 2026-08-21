@@ -221,7 +221,9 @@ for the full schema.
    password (`ConnectionError` and `Timeout` on auth abort the poll and
    report `unreachable`). The same reasoning extends to HTTP status:
    5xx means the modem declined to serve the request, not that it
-   examined the credential and rejected it. These emit
+   examined the credential and rejected it. So does a response body
+   the catalog entry declares busy, for firmware that refuses under
+   HTTP 200. These emit
    `AUTH_UNAVAILABLE`, never touch the auth streak, and never reach a
    credential prompt no matter how many polls in a row they occur —
    some causes (ISP customer care holding the session) are outside the

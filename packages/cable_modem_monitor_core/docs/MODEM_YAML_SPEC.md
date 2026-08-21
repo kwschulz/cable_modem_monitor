@@ -308,7 +308,8 @@ auth:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `action` | string | required | Form POST URL |
+| `action` | string | required | Form POST URL. Used directly unless `action_source` names another source, and the fallback whenever that source yields nothing. |
+| `action_source` | enum | `config` | Where the POST URL comes from. `config` uses `action`. `login_page` reads the `action` attribute of the form `form_selector` identifies on the pre-fetched page, resolved against that page's URL. Requires `login_page`. |
 | `method` | string | `POST` | HTTP method |
 | `username_field` | string | `"username"` | Form field name for username |
 | `password_field` | string or list | `"password"` | Form field name(s) for password. All fields receive the same encoded password. Use a list when the modem POSTs the password to multiple form fields. |
@@ -328,6 +329,21 @@ modems with dynamic CSRF tokens (e.g., server-generated `webToken`).
 When `login_page` is empty, the POST body is built entirely from
 config: `username_field`, `password_field` entries, and
 `hidden_fields`.
+
+**Dynamic POST URLs:** some firmware publishes a per-page-load value in
+the login form's action (`<form action="/goform/Login?id=1740525841">`)
+and rejects a POST that omits it. `action_source: login_page` reads the
+action off the pre-fetched page instead of `action`, resolving relative
+values against the page URL — the form declaring `action="setup.cgi"`
+posts to `/setup.cgi`, matching what a browser does. `form_selector`
+identifies the form; when unset the first `<form>` on the page is used.
+
+The read is best-effort in one direction only: no form, no matching
+selector, or no `action` attribute logs an ERROR and falls back to
+`action`. It never fails the login, because a modem that accepts the
+static URL must keep working, and it is never silent, because a
+declared source that stopped resolving is a config defect that has to
+surface. Entries leaving `action_source` at `config` are unaffected.
 
 **Success detection:** If `success` is provided, checks `redirect`
 (path substring match) and/or `indicator` (body substring match).
@@ -672,12 +688,15 @@ actions:
 | `csrf_header` | string | `""` | Header name for the CSRF token (e.g., `X-CSRF-TOKEN`). The `form_pbkdf2` strategy fetches the token value (via `csrf_init_endpoint` or login response) and attaches it as this header. Which requests carry the token and how the token is obtained are strategy-specific — other strategies that need CSRF may define their own fields. |
 | `cookie_name` | string | `""` | Session cookie produced by login. Auth owns the cookie it produces — see ARCHITECTURE_DECISIONS.md. |
 | `login_success` | dict | `{}` | When set, login is considered successful only when every key-value pair in this dict matches the response JSON. Values may be string, integer, or boolean — matched by equality against the parsed JSON response. Use when the firmware signals success with a specific field rather than absence of an error (e.g., Technicolor CGA6444VF returns `{"error": "ok", ...}` — set `login_success: {error: "ok"}`). |
+| `login_busy` | dict | `{}` | When set and every key-value pair matches the response JSON, the modem declined to serve the login without judging the credential: Core reports the attempt busy and the collector classifies it `AUTH_UNAVAILABLE`, the same as a 5xx (UC-87a). Same matching rules as `login_success`, checked first. Use when single-session firmware refuses a second login under HTTP 200 (e.g., Technicolor CGA6444VF answers `{"message": "MSG_LOGIN_150", ...}` — set `login_busy: {message: "MSG_LOGIN_150"}`). |
 
 Session-wide headers and logout are declared in their respective
 sections. See [Session](#session) and [Actions](#actions).
 
 **Success detection:** HTTP 401 is always treated as failure. If
-`login_success` is set, login succeeds only when every key-value
+`login_busy` is set and every key-value pair matches the response
+JSON, the login is busy, not failed; see the field above. Otherwise,
+if `login_success` is set, login succeeds only when every key-value
 pair in the dict matches the response JSON; any mismatch is treated
 as failure (the `message` field provides the error detail). If
 `login_success` is empty (the default), any truthy `"error"` field
@@ -1038,9 +1057,11 @@ third-party session the pre-retry logout cannot free means our login
 is refused. Firmware that reports this as 5xx is classified
 `AUTH_UNAVAILABLE` and reports `unreachable`, leaving polling alive so
 recovery happens on its own when the other session ends (explicit
-logout or modem-side timeout).
-That classification is driven by the login's status code, not by
-logout presence, so it applies to any firmware that answers this way.
+logout or modem-side timeout). Firmware that refuses under HTTP 200
+gets the same classification when the entry declares the refusal body
+(`login_busy` on `form_pbkdf2`).
+That classification is driven by the login response, not by logout
+presence, so it applies to any firmware that answers this way.
 See UC-87a.
 
 See RUNTIME_POLLING_SPEC.md for the full session lifecycle.

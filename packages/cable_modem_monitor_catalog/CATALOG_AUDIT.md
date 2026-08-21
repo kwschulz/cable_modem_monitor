@@ -2,7 +2,7 @@
 
 > Auto-generated. Run `scripts/generate_catalog_index.py` to refresh.
 
-**44 configurations supported** — 27 confirmed on real hardware, 17 awaiting verification.
+**45 configurations supported** — 27 confirmed on real hardware, 18 awaiting verification.
 
 ---
 
@@ -39,6 +39,7 @@ and share a diagnostics snapshot.
 | G54 | HTML | Cox, Spectrum, Xfinity | generated |
 | C3700 | HTML | Comcast, Cox, Spectrum | synthetic |
 | CM2000 | HTML | Comcast, Cox, Spectrum, Xfinity | synthetic |
+| CM2500 | HTML | Comcast, Cox, Spectrum | reconstructed |
 | CM600 | HTML | Comcast, Cox, Spectrum, TWC | synthetic |
 | CGA2121 | HTML | Telia | generated |
 | CGA4236 | HTML | Unknown | — |

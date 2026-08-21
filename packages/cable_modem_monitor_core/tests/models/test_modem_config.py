@@ -121,6 +121,8 @@ FIELD_ACCESS_CASES = [
     ("auth_basic_challenge_cookie.json", "auth.challenge_cookie",   True),
     ("auth_hnap.json",                   "auth.hmac_algorithm",     "md5"),
     ("auth_hnap_sha256.json",            "auth.hmac_algorithm",     "sha256"),
+    ("auth_form_pbkdf2.json",            "auth.login_success",      {"error": "ok"}),
+    ("auth_form_pbkdf2.json",            "auth.login_busy",         {"message": "MSG_LOGIN_150"}),
     ("health_config.json",               "health.http_probe",       False),
     ("health_config.json",               "health.supports_head",    False),
     ("health_config.json",               "health.supports_icmp",    False),

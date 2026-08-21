@@ -763,26 +763,62 @@ def _extract_form(
         if location:
             success["redirect"] = path_from_url(location)
 
+    fields: dict[str, Any] = {
+        "action": post_path,
+        "method": "POST",
+        "username_field": username_field,
+        "password_field": password_field,
+        "encoding": encoding,
+        "hidden_fields": hidden_fields,
+        "login_page": login_page,
+        "form_selector": form_selector,
+        "success": success,
+    }
+
+    # A query string on the login POST is a per-session token published in
+    # the login form's action (Netgear ?id=). path_from_url strips it, so
+    # the config needs action_source: login_page to read it live; without
+    # that the bare-action POST may be rejected by the firmware (#189).
+    confidence = "high"
+    query = urlsplit(url).query
+    if query:
+        if login_page and _core_supports_action_source():
+            fields["action_source"] = "login_page"
+        elif not login_page:
+            warnings.append(
+                f"{WARNING_PREFIX} login POST {post_path}?{query} carries a query "
+                "string, a per-session token read from the login form's action, "
+                "but the capture has no login page GET to read it from. Recapture "
+                "including the pre-login page load."
+            )
+            confidence = "medium"
+        else:
+            warnings.append(
+                f"{WARNING_PREFIX} login POST {post_path}?{query} carries a query "
+                "string, a per-session token the generated config cannot "
+                "reproduce. This Core version's form auth has no action_source "
+                "support (#189), so the firmware may reject logins posted to the "
+                "bare action. Verify login on hardware before shipping the entry."
+            )
+            confidence = "medium"
+
     return AuthDetail(
         strategy="form",
-        fields={
-            "action": post_path,
-            "method": "POST",
-            "username_field": username_field,
-            "password_field": password_field,
-            "encoding": encoding,
-            "hidden_fields": hidden_fields,
-            "login_page": login_page,
-            "form_selector": form_selector,
-            "success": success,
-        },
-        confidence="high",
+        fields=fields,
+        confidence=confidence,
     )
 
 
 # ---------------------------------------------------------------------------
 # Utility functions
 # ---------------------------------------------------------------------------
+
+
+def _core_supports_action_source() -> bool:
+    """True when the installed Core's FormAuth accepts action_source (#189)."""
+    from solentlabs.cable_modem_monitor_core.models.modem_config.auth import FormAuth
+
+    return "action_source" in FormAuth.model_fields
 
 
 def _parse_auth_scheme(www_authenticate: str) -> str:

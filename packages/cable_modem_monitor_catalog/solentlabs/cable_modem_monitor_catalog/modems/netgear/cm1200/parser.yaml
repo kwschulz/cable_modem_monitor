@@ -165,7 +165,10 @@ system_info:
             - offset: 14
               field: system_uptime
               type: uptime
-              format: "{days} days {hours}:{minutes}:{seconds}"
+              # The firmware omits "N days " below 24h uptime. Not yet observed
+              # on this model (every capture is 8+ days); observed on the CM3000
+              # (verified.json at 10 minutes) and the CM2500, same firmware line.
+              format: "[{days} days ]{hours}:{minutes}:{seconds}"
     # /RouterStatus.htm exposes hardware and firmware version via a
     # separate InitTagValue function. Same JS comment pattern as
     # DocsisStatus.htm (real data on one line, example data in a

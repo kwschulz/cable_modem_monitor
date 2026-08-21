@@ -1,0 +1,40 @@
+{
+  "_description": "Form auth whose login form publishes a per-page-load ?id= in its action; the accepted login redirects to /index.htm",
+  "_entries": [
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/"},
+      "response": {
+        "status": 200,
+        "headers": [{"name": "Content-Type", "value": "text/html"}],
+        "content": {"text": "<html><body><form name='loginform' method='POST' action='/goform/login?id=111'><input type='hidden' name='loginName' value='admin'><input type='password' name='loginPassword'></form></body></html>"}
+      }
+    },
+    {
+      "request": {"method": "POST", "url": "http://192.168.100.1/goform/login?id=111"},
+      "response": {
+        "status": 302,
+        "headers": [{"name": "Location", "value": "http://192.168.100.1/index.htm"}],
+        "content": {"text": ""}
+      }
+    },
+    {
+      "request": {"method": "GET", "url": "http://192.168.100.1/index.htm"},
+      "response": {
+        "status": 200,
+        "headers": [{"name": "Content-Type", "value": "text/html"}],
+        "content": {"text": "<html>Dashboard</html>"}
+      }
+    }
+  ],
+  "_modem_config": {
+    "auth": {
+      "strategy": "form",
+      "action": "/goform/login",
+      "action_source": "login_page",
+      "login_page": "/",
+      "username_field": "loginName",
+      "password_field": "loginPassword",
+      "success": {"redirect": "/index.htm"}
+    }
+  }
+}

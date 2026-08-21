@@ -87,6 +87,20 @@ class TestNewOnboarding:
         assert result.metadata["hardware"]["docsis_version"] == "3.0"
         assert "hardware.docsis_version" in result.inferred
 
+    def test_docsis_not_inferred_without_channels(self) -> None:
+        """No channel sections at all: no inference, reported missing.
+
+        Absence of OFDM only means 3.0 when channels were observed; an
+        unprovisioned modem has none, and "3.0" would be a guess.
+        """
+        analysis = _minimal_analysis()
+        analysis["sections"] = None
+        result = enrich_metadata(analysis)
+
+        assert "docsis_version" not in result.metadata.get("hardware", {})
+        assert "hardware.docsis_version" not in result.inferred
+        assert "hardware.docsis_version" in result.missing
+
     def test_infers_status_awaiting_verification(self) -> None:
         """New modem defaults to awaiting_verification status."""
         analysis = _minimal_analysis()
@@ -311,10 +325,11 @@ class TestDocsisInference:
         assert result.metadata["hardware"]["docsis_version"] == "3.1"
 
     def test_no_sections(self) -> None:
-        """No sections → 3.0 default."""
+        """No sections → no inference; the field is reported missing."""
         analysis: dict[str, Any] = {"transport": "http"}
         result = enrich_metadata(analysis)
-        assert result.metadata["hardware"]["docsis_version"] == "3.0"
+        assert "docsis_version" not in result.metadata.get("hardware", {})
+        assert "hardware.docsis_version" in result.missing
 
 
 # ---------------------------------------------------------------------------

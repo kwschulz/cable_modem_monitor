@@ -10,7 +10,9 @@
     "pbkdf2_key_length": 128,
     "csrf_init_endpoint": "/api/v1/session/init_page",
     "csrf_header": "X-CSRF-TOKEN",
-    "cookie_name": "PHPSESSID"
+    "cookie_name": "PHPSESSID",
+    "login_success": {"error": "ok"},
+    "login_busy": {"message": "MSG_LOGIN_150"}
   },
   "session": {
     "headers": {"X-Requested-With": "XMLHttpRequest"},

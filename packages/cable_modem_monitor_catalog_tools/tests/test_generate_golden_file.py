@@ -101,6 +101,21 @@ class TestFileErrors:
         )
         assert len(result.errors) > 0
 
+    @pytest.mark.parametrize("parser_yaml", [None, ""], ids=["none", "empty"])
+    def test_empty_parser_yaml(self, tmp_path: Path, parser_yaml: str | None) -> None:
+        """No parser (analyze found no data sections) gets a legible error, not a traceback."""
+        har_file = tmp_path / "modem.har"
+        har_file.write_text('{"log": {"entries": []}}')
+
+        result = generate_golden_file(
+            har_path=str(har_file),
+            parser_yaml_content=parser_yaml,
+        )
+        assert result.golden_file == {}
+        assert len(result.errors) == 1
+        assert "no data sections" in result.errors[0]
+        assert "NoneType" not in result.errors[0]
+
     def test_missing_har_file(self, tmp_path: Path) -> None:
         """Missing HAR file returns errors."""
         result = generate_golden_file(

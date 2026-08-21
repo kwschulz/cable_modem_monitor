@@ -19,6 +19,7 @@
 | Async / blocking I/O | `docs/CODE_REVIEW.md` § No Blocking I/O in Async Context |
 | Release flow (branching, merging, tagging) | `docs/reference/RELEASING.md` |
 | Process questions (where does X go? PR vs Discussion vs Issue?) | `CONTRIBUTING.md` |
+| Doc authoring (one home per rule, current contract only — no version history, what earns an ADR entry, cross-linking) | `docs/README.md` § Doc Authoring |
 | Specs by package | core: `packages/cable_modem_monitor_core/docs/README.md` · catalog tools: `packages/cable_modem_monitor_catalog_tools/docs/README.md` · HA: `custom_components/cable_modem_monitor/docs/README.md` · project: `docs/README.md` |
 | Reference test (table-driven exemplar) | `tests/lib/test_parse_host_input.py` |
 

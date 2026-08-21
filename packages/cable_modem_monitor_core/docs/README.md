@@ -27,10 +27,10 @@
 | [SNMP_RESEARCH.md](SNMP_RESEARCH.md) | SNMP on cable modems — research findings, deferred |
 
 Intake / onboarding pipeline specs live in the
-[Catalog Tools docs](../../cable_modem_monitor_catalog_tools/docs/)
-(carved out of Core in v3.14). Catalog Tools is the maintainer
-authoring package — HA never installs it. See ARCHITECTURE_DECISIONS.md
-§ "catalog_tools is a developer accelerator, never a runtime dep".
+[Catalog Tools docs](../../cable_modem_monitor_catalog_tools/docs/).
+Catalog Tools is the maintainer authoring package — HA never installs
+it. See ARCHITECTURE_DECISIONS.md § "catalog_tools is a developer
+accelerator, never a runtime dep".
 
 ## HA Integration Specs
 
@@ -66,19 +66,8 @@ a protocol, format, or subsystem implemented or verified in isolation
 section in the doc that already governs the surrounding surface. A
 new file always gets a row in the index above.
 
-### Anti-bloat
+### Anti-bloat and cross-linking
 
-- One home per rule. A fact stated in two docs will drift; state it
-  once and link from everywhere else.
-- Specs state the current contract only — no version history or
-  "previously" narrative; git carries that.
-- Quote code only as far as the contract requires (public signature,
-  schema); implementation detail stays in code.
-- A decision enters `ARCHITECTURE_DECISIONS.md` only if it constrains
-  future work; alternatives merely considered are omitted.
-
-### Cross-linking
-
-Cite as `FILE.md § Section Name` with a relative link. The doc that
-owns a rule is the link target; consumers point to it with at most
-one sentence of local context.
+Repo-wide rules — one home per rule, current contract only, what
+earns an ADR entry, how to cite another doc — live in
+[Project docs § Doc Authoring](../../../docs/README.md#doc-authoring).

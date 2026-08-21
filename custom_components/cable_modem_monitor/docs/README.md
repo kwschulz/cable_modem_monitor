@@ -11,3 +11,7 @@ Home Assistant-specific specs for the Cable Modem Monitor integration.
 
 For architecture, parsing, and all other specs, see the
 [Core documentation](../../../packages/cable_modem_monitor_core/docs/).
+
+Doc-authoring rules — one home per rule, current contract only, how to
+cite another doc — are repo-wide and live in
+[Project docs § Doc Authoring](../../../docs/README.md#doc-authoring).

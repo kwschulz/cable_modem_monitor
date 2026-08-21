@@ -102,10 +102,9 @@ class Orchestrator:
 
         # Recovery — owns the polling-cadence window triggered by
         # restart, connectivity outage, or the reboot-signal vote.
-        # 2C wires tick/evaluate_snapshot/evaluate_failure into the
-        # collection flow; here we only construct it so run_restart
-        # has a destination for recovery.begin().
-        self._recovery = Recovery(collector=collector, modem_config=modem_config)
+        # The poll flow drives it via tick/evaluate_snapshot/
+        # evaluate_failure; run_restart calls begin() directly.
+        self._recovery = Recovery(modem_config=modem_config)
 
         # Last connection status — used to detect UNREACHABLE→ONLINE
         # transitions and emit a single INFO log line.

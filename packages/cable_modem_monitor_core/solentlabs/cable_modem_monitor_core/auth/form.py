@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup, Tag
@@ -23,8 +23,9 @@ class FormAuthManager(BaseAuthManager):
 
     POSTs credentials to a configured endpoint and evaluates the
     response for success. Supports password encoding (plain or base64),
-    hidden form fields, login page pre-fetch, and success detection
-    via redirect URL or response body indicator.
+    hidden form fields, login page pre-fetch, a POST URL read off the
+    pre-fetched form (``action_source: login_page``), and success
+    detection via redirect URL or response body indicator.
 
     Args:
         config: Validated ``FormAuth`` config from modem.yaml.
@@ -57,7 +58,8 @@ class FormAuthManager(BaseAuthManager):
         """Execute the form login flow.
 
         Steps:
-            1. Pre-fetch login page if configured (to get cookies/nonces).
+            1. Pre-fetch login page if configured (to get cookies/nonces,
+               and the form action when ``action_source: login_page``).
             2. Build form data with credentials and hidden fields.
             3. POST to the login endpoint.
             4. Evaluate success via redirect or indicator.
@@ -76,6 +78,7 @@ class FormAuthManager(BaseAuthManager):
 
         # Step 1: Pre-fetch login page if configured (for cookies/nonces)
         discovered_fields: dict[str, str] = {}
+        login_url = f"{base_url}{config.action}"
         if config.login_page:
             try:
                 prefetch_response = session.get(
@@ -96,6 +99,29 @@ class FormAuthManager(BaseAuthManager):
                 config.form_selector,
             )
 
+            # Read the POST URL off the form every login: firmware that
+            # publishes a per-page-load token in the action (#189) rejects
+            # a stale or missing one. Re-read here, never cached, for the
+            # same reason the hidden fields are.
+            if config.action_source == "login_page":
+                published = _login_action_from_page(
+                    prefetch_response.text,
+                    config.form_selector,
+                    prefetch_response.url,
+                )
+                if published is not None:
+                    login_url = published
+                else:
+                    # Falling back keeps a modem the static URL satisfies
+                    # working; ERROR because a declared source that stopped
+                    # resolving is a config defect that has to surface.
+                    _logger.error(
+                        "Login form action not found on %s (form_selector=%r); " "falling back to configured action %s",
+                        config.login_page,
+                        config.form_selector,
+                        config.action,
+                    )
+
         # Step 2: Build form data
         # Merge order: discovered fields <- hidden_fields <- credentials
         encoded_password = _encode_password(password, config.encoding)
@@ -110,7 +136,6 @@ class FormAuthManager(BaseAuthManager):
         # Some modem firmware rejects login POSTs without a matching
         # Referer header (defensive measure from v3.13, HAR evidence
         # shows 60% of modems send it, none reject it).
-        login_url = f"{base_url}{config.action}"
         try:
             response = session.request(
                 config.method,
@@ -179,6 +204,49 @@ def _check_success(config: FormAuth, response: requests.Response) -> str:
     return ""
 
 
+def _parse_login_page(html: str) -> BeautifulSoup | None:
+    """Parse the pre-fetched page; ``None`` when there is nothing to read."""
+    if not html:
+        return None
+    try:
+        return BeautifulSoup(html, "html.parser")
+    except Exception:
+        _logger.debug("Failed to parse login page HTML", exc_info=True)
+        return None
+
+
+def _login_form_scope(soup: BeautifulSoup, form_selector: str) -> Tag | BeautifulSoup:
+    """The element the login form reads from: selector match, else first form, else the page."""
+    if form_selector:
+        match = soup.select_one(form_selector)
+        if match is not None:
+            return match
+    form = soup.find("form")
+    return form if form is not None else soup
+
+
+def _login_action_from_page(html: str, form_selector: str, page_url: str) -> str | None:
+    """Resolve the login form's ``action`` against the page URL; ``None`` when it cannot be read.
+
+    No form, a selector matching nothing (or not a form), or a form
+    without an action all answer ``None``. A selector miss does not
+    fall back to the first form here: the declared form is gone, and
+    posting to whatever form remains is a guess. Resolution follows the
+    browser: a relative ``setup.cgi`` on ``/cgi-bin/login.html`` posts
+    to ``/cgi-bin/setup.cgi``.
+    """
+    soup = _parse_login_page(html)
+    if soup is None:
+        return None
+    form = soup.select_one(form_selector) if form_selector else soup.find("form")
+    if not isinstance(form, Tag) or form.name != "form":
+        return None
+    action = form.get("action")
+    if not isinstance(action, str) or not action.strip():
+        return None
+    return urljoin(page_url, action.strip())
+
+
 def _discover_hidden_fields(html: str, form_selector: str) -> dict[str, str]:
     """Read ``<input type="hidden">`` fields from the login form.
 
@@ -196,24 +264,11 @@ def _discover_hidden_fields(html: str, form_selector: str) -> dict[str, str]:
     Returns:
         Dict of field name to value. Empty dict on any failure.
     """
-    if not html:
+    soup = _parse_login_page(html)
+    if soup is None:
         return {}
 
-    try:
-        soup = BeautifulSoup(html, "html.parser")
-    except Exception:
-        _logger.debug("Failed to parse login page HTML", exc_info=True)
-        return {}
-
-    scope: Tag | BeautifulSoup = soup
-    if form_selector:
-        match = soup.select_one(form_selector)
-        if match is not None:
-            scope = match
-    if scope is soup:
-        form = soup.find("form")
-        if form is not None:
-            scope = form
+    scope = _login_form_scope(soup, form_selector)
 
     fields: dict[str, str] = {}
     for inp in scope.find_all("input", attrs={"type": "hidden"}):

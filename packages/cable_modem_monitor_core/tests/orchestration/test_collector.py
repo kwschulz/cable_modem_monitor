@@ -1056,7 +1056,7 @@ class TestAttemptLogoutBeforeRetry:
         mock_clear.assert_not_called()
 
 
-def _login_failure(status: int | None) -> dict[str, Any]:
+def _login_failure(status: int | None, *, busy: bool = False) -> dict[str, Any]:
     """Build an auth_return for a login the modem answered with *status*."""
     response = MagicMock()
     response.status_code = status
@@ -1069,57 +1069,63 @@ def _login_failure(status: int | None) -> dict[str, Any]:
             success=False,
             error=f"Login returned HTTP {status}",
             response=response if status is not None else None,
+            busy=busy,
         )
     }
 
 
-# Only 5xx is the modem declining to serve the login. Everything else that
-# comes back as a failed AuthResult is a verdict on the credential, whoever
-# reached it — the modem itself, or a declared success criterion.
+# A 5xx, or a body the entry declared busy, is the modem declining to serve
+# the login. Everything else that comes back as a failed AuthResult is a
+# verdict on the credential, whoever reached it — the modem itself, or a
+# declared success criterion.
 #
-# ┌────────┬─────────────────────┬──────────────────────────────────────┐
-# │ status │ expected signal     │ why                                  │
-# ├────────┼─────────────────────┼──────────────────────────────────────┤
-# │ 200    │ AUTH_FAILED         │ criterion rejected the landing       │
-# │        │                     │ (UC-87c); HNAP's LoginResult FAILED  │
-# │ 401    │ AUTH_FAILED         │ credential examined and rejected     │
-# │ 403    │ AUTH_FAILED         │ credential examined and rejected     │
-# │ 404    │ AUTH_FAILED         │ login endpoint absent (UC-87b)       │
-# │ 500    │ AUTH_UNAVAILABLE    │ modem declined to serve (UC-87a)     │
-# │ 502    │ AUTH_UNAVAILABLE    │ modem declined to serve              │
-# │ 503    │ AUTH_UNAVAILABLE    │ session slot busy on the F3896LG     │
-# │ 504    │ AUTH_UNAVAILABLE    │ modem declined to serve              │
-# │ none   │ AUTH_FAILED         │ no response to inspect               │
-# └────────┴─────────────────────┴──────────────────────────────────────┘
+# ┌────────┬───────┬─────────────────────┬──────────────────────────────────────┐
+# │ status │ busy  │ expected signal     │ why                                  │
+# ├────────┼───────┼─────────────────────┼──────────────────────────────────────┤
+# │ 200    │ False │ AUTH_FAILED         │ criterion rejected the landing       │
+# │        │       │                     │ (UC-87c); HNAP's LoginResult FAILED  │
+# │ 200    │ True  │ AUTH_UNAVAILABLE    │ body matched login_busy (UC-87a)     │
+# │ 401    │ False │ AUTH_FAILED         │ credential examined and rejected     │
+# │ 403    │ False │ AUTH_FAILED         │ credential examined and rejected     │
+# │ 404    │ False │ AUTH_FAILED         │ login endpoint absent (UC-87b)       │
+# │ 500    │ False │ AUTH_UNAVAILABLE    │ modem declined to serve (UC-87a)     │
+# │ 502    │ False │ AUTH_UNAVAILABLE    │ modem declined to serve              │
+# │ 503    │ False │ AUTH_UNAVAILABLE    │ session slot busy on the F3896LG     │
+# │ 504    │ False │ AUTH_UNAVAILABLE    │ modem declined to serve              │
+# │ none   │ False │ AUTH_FAILED         │ no response to inspect               │
+# └────────┴───────┴─────────────────────┴──────────────────────────────────────┘
 #
-# The 200 row is not hypothetical: a form entry with a success criterion
-# fails on a 2xx landing, and HNAP answers a rejected credential with 200
-# and LoginResult "FAILED". auth_status_code carries that 2xx through, so
-# only a 404 changes the blocked-poll message (UC-87b).
+# Neither 200 row is hypothetical: a form entry with a success criterion
+# fails on a 2xx landing, HNAP answers a rejected credential with 200 and
+# LoginResult "FAILED", and the CGA6444VF refuses a second session with
+# 200 and MSG_LOGIN_150 (#120). Status alone cannot split the two 200
+# rows; only the strategy's busy flag can. auth_status_code carries the
+# 2xx through, so only a 404 changes the blocked-poll message (UC-87b).
 #
 # fmt: off
 LOGIN_STATUS_CASES = [
-    (200,  CollectorSignal.AUTH_FAILED,      "200-criterion-rejected"),
-    (401,  CollectorSignal.AUTH_FAILED,      "401-rejected"),
-    (403,  CollectorSignal.AUTH_FAILED,      "403-rejected"),
-    (404,  CollectorSignal.AUTH_FAILED,      "404-absent-endpoint"),
-    (500,  CollectorSignal.AUTH_UNAVAILABLE, "500-declined"),
-    (502,  CollectorSignal.AUTH_UNAVAILABLE, "502-declined"),
-    (503,  CollectorSignal.AUTH_UNAVAILABLE, "503-busy"),
-    (504,  CollectorSignal.AUTH_UNAVAILABLE, "504-declined"),
-    (None, CollectorSignal.AUTH_FAILED,      "no-response"),
+    (200,  False, CollectorSignal.AUTH_FAILED,      "200-criterion-rejected"),
+    (200,  True,  CollectorSignal.AUTH_UNAVAILABLE, "200-declared-busy"),
+    (401,  False, CollectorSignal.AUTH_FAILED,      "401-rejected"),
+    (403,  False, CollectorSignal.AUTH_FAILED,      "403-rejected"),
+    (404,  False, CollectorSignal.AUTH_FAILED,      "404-absent-endpoint"),
+    (500,  False, CollectorSignal.AUTH_UNAVAILABLE, "500-declined"),
+    (502,  False, CollectorSignal.AUTH_UNAVAILABLE, "502-declined"),
+    (503,  False, CollectorSignal.AUTH_UNAVAILABLE, "503-busy"),
+    (504,  False, CollectorSignal.AUTH_UNAVAILABLE, "504-declined"),
+    (None, False, CollectorSignal.AUTH_FAILED,      "no-response"),
 ]
 # fmt: on
 
 
 @pytest.mark.parametrize(
-    ("status", "expected"),
-    [(c[0], c[1]) for c in LOGIN_STATUS_CASES],
-    ids=[c[2] for c in LOGIN_STATUS_CASES],
+    ("status", "busy", "expected"),
+    [(c[0], c[1], c[2]) for c in LOGIN_STATUS_CASES],
+    ids=[c[3] for c in LOGIN_STATUS_CASES],
 )
-def test_login_failure_signal_by_status(status: int | None, expected: CollectorSignal) -> None:
-    """A 5xx login is the modem declining to serve, not a credential verdict (UC-87a)."""
-    result = _run_collector_with_failure(**_login_failure(status))
+def test_login_failure_signal_by_status(status: int | None, busy: bool, expected: CollectorSignal) -> None:
+    """A 5xx or declared-busy login is the modem declining to serve, not a credential verdict (UC-87a)."""
+    result = _run_collector_with_failure(**_login_failure(status, busy=busy))
     assert result.signal is expected
     assert result.auth_status_code == status
 

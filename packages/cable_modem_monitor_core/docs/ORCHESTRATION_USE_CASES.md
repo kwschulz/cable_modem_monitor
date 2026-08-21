@@ -2194,10 +2194,9 @@ produced a verdict at all. The remedy shipped here is navigational —
 it lets the user escape a wrong guess — and it does not change what
 the message asserts.
 
-**Evidence:** Discussion #175 and #176 (Arris SB8200 v7). Shipped in
-3.14.0-beta.12. Auto-detecting the variant was considered and left out
-of 3.14: an earlier attempt was fragile, and probing costs login
-attempts at firmware that locks up after a few.
+**Evidence:** Discussion #175 and #176 (Arris SB8200 v7). The variant
+is not auto-detected: probing costs login attempts at firmware that
+locks up after a few.
 
 ---
 
@@ -2230,8 +2229,9 @@ rejected it. The status code is not what identifies it: HNAP answers a
 rejected login with HTTP 200 and `LoginResult: "FAILED"`. `AUTH_FAILED`
 is the collector's default for any failed login that is not a 5xx, so
 the siblings below are carved out by cause, not by status code. A login
-answering 5xx is UC-87a — the modem declined to serve the request
-without judging the credential. A 404 is UC-87b. A login
+answering 5xx, or with a body the entry declares busy, is UC-87a — the
+modem declined to serve the request without judging the credential. A
+404 is UC-87b. A login
 answered under HTTP 400 whose landing fails a declared `success:`
 criterion is UC-87c. A login that failed before the modem judged
 anything is UC-87d.
@@ -2267,11 +2267,15 @@ correct. Something makes the modem decline to serve a login. Observed
 causes on the Sagemcom F3896LG (single-session firmware): the user logs
 into the modem's own web page and takes the only session slot, or ISP
 customer care is connected to it. A modem mid-reboot behaves the same
-way. All answer the login with 5xx.
+way. All answer the login with 5xx. The Technicolor CGA6444VF (#120),
+also single-session, refuses the newcomer under HTTP 200 with
+`message: "MSG_LOGIN_150"`; its entry declares that body as
+`login_busy`, and the rival session there is usually our own, left
+over from config-flow validation 342 ms earlier.
 
 | Poll | What happens | Streak | Status |
 |------|-------------|--------|--------|
-| N | Login answers 5xx | 0 | UNREACHABLE |
+| N | Login answers 5xx, or the body matches `login_busy` | 0 | UNREACHABLE |
 | N+1..N+k | Still busy; polling continues at normal cadence | 0 | UNREACHABLE |
 | N+k+1 | Condition clears; login succeeds | 0 | ONLINE |
 
@@ -2301,6 +2305,15 @@ messages for each — but Core does not need the distinction to choose the
 right behavior, and encoding those codes would be modem-specific
 behavior (MODEM_YAML_SPEC § Principles).
 
+**Why a declared body criterion, not a Core error table:** firmware
+that refuses under HTTP 200 gives the status rule nothing to read, and
+before `login_busy` existed the CGA6444VF's refusal failed the
+`login_success` check and tripped the breaker on the first poll, so a
+busy modem sent the user a reauth form. Recognising `MSG_LOGIN_150` in
+Core would be the per-modem table the paragraph above refuses. The
+entry declares the pair; Core owns the matcher and the behavior
+(ARCHITECTURE_DECISIONS § Session-busy is a declared criterion).
+
 **Consistency:** this is the rule the data path already applies.
 RESOURCE_LOADING_SPEC states that on a data page, 401/403 maps to
 `LOAD_AUTH` and other status codes map to `LOAD_ERROR`. Before this use
@@ -2316,9 +2329,21 @@ different mechanism entirely: the UI re-reads
 `GET /rest/v1/user/login`, whose response carries
 `numberOfContiguousFailures` and `lockoutTime`.
 
-> **Status:** Implemented. The collector classifies a 5xx login response
-> as `AUTH_UNAVAILABLE`; `SignalPolicy.apply` maps it to `UNREACHABLE`
-> with no side effects, matching `LOAD_ERROR`.
+Issue #120 (Technicolor CGA6444VF, 3.14.0-beta.21 logs). The firmware's
+`login.js` handles the login response as `error == "ok"` → success,
+`message == "MSG_LOGIN_150"` → already logged in, else wrong
+credentials; the captured HAR holds no busy body because the browser
+never hit one. Config-flow validation logged in at 16:52:15.063, the
+first poll began 342 ms later and answered `MSG_LOGIN_150`, the
+breaker tripped at one failure, and HA reopened the reauth form, whose
+validation login restarted the cycle. The modem frees the slot unaided
+in about 20 s, so classification alone breaks the loop.
+
+> **Status:** Implemented. The collector classifies a 5xx login
+> response, or an `AuthResult` the strategy marked `busy`, as
+> `AUTH_UNAVAILABLE`; `SignalPolicy.apply` maps it to `UNREACHABLE`
+> with no side effects, matching `LOAD_ERROR`. `form_pbkdf2` marks
+> busy when the body matches `login_busy`.
 
 ---
 

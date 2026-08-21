@@ -269,13 +269,27 @@ def is_docker_desktop_running():
         return False
 
 
-def _wait_for_docker_ready(timeout_seconds=60):
-    """Poll for Docker to become ready. Returns True if ready within timeout."""
+def _wait_for_docker_ready(timeout_seconds=60, engine_up_grace=0):
+    """Poll for Docker to become ready. True if ready within the deadline."""
     print("  Waiting for Docker to be ready", end="", flush=True)
 
-    for _ in range(timeout_seconds):
+    # Socket provisioning starts when the engine comes up, not when this
+    # wait starts. With engine_up_grace, the first sighting of the engine
+    # socket without this distro's docker.sock extends the deadline so
+    # provisioning gets at least that long from engine-up. docker info
+    # keeps being polled throughout: an engine that appears early keeps
+    # the full original budget, and setups that reach the daemon some
+    # other way (DOCKER_HOST, a non-default context) still succeed.
+    deadline = timeout_seconds
+    elapsed = 0
+    engine_seen = False
+    while elapsed < deadline:
         time.sleep(1)
+        elapsed += 1
         print(".", end="", flush=True)
+        if engine_up_grace and not engine_seen and _engine_up_but_socket_missing():
+            engine_seen = True
+            deadline = max(deadline, elapsed + engine_up_grace)
         try:
             result = subprocess.run(
                 ["docker", "info"],
@@ -446,7 +460,10 @@ def _repair_docker_engine_wsl():
         print(" failed")
         return False
     print(" done")
-    return _wait_for_docker_ready()
+    # The re-provisioned engine can come up well before this distro's
+    # socket does; grant the same engine-up grace as the cold-start path
+    # instead of burning the whole wait on guaranteed-failing docker info.
+    return _wait_for_docker_ready(60, engine_up_grace=120)
 
 
 def _reconnect_engine_socket(docker_exe, grace_wait):
@@ -485,6 +502,51 @@ def _clear_stale_proxy_if_any():
             _cleanup_stale_proxy(pids)
 
 
+def _repair_stuck_desktop(docker_exe):
+    """Repair a running-but-unresponsive Desktop. True if ready, else "handled"."""
+    print(f"  {YELLOW}Docker Desktop is running but not responding.{NC}")
+    print("")
+    print("  This usually means the engine did not re-attach")
+    print("  /var/run/docker.sock to this distro. It commonly happens")
+    print("  after a Docker Desktop update. Restarting Docker's backend")
+    print("  distro re-provisions the engine and recreates the socket.")
+    print("")
+    try:
+        response = input("  Restart Docker's backend to repair it? [Y/n]: ").strip().lower()
+        if response in ("", "y", "yes"):
+            if _repair_docker_engine_wsl():
+                return True
+            # The restart can leave the engine up with this distro's
+            # socket still missing; the proxy reconnect is the surgical
+            # fix for exactly that state, so try it before the heavy
+            # full-reset guidance. The repair wait already granted the
+            # provisioning grace from engine-up, so skip a second one.
+            if _engine_up_but_socket_missing() and _reconnect_engine_socket(docker_exe, grace_wait=False):
+                return True
+    except (EOFError, KeyboardInterrupt):
+        print("")
+
+    # Repair declined or did not take. Fall back to the full WSL restart,
+    # which the script cannot run itself without killing this distro.
+    print("")
+    print("  If that did not fix it, do a full reset from a Windows")
+    print("  PowerShell or CMD prompt:")
+    print("")
+    print("    1. wsl --shutdown")
+    print("       (restarts all WSL distros, including this one)")
+    print("    2. Fully quit Docker Desktop from the system tray, then")
+    print("       relaunch it and wait for 'Running'")
+    print("    3. If it still fails: Docker Desktop > Settings >")
+    print("       Resources > WSL Integration > enable this distro >")
+    print("       Apply & Restart")
+    print("")
+    print("  Then re-open your terminal and try the command again.")
+    print("")
+    # Targeted guidance already shown; tell the caller to skip the
+    # generic "start Docker Desktop" trailer (it is already running).
+    return "handled"
+
+
 def _prompt_start_docker_wsl(docker_exe):
     """Start/repair Docker for WSL. True if ready, "handled" if guidance shown, else False."""
     # Clear a stale proxy first, then continue into the start/repair flow.
@@ -498,41 +560,9 @@ def _prompt_start_docker_wsl(docker_exe):
     if _engine_up_but_socket_missing() and _reconnect_engine_socket(docker_exe, grace_wait=True):
         return True
 
-    # Check if Docker Desktop is already running but not responding
+    # Docker Desktop already running but not responding gets the repair flow.
     if is_docker_desktop_running():
-        print(f"  {YELLOW}Docker Desktop is running but not responding.{NC}")
-        print("")
-        print("  This usually means the engine did not re-attach")
-        print("  /var/run/docker.sock to this distro. It commonly happens")
-        print("  after a Docker Desktop update. Restarting Docker's backend")
-        print("  distro re-provisions the engine and recreates the socket.")
-        print("")
-        try:
-            response = input("  Restart Docker's backend to repair it? [Y/n]: ").strip().lower()
-            if response in ("", "y", "yes") and _repair_docker_engine_wsl():
-                return True
-        except (EOFError, KeyboardInterrupt):
-            print("")
-
-        # Repair declined or did not take. Fall back to the full WSL restart,
-        # which the script cannot run itself without killing this distro.
-        print("")
-        print("  If that did not fix it, do a full reset from a Windows")
-        print("  PowerShell or CMD prompt:")
-        print("")
-        print("    1. wsl --shutdown")
-        print("       (restarts all WSL distros, including this one)")
-        print("    2. Fully quit Docker Desktop from the system tray, then")
-        print("       relaunch it and wait for 'Running'")
-        print("    3. If it still fails: Docker Desktop > Settings >")
-        print("       Resources > WSL Integration > enable this distro >")
-        print("       Apply & Restart")
-        print("")
-        print("  Then re-open your terminal and try the command again.")
-        print("")
-        # Targeted guidance already shown; tell the caller to skip the
-        # generic "start Docker Desktop" trailer (it is already running).
-        return "handled"
+        return _repair_stuck_desktop(docker_exe)
 
     print(f"  {CYAN}Would you like to start Docker Desktop now?{NC}")
     print("")
@@ -548,16 +578,15 @@ def _prompt_start_docker_wsl(docker_exe):
             )
             print(" started")
             # A cold start (first launch after reboot) has been observed to
-            # need more than 120s before the engine answers.
-            if _wait_for_docker_ready(180):
+            # need more than 120s before the engine answers. The engine-up
+            # grace lets a late engine finish provisioning without stacking
+            # a second full wait after this one.
+            if _wait_for_docker_ready(180, engine_up_grace=120):
                 return True
-            # The engine may have come up mid-wait without this distro's
-            # socket. Socket provisioning starts when the engine comes up,
-            # not when Desktop launches — an engine that answered late in the
-            # wait has had only seconds to provision, so grant the grace
-            # period before spending a sudo prompt on the proxy reconnect.
             if _engine_up_but_socket_missing():
-                return _reconnect_engine_socket(docker_exe, grace_wait=True)
+                # The wait already granted provisioning its grace from
+                # engine-up; go straight to the proxy reconnect.
+                return _reconnect_engine_socket(docker_exe, grace_wait=False)
             return False
     except (EOFError, KeyboardInterrupt):
         print("")

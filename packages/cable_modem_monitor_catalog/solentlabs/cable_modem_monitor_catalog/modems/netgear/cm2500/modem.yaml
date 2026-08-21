@@ -1,0 +1,128 @@
+manufacturer: Netgear
+model: CM2500
+brands:
+  - Nighthawk
+transport: http
+default_host: "192.168.100.1"
+
+auth:
+  strategy: form
+  action: "/goform/Login"
+  action_source: login_page
+  login_page: "/"
+  username_field: loginName
+  password_field: loginPassword
+  cookie_name: "XSRF_TOKEN"
+  success:
+    redirect: "/index.htm"
+
+actions:
+  logout:
+    type: http
+    method: POST
+    endpoint: "/goform/logout"
+    endpoint_pattern: logout
+    pre_fetch_url: "/Logout.htm"
+    requires_session: true
+    params:
+      nowTime: "0"
+  restart:
+    type: http
+    method: POST
+    endpoint: "/goform/RouterStatus"
+    endpoint_pattern: RouterStatus
+    pre_fetch_url: "/RouterStatus.htm"
+    params:
+      buttonSelect: "2"
+      wantype: dhcp
+      enable_apmode: "0"
+
+hardware:
+  docsis_version: "3.1"
+  release_date: "2024"
+
+status: awaiting_verification
+
+sources:
+  auth_config:
+    "[#189 CM2050V authentication and persistence](https://github.com/solentlabs/cable_modem_monitor/issues/189)
+    — maintainer bench captures on this unit (2026-08-19, fw V6.01.03),
+    committed as test_data/modem.har: login form action /goform/Login?id=N,
+    accepted login 302 to /index.htm"
+  logout_action:
+    "test_data/modem.har — Logout.htm pre-fetch and the form's POST to
+    /goform/logout?id=N observed on this unit"
+  restart_action:
+    "test_data/modem.har — RouterStatus.htm form POST to /goform/RouterStatus
+    with buttonSelect=2 observed on this unit"
+  brands: "test_data/modem.har — the firmware's own page banner reads
+    'My Modem: Nighthawk CM2500'"
+  docsis_version: "[Netgear CM2500 product page](https://www.netgear.com/home/wifi/modems/cm2500/)"
+  release_date: "[CM2500 user manual, dated April 2024 (proxy for launch)](https://www.downloads.netgear.com/files/GDC/CM2500/CM2500_UM_EN.pdf)"
+  isps: "[Netgear CM2500 product page](https://www.netgear.com/home/wifi/modems/cm2500/)"
+
+attribution:
+  contributors:
+    - github: https://github.com/kwschulz
+      contribution: "Bench HAR captures and session-semantics probes (2026-08-19/20, HW 1.01, SW V6.01.03)"
+
+isps:
+  - Comcast
+  - Cox
+  - Spectrum
+
+notes: |
+  Netgear multi-gig DOCSIS 3.1 cable modem, same firmware line as the
+  CM2000/CM2050V/CM3000. Captured on unprovisioned bench hardware: the
+  dashboard serves DocsisOffline.htm, no channel tables were observed,
+  and CableInfo.txt served empty (unverified whether that is
+  pre-provisioning emptiness).
+  modem.har is an assembled fixture, declared in its log.comment: the
+  real bench session with the /DocsisStatus.htm response body alone
+  transplanted from the netgear/cm3000 fixture (#127, same firmware
+  family) to simulate a provisioned unit. The capture's only fetch of
+  that page was pre-login and holds the login-page body; after login
+  the UI routed to DocsisOffline.htm. No channel value, system-info
+  field, or cable-diag code in the transplanted body was observed on
+  CM2500 hardware; the round-trip against the CM3000 golden matches
+  exactly, differing only in software_version, which comes from this
+  unit's real RouterStatus.htm. parser.yaml is the CM3000's verbatim
+  for the same reason.
+  Maintainer bench run, 2026-08-21, beta.22 tree: the integration
+  authenticated, fetched the unit's real authenticated DocsisStatus.htm
+  (63 KB, full page structure) and RouterStatus.htm, and parsed every
+  system_info field (HW 1.01, SW V6.01.03, uptime, cable-diag codes
+  reporting the unprovisioned state) with 0 DS / 0 US channels and
+  connection_status no_signal. That confirms the system_info mappings
+  on this hardware; the channel mappings stay unverified, and the
+  entry cannot be confirmed, until the unit is provisioned. A
+  post-provisioning capture then replaces the fixture and the golden.
+  Login: the form action's ?id= is validated and rotates per page
+  load, so action_source reads it off the login page at every login. A
+  bare or stale-id POST is refused even with correct credentials.
+  Every login outcome is a 302; only the Location target
+  discriminates: /index.htm accepted, /Login.htm wrong password,
+  /ErrorMsg.htm bad or stale id.
+  Session semantics, bench-probed 2026-08-20 (#189): the firmware
+  authenticates by SOURCE IP, not by session cookie. The XSRF_TOKEN
+  cookie only needs to be present for pages to render; any fresh
+  client on an authenticated IP reads full data, and a logout from any
+  client deauthenticates the IP for every client. Session expiry
+  signature: gated pages return HTTP 200 with the login-page body at
+  the data URL.
+  Logout.htm is an auto-action page (server-templated unAuth flag) and
+  can silently no-op; the real logout is the form's POST to
+  /goform/logout?id=N. The bench probe posted it with a live epoch-ms
+  nowTime, so firmware acceptance of the form's static default
+  nowTime=0 is unverified on this model.
+  actions.restart is observed on the bench: RouterStatus.htm's form
+  posts /goform/RouterStatus with buttonSelect=2. Whether it reboots a
+  provisioned unit is unverified.
+  Hand redaction: the TLS certificate subject in modem.har carried the
+  unit's MAC as its CableLabs device certificate subject and now reads
+  XX:XX:XX:XX:XX:XX; har-capture masks headers and cookies but not
+  _securityDetails.
+
+references:
+  issues:
+    - "[#189 — [Bug]: Authentication setup and persistence with Nighthawk CM2050V](https://github.com/solentlabs/cable_modem_monitor/issues/189)"
