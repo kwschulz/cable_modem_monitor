@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.22] - 2026-08-21
+
 ### Added
 
 - **Netgear CM2500 added to the catalog.** Form auth with the
