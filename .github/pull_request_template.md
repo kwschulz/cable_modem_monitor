@@ -29,7 +29,6 @@ Related to #
 ## Checklist
 
 - [ ] This PR is a bug fix, documented-feature change, or small scoped fix — **OR** it links to a prior Discussion (see [CONTRIBUTING § Before You File](../CONTRIBUTING.md#before-you-file))
-- [ ] CHANGELOG.md updated (or N/A for catalog/docs)
 - [ ] Tested against real modem hardware (catalog PRs and Core parsing/auth changes)
 - [ ] Catalog PR: used `/modem-intake` (or `skills/modem-intake.md` with another AI tool) or output matches its structure
 - [ ] Breaking change? Migration path described in the Description above

@@ -138,10 +138,10 @@ repos:
         files: \.(ql|qls)$
 
       - id: check-changelog
-        name: Check CHANGELOG.md reminder
-        entry: scripts/dev/check-changelog.sh
+        name: Validate CHANGELOG.md structure
+        entry: scripts/dev/run-python.sh scripts/check_changelog.py
         language: script
-        always_run: true
+        files: ^CHANGELOG\.md$
         pass_filenames: false
         stages: [pre-commit]
 

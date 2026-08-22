@@ -19,6 +19,7 @@ ignoreWords:
   - Anthranilic
   - BADHASH
   - Bowles
+  - Sadowski
   - Cabe
   - ccpk
   - chairstacker
@@ -593,6 +594,7 @@ words:
 
   # Dev tooling, linters, pytest/config keys, shell flags
   - addopts
+  - commitlint
   - aiohttp
   - asynccontextmanager
   - callspec
@@ -611,6 +613,9 @@ words:
   - monkeypatching
   - originalname
   - Pyflakes
+  - retarget
+  - retargets
+  - shfmt
   - pythonpath
   - rootdir
   - semgrep
