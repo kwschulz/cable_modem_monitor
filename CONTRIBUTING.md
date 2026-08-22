@@ -385,16 +385,20 @@ the conversation — not automatic).
 
 ### Commit Message Format
 
-Use clear, descriptive commit messages:
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
+CI validates every commit in a PR against `commitlint.config.js`, and the
+local `commit-msg` hook uses the same file.
 
 ```text
-Add support for Arris TG1682G modem
+feat(catalog): add support for Arris TG1682G
 
 - Added HTML parser for Arris status page format
 - Created test fixtures from real modem output
 - Updated documentation with supported models
-- All existing tests still pass
 ```
+
+Valid types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
+`build`, `ci`, `chore`, `revert`, `deps`.
 
 ## Issue Labels
 

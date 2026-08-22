@@ -50,14 +50,20 @@ else
 fi
 echo ""
 
-# Check 4: Core package importable
+# Check 4: local packages importable
+# All three must be editable-installed. Checking only Core would report a
+# healthy setup while catalog imports fail during collection.
 echo -e "${CYAN}[4/6]${NC} Checking packages installed..."
-if [ -f ".venv/bin/python" ] && .venv/bin/python -c "import solentlabs.cable_modem_monitor_core" 2>/dev/null; then
-    echo -e "${GREEN}✓${NC} Core package importable"
-else
-    echo -e "${YELLOW}!${NC} Core package not importable — packages may not be installed"
-    echo "   Run: .venv/bin/pip install -e packages/cable_modem_monitor_core"
-fi
+for pkg in core catalog catalog_tools; do
+    module="solentlabs.cable_modem_monitor_${pkg}"
+    directory="packages/cable_modem_monitor_${pkg}"
+    if [ -f ".venv/bin/python" ] && .venv/bin/python -c "import ${module}" 2>/dev/null; then
+        echo -e "${GREEN}✓${NC} ${module} importable"
+    else
+        echo -e "${YELLOW}!${NC} ${module} not importable, package may not be installed"
+        echo "   Run: .venv/bin/pip install -e ${directory}"
+    fi
+done
 echo ""
 
 # Check 5: Dev tools functional

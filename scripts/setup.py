@@ -333,7 +333,22 @@ def main():  # noqa: C901
         print_success("Development dependencies installed")
     print("")
 
-    # 8. Install Playwright for HAR capture (optional)
+    # 8. Install the local packages editable
+    # Without these, `solentlabs.*` imports resolve to whatever pip pulled
+    # from PyPI instead of this checkout, so tests run against the published
+    # release and fail in ways that look like broken code. setup_env.sh
+    # (`make setup`) does the same three installs; keep both paths in step.
+    print_step("Installing solentlabs packages (editable)...")
+    for package in (
+        "packages/cable_modem_monitor_core",
+        "packages/cable_modem_monitor_catalog",
+        "packages/cable_modem_monitor_catalog_tools",
+    ):
+        run_command(f"{pip_cmd} install --quiet -e {package}")
+    print_success("solentlabs packages installed")
+    print("")
+
+    # 9. Install Playwright for HAR capture (optional)
     print_step("Installing Playwright for modem traffic capture...")
     try:
         run_command(f"{pip_cmd} install --quiet playwright", quiet=True)
@@ -361,7 +376,7 @@ def main():  # noqa: C901
         print("  Run manually: pip install playwright && playwright install firefox")
     print("")
 
-    # 9. Install pre-commit hooks
+    # 10. Install pre-commit hooks
     print_step("Setting up pre-commit hooks...")
     try:
         run_command(f"{pip_cmd} show pre-commit", quiet=True)
@@ -377,7 +392,7 @@ def main():  # noqa: C901
         print("  Run manually: pre-commit install --hook-type pre-commit --hook-type commit-msg")
     print("")
 
-    # 10. Check Docker
+    # 11. Check Docker
     print_step("Checking Docker...")
     if shutil.which("docker"):
         try:
@@ -392,7 +407,7 @@ def main():  # noqa: C901
         print("  Optional: Install Docker Desktop for containerized development")
     print("")
 
-    # 11. Check Git LFS
+    # 12. Check Git LFS
     print_step("Checking Git LFS...")
     try:
         run_command("git lfs version", quiet=True)
@@ -415,12 +430,12 @@ def main():  # noqa: C901
         print("  Then:    git lfs install && git lfs pull")
     print("")
 
-    # 12. Configure git email privacy
+    # 13. Configure git email privacy
     print_step("Checking git email privacy...")
     configure_git_email_privacy()
     print("")
 
-    # 13. Check VS Code extensions
+    # 14. Check VS Code extensions
     print_step("Checking VS Code...")
     if shutil.which("code"):
         try:
@@ -456,7 +471,7 @@ def main():  # noqa: C901
         print("  Optional: Install VS Code for better development experience")
     print("")
 
-    # 14. Run a quick test
+    # 15. Run a quick test
     print_step("Running quick test to verify setup...")
     try:
         run_command(f"{python_cmd} -m pytest tests/parsers/netgear/test_cm600.py::test_fixtures_exist -q", quiet=True)

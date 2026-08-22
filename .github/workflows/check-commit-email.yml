@@ -1,7 +1,17 @@
 name: Check Commit Email Privacy
 
+# pull_request_target, not pull_request: a PR from a fork runs pull_request
+# with a read-only token, so the informational comment 403s and the check
+# reports failure even though it passed. pull_request_target runs with this
+# repo's token instead.
+#
+# SAFETY: this workflow must never execute code from the PR. It checks out
+# the base branch (the default under pull_request_target) and reads only
+# commit metadata (author name and email) from the PR head. Do not add a
+# checkout of the PR head, and do not run scripts, builds, or installs from
+# it.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
 
 jobs:
@@ -21,8 +31,10 @@ jobs:
       - name: Check commit author emails
         id: check-emails
         run: |
-          # Get commits in this PR
+          # Metadata only. Fetch the PR head into a local ref; nothing from it
+          # is ever executed.
           git fetch origin ${{ github.base_ref }}
+          git fetch origin refs/pull/${{ github.event.pull_request.number }}/head:pr-head
 
           # Allowed email patterns
           ALLOWED_PATTERNS=(
@@ -36,7 +48,7 @@ jobs:
           FOUND_PERSONAL=0
           PERSONAL_EMAILS=""
 
-          for commit in $(git rev-list origin/${{ github.base_ref }}..HEAD); do
+          for commit in $(git rev-list origin/${{ github.base_ref }}..pr-head); do
             EMAIL=$(git log -1 --format='%ae' $commit)
             AUTHOR=$(git log -1 --format='%an' $commit)
             SHORT=$(git rev-parse --short $commit)

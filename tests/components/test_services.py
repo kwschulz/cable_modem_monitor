@@ -7,6 +7,7 @@ Service handler tests mock runtime_data and HA infrastructure.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1054,6 +1055,59 @@ def test_generate_dashboard_handler_no_restart_support(
     yaml = handler(call)["yaml"]
     assert "button.cable_modem_restart_modem" not in yaml
     assert "This will restart your modem" not in yaml
+
+
+def test_generate_dashboard_number_mode_without_lock_status(
+    mock_runtime_data: CableModemRuntimeData,
+) -> None:
+    """Channels that report no lock_status still reach the dashboard in NUMBER mode.
+
+    Some modems never emit the field. Core leaves those channels alone and
+    every downstream consumer treats them as locked
+    (CHANNEL_IDENTIFICATION_SPEC.md section 6). Guards the whole service
+    path, not just the helper: the reported symptom was a dashboard whose
+    card list came back with no channel graphs at all.
+    """
+    from custom_components.cable_modem_monitor.const import (
+        CONF_CHANNEL_IDENTITY,
+        ChannelIdentity,
+    )
+
+    snapshot = mock_runtime_data.data_coordinator.data
+    modem_data = snapshot.modem_data
+    assert modem_data is not None
+    without_lock_status = {
+        **modem_data,
+        "downstream": [{k: v for k, v in ch.items() if k != "lock_status"} for ch in modem_data["downstream"]],
+        "upstream": [{k: v for k, v in ch.items() if k != "lock_status"} for ch in modem_data["upstream"]],
+    }
+    mock_runtime_data.data_coordinator.data = replace(snapshot, modem_data=without_lock_status)
+
+    entry = _make_mock_entry(mock_runtime_data)
+    entry.data = {
+        "entity_prefix": "none",
+        "host": "192.168.100.1",
+        CONF_CHANNEL_IDENTITY: ChannelIdentity.NUMBER,
+    }
+
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [entry]
+
+    handler = create_generate_dashboard_handler(hass)
+    call = MagicMock()
+    call.data = {
+        "include_downstream_power": True,
+        "include_upstream_power": True,
+        "include_status_card": True,
+        "channel_grouping": "by_direction",
+    }
+
+    yaml = handler(call)["yaml"]
+
+    # Position-mode entity ids carry no channel type.
+    assert "sensor.cable_modem_ds_ch_1_power" in yaml
+    assert "sensor.cable_modem_ds_ch_2_power" in yaml
+    assert "sensor.cable_modem_us_ch_1_power" in yaml
 
 
 def test_generate_dashboard_no_entry_raises() -> None:
