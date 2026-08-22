@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dashboards are no longer empty on modems that do not report channel
+  lock status.** In Channel Number mode the dashboard generator kept only
+  channels whose `lock_status` read `locked`, so a modem that never emits
+  the field lost every channel and
+  `cable_modem_monitor.generate_dashboard` returned a card list with no
+  channel graphs, even though the entities existed and held good data.
+  Core and the entity mapping layer already treat a missing `lock_status`
+  as locked, as the channel identification spec requires of every
+  consumer; the dashboard generator was the last one that did not.
+  Channels reported as explicitly unlocked are still left out. Found and
+  fixed by a contributor on a Hitron CODA56.
+
+- **The documented setup path now installs the packages it says it
+  installs.** `scripts/setup.sh` stopped after the development
+  requirements and never installed Core, Catalog, and Catalog Tools into
+  the virtual environment, so `solentlabs` imports resolved to whatever
+  was published on PyPI rather than the working copy, and tests ran
+  against the released build. `make setup` had always installed all
+  three; the two paths had drifted apart. `scripts/verify-setup.sh`, the
+  script the setup guide points to when something looks wrong, checked
+  only Core, so it reported a healthy environment while the other two
+  were missing. It now checks all three and names the one to install.
+
+### Changed
+
+- **Checks on pull requests from forks now report their own result.**
+  A pull request from a fork runs with a read-only token, so the two
+  workflows that post an informational comment received a permission
+  error and reported failure even when the underlying check had passed.
+  The commit email check now runs with the repository's own token, and
+  reads commit metadata only; it never checks out or runs anything from
+  the pull request. Commit message validation keeps the restricted token,
+  because it installs packages, and writes its guidance to the run
+  summary where a fork contributor can read it. The contributing guide's
+  commit message example also did not satisfy the project's own commit
+  message rules, and now does.
+
+- **A changelog entry is required only on pull requests into `main`.**
+  Entries are written at release time, so requiring one on every pull
+  request failed contributions that were never going to carry one. The
+  structure of this file is now validated on every pull request instead,
+  reporting only on lines a branch actually touches.
+
 ## [3.14.0-beta.22] - 2026-08-21
 
 ### Added
