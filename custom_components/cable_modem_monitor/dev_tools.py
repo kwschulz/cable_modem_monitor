@@ -137,7 +137,11 @@ def _get_channel_info_number_mode(
     result: list[tuple[str, int]] = []
     for idx, ch in enumerate(channels):
         ch_num = ch.get("channel_number", idx + 1)
-        if ch.get("lock_status") == "locked":
+        lock_status = ch.get("lock_status")
+        # Missing lock_status is a supported Core condition (some modems,
+        # e.g. hitron/coda56, don't report it) and must be treated as
+        # locked per CHANNEL_IDENTIFICATION_SPEC §6.
+        if lock_status is None or lock_status == "locked":
             result.append(("", ch_num))
     return sorted(result, key=lambda x: x[1])
 
