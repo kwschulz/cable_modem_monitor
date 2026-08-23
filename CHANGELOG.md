@@ -32,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only Core, so it reported a healthy environment while the other two
   were missing. It now checks all three and names the one to install.
 
+- **The Technicolor XB8 no longer logs in on every poll.** Its catalog
+  entry named the session cookie `session`, inherited from the XB7
+  fixture it was reconstructed from; the gateway issues `DUKSID`. Core
+  never recognized the session it had just established, so it posted
+  credentials again on every poll. The first real XB8 capture,
+  contributed by an owner on Rogers, corrects the cookie name, adds the
+  logout endpoint, and confirms the entry against their gateway, which
+  moves it from awaiting verification to confirmed. It also confirms on
+  XB8 hardware the firmware quirk the entry had assumed from the XB7:
+  one OFDM channel's error counts appear again on a QAM channel. That is
+  why this modem reports no error totals and has no error total or error
+  rate sensors.
+
 ### Changed
 
 - **Checks on pull requests from forks now report their own result.**
