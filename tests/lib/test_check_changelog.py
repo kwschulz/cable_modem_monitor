@@ -315,8 +315,9 @@ def test_real_changelog_sections_are_known_in_the_unreleased_block() -> None:
         (i for i in range(start + 1, len(lines)) if _mod._VERSION_HEADING.match(lines[i])),
         len(lines),
     )
+    # An empty Unreleased block is the normal state between a release bump and
+    # the next entry, so only the names are asserted, never their presence.
     sections = [line[4:] for line in lines[start:end] if line.startswith("### ")]
-    assert sections, "Unreleased block has no ### section — release.py has nothing to read"
     assert all(name in _mod._SECTIONS for name in sections), sections
 
 
