@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.23] - 2026-08-24
+
 ### Fixed
 
 - **The fixture PII gate now scans HAR request URLs.** A credential in a
