@@ -233,16 +233,30 @@ def test_gate_fails_on_a_de_accented_language(gate, capsys: pytest.CaptureFixtur
     assert "diacritic density" in capsys.readouterr().out
 
 
-def test_absent_strings_file_skips_the_gate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Documented, not endorsed: a missing strings.json returns 0.
-
-    ``_COMPONENT_DIR`` is a *relative* path, so this is also what happens
-    when the hook is invoked from anywhere but the repo root — the exit
-    code is indistinguishable from a real pass. pre-commit always runs
-    from the repo root, which is what keeps it from mattering today.
-    """
+def test_absent_strings_file_fails_loudly(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A missing strings.json means the gate verified nothing, so exit 2."""
     monkeypatch.setattr(_mod, "_STRINGS", tmp_path / "absent.json")
-    assert _mod.main() == 0
+    assert _mod.main() == 2
+
+
+def test_absent_translations_dir_fails_loudly(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Same for the translations directory."""
+    strings = tmp_path / "strings.json"
+    strings.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(_mod, "_STRINGS", strings)
+    monkeypatch.setattr(_mod, "_TRANSLATIONS_DIR", tmp_path / "absent")
+    assert _mod.main() == 2
+
+
+def test_component_paths_are_anchored_to_the_repo_root() -> None:
+    """The gate must not depend on the process cwd.
+
+    With a relative component path the hook found nothing — and returned
+    success — whenever it ran from anywhere but the repo root.
+    """
+    assert _mod._STRINGS.is_absolute()
+    assert _mod._STRINGS.is_file()
+    assert _mod._TRANSLATIONS_DIR.is_dir()
 
 
 # ---------------------------------------------------------------------------

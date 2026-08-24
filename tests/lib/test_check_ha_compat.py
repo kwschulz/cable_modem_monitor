@@ -187,21 +187,25 @@ def test_unparseable_specifier_is_reported_rather_than_swallowed(gate, capsys: p
     assert "could not parse" in capsys.readouterr().out
 
 
-def test_absent_homeassistant_skips_the_gate(
+def test_absent_homeassistant_fails_loudly(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Documented, not endorsed: with no HA installed the gate returns 0.
+    """No HA installed means the gate cannot check, which is not a pass.
 
-    The check cannot run without HA's constraints file, but the exit code
-    is indistinguishable from a real pass, so a local run in an
-    environment missing HA reports success having verified nothing. CI
-    installs homeassistant explicitly (tests.yml § HA Dependency
-    Compatibility), which is what keeps this path from mattering there.
+    Exit 2 is the repo's "invocation error" code, distinct from 1 for a
+    real conflict. Returning 0 here would make an unverified run
+    indistinguishable from a verified one — and because a gate that
+    wrongly passes generates no signal, nothing would ever correct it.
     """
     monkeypatch.setattr(_mod, "_find_ha_constraints", lambda: None)
-    assert _mod.main() == 0
-    assert "skipping" in capsys.readouterr().out
+    assert _mod.main() == 2
+    assert "verified nothing" in capsys.readouterr().err
+
+
+def test_conflict_and_cannot_check_use_different_codes(gate, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Live counterpart: 2 must not swallow the real-violation path."""
+    assert gate(["requests>=2.34.2"], "requests==2.32.3\n") == 1
 
 
 # ---------------------------------------------------------------------------
