@@ -31,6 +31,13 @@ def _load_module() -> Any:
 
     ``scripts/`` is not an importable package, so the hook is loaded
     directly rather than through the package namespace.
+
+    Deliberately not ``tests.fixture_helpers.load_script``, which the
+    root-level ``tests/lib/`` suites share: this package is its own
+    pytest rootdir, so ``tests`` resolves to *this* directory and the
+    root helper is unreachable from here. Importing it would also
+    shadow Core's ``tests`` package, which is the collision
+    fixture_helpers' own docstring documents.
     """
     spec = importlib.util.spec_from_file_location("check_fixture_pii", _SCRIPT)
     assert spec and spec.loader

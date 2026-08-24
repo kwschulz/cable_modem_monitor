@@ -397,6 +397,7 @@ words:
   - backoffs
   - backticked
   - basenames
+  - syspath
   - beautifulsoup
   - unsmudged
   - webinspector

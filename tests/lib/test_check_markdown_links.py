@@ -21,19 +21,13 @@ asserting either would pin behavior the script never claims.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
 import pytest
 
-# Loaded by path — scripts/ is not an importable package.
-_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_markdown_links.py"
-_spec = importlib.util.spec_from_file_location("check_markdown_links", _SCRIPT)
-assert _spec is not None and _spec.loader is not None
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules["check_markdown_links"] = _mod
-_spec.loader.exec_module(_mod)
+from tests.fixture_helpers import load_script
+
+_mod = load_script("scripts/check_markdown_links.py")
 
 _BLOB = "https://github.com/solentlabs/cable_modem_monitor/blob/main"
 

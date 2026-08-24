@@ -24,20 +24,13 @@ rather than the whole file.
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 
 import pytest
 
-# Load the checker by file path — it lives in scripts/, not in any
-# package, so it cannot be imported normally.
-_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_changelog.py"
-_spec = importlib.util.spec_from_file_location("check_changelog", _SCRIPT)
-assert _spec is not None and _spec.loader is not None
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules["check_changelog"] = _mod
-_spec.loader.exec_module(_mod)
+from tests.fixture_helpers import load_script
+
+_mod = load_script("scripts/check_changelog.py")
 
 _CHANGELOG = Path(__file__).resolve().parents[2] / "CHANGELOG.md"
 
