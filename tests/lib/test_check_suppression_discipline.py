@@ -18,23 +18,15 @@ exercise that distinction directly.
 
 from __future__ import annotations
 
-import importlib.util
 import re
 import sys
 from pathlib import Path
 
 import pytest
 
-from tests.fixture_helpers import collect_fixtures, load_fixture
+from tests.fixture_helpers import collect_fixtures, load_fixture, load_script
 
-# Load the scanner module by file path — it lives in scripts/, not
-# in any package, so we cannot import it normally.
-_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_suppression_discipline.py"
-_spec = importlib.util.spec_from_file_location("check_suppression_discipline", _SCRIPT)
-assert _spec is not None and _spec.loader is not None
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules["check_suppression_discipline"] = _mod
-_spec.loader.exec_module(_mod)
+_mod = load_script("scripts/check_suppression_discipline.py")
 
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "suppression_diffs"

@@ -48,8 +48,8 @@ class FormNonceAuthHandler(FormAuthHandler):
         super().__init__(
             login_path=login_path,
             cookie_name=cookie_name,
+            login_page_html=login_page_html,
         )
-        self._login_page_html = login_page_html
 
     def is_login_request(self, method: str, path: str) -> bool:
         """GET to login page is also a login-flow request."""

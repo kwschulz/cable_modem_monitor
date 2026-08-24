@@ -2,22 +2,15 @@ name: Changelog Verification
 
 on:
   pull_request:
+    # "edited" covers a base-branch retarget, which changes which steps apply.
     types: [opened, edited, synchronize, reopened]
-    paths-ignore:
-      - "docs/**"
-      - "*.md"
-      - ".github/**"
-      - "scripts/**"
-      - "tests/**"
 
 jobs:
   check-changelog:
-    name: Verify CHANGELOG.md Updated
+    name: Changelog Check
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
-      issues: write
 
     steps:
       - name: Checkout code
@@ -25,131 +18,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check if CHANGELOG.md was modified
-        id: changelog_check
-        run: |
-          # Fetch the base branch
-          git fetch origin ${{ github.base_ref }}
-
-          # Check if CHANGELOG.md has been modified in this PR
-          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q "^CHANGELOG.md$"; then
-            echo "changelog_updated=true" >> $GITHUB_OUTPUT
-            echo "✅ CHANGELOG.md has been updated"
-          else
-            echo "changelog_updated=false" >> $GITHUB_OUTPUT
-            echo "⚠️ CHANGELOG.md has not been updated"
-          fi
-
-      - name: Check if code changes were made
-        id: code_check
-        run: |
-          # Check if any Python files in custom_components were changed
-          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q "^custom_components/.*\.py$"; then
-            echo "code_changed=true" >> $GITHUB_OUTPUT
-            echo "Code changes detected"
-          else
-            echo "code_changed=false" >> $GITHUB_OUTPUT
-            echo "No code changes detected"
-          fi
-
-      - name: Verify changelog update
-        if: steps.code_check.outputs.code_changed == 'true' && steps.changelog_check.outputs.changelog_updated == 'false'
-        run: |
-          echo "❌ CHANGELOG.md needs to be updated!"
-          echo "This PR contains code changes but CHANGELOG.md was not updated."
-          echo ""
-          echo "Please add an entry to CHANGELOG.md following the Keep a Changelog format."
-          exit 1
-
-      - name: Validate CHANGELOG.md format
-        if: steps.changelog_check.outputs.changelog_updated == 'true'
-        run: |
-          # Check if CHANGELOG.md follows Keep a Changelog format
-          if ! grep -q "^## \[Unreleased\]" CHANGELOG.md; then
-            echo "⚠️ Warning: CHANGELOG.md should have an [Unreleased] section"
-          fi
-
-          if ! grep -q "^### Added\|^### Changed\|^### Deprecated\|^### Removed\|^### Fixed\|^### Security" CHANGELOG.md; then
-            echo "⚠️ Warning: CHANGELOG.md should use standard section headers (Added, Changed, Fixed, etc.)"
-          fi
-
-          echo "✅ CHANGELOG.md format looks good"
-
-      - name: Comment on PR (if changelog missing)
-        if: failure()
-        uses: actions/github-script@v9
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
-          script: |
-            const message = `## ⚠️ CHANGELOG.md Update Required
+          python-version: "3.12"
 
-            This pull request contains code changes but \`CHANGELOG.md\` has not been updated.
-
-            ### Required Action
-
-            Please add an entry to \`CHANGELOG.md\` under the \`[Unreleased]\` section following the [Keep a Changelog](https://keepachangelog.com/) format.
-
-            ### Format
-
-            \`\`\`markdown
-            ## [Unreleased]
-
-            ### Added
-            - New features go here
-
-            ### Changed
-            - Changes to existing functionality go here
-
-            ### Deprecated
-            - Soon-to-be removed features go here
-
-            ### Removed
-            - Removed features go here
-
-            ### Fixed
-            - Bug fixes go here
-
-            ### Security
-            - Security fixes go here
-            \`\`\`
-
-            ### Examples
-
-            \`\`\`markdown
-            ### Added
-            - Support for ARRIS SB8200 modem (#123)
-            - New sensor for modem temperature
-
-            ### Fixed
-            - Authentication timeout on Motorola MB7621 (#456)
-            - Channel parsing error on Technicolor TC4400
-            \`\`\`
-
-            ### Exemptions
-
-            If this PR only contains:
-            - Documentation updates
-            - Test improvements
-            - CI/CD configuration changes
-            - Non-functional changes
-
-            Then a CHANGELOG update may not be required. Please add a comment explaining why.
-
-            ---
-
-            For more information, see [CONTRIBUTING.md](https://github.com/solentlabs/cable_modem_monitor/blob/main/CONTRIBUTING.md).`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: message
-            });
-
-      - name: Success message
-        if: success()
+      # Reports only on lines this PR touches. Entries published before
+      # these rules existed are read for context, never flagged.
+      - name: Validate CHANGELOG.md structure
         run: |
-          if [ "${{ steps.code_check.outputs.code_changed }}" == "true" ]; then
-            echo "✅ CHANGELOG.md has been properly updated"
-          else
-            echo "✅ No code changes, CHANGELOG update not required"
+          git fetch origin ${{ github.base_ref }}
+          python scripts/check_changelog.py --base origin/${{ github.base_ref }}
+
+      # Contributor PRs target the open beta branch and carry no CHANGELOG
+      # entry; the maintainer writes it before the version bump. A PR into
+      # main is a release or hotfix, so code changes there must ship with one.
+      # See docs/reference/RELEASING.md § CHANGELOG ownership.
+      - name: Require a CHANGELOG entry for code changes (PRs into main)
+        if: github.base_ref == 'main'
+        run: |
+          changed=$(git diff --name-only origin/main...HEAD)
+          code=$(echo "$changed" | grep -E '^(custom_components|packages)/.*\.py$' | grep -v '/tests/' || true)
+          if [ -n "$code" ] && ! echo "$changed" | grep -qx 'CHANGELOG.md'; then
+            echo "This PR into main changes code but CHANGELOG.md was not updated."
+            echo "Reconcile [Unreleased] before the version bump (docs/reference/RELEASING.md)."
+            exit 1
           fi
+          echo "CHANGELOG.md entry present, or no code changes."

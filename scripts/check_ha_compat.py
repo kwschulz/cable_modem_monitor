@@ -6,7 +6,17 @@ packages that declare floors above HA's pins will fail to install at runtime eve
 though they install fine in a standalone environment (e.g., the beta.4 incident
 where requests>=2.34.2 and pyyaml>=6.0.3 both exceeded HA's pins).
 
-Exit non-zero if any conflict is found — this IS a build gate.
+Exit codes:
+  0  Every declared dependency satisfies HA's pins
+  1  At least one declared floor conflicts with an HA pin
+  2  Cannot check — homeassistant is not installed, so there are no
+     constraints to compare against
+
+2 is deliberately not 0. A gate has three outcomes and only two exit
+codes are ever reached by accident: collapsing "couldn't check" into
+"passed" makes an unverified run indistinguishable from a verified one,
+and nothing downstream ever notices, because a gate that wrongly passes
+generates no signal.
 """
 
 import importlib.util
@@ -74,8 +84,13 @@ def _parse_pyproject_deps(path: Path) -> list[tuple[str, str]]:
 def main() -> int:
     constraints_path = _find_ha_constraints()
     if not constraints_path:
-        print("  homeassistant not installed — skipping HA compatibility check.")
-        return 0
+        print(
+            "  ERROR: homeassistant is not installed, so its package constraints"
+            " cannot be read — this check verified nothing.",
+            file=sys.stderr,
+        )
+        print("  Fix: pip install homeassistant (CI installs it for this job).", file=sys.stderr)
+        return 2
 
     ha_pins = _parse_ha_constraints(constraints_path)
 

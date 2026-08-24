@@ -132,7 +132,7 @@ def main() -> int:
     """Normalize all modem.yaml and parser.yaml files in the catalog."""
     dry_run = "--dry-run" in sys.argv
 
-    root = Path("packages/cable_modem_monitor_catalog/solentlabs/" "cable_modem_monitor_catalog/modems")
+    root = Path("packages/cable_modem_monitor_catalog/solentlabs/cable_modem_monitor_catalog/modems")
     if not root.exists():
         print("Error: catalog modems directory not found")
         return 1

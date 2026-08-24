@@ -75,6 +75,29 @@ When a value must be sanitized by hand:
 Precedent: the Sagemcom F3896LG-ZG session token in a logout URL
 path, declared in that modem's notes.
 
+#### When the value's shape is the evidence
+
+`[REDACTED]` destroys shape. Where the fixture exists to document a
+wire format — a bare-base64 credential, a fixed-width token — replacing
+the value with a differently-shaped string erases the very thing the
+capture was taken to prove, and any later analyzer re-run infers the
+wrong auth strategy from it.
+
+In that case substitute a **format-preserving placeholder** whose
+decoded or literal content is an obvious non-secret:
+
+- base64 basic-auth → `YWRtaW46c2FuaXRpemVk` (`admin:sanitized`)
+- fixed-width hex token → same width, `sanitized`-derived digest
+
+The placeholder must still be declared in `modem.yaml` `notes:` like any
+other substitution, and the non-secret half must appear in
+`scripts/data/pii_safe_values.json` under `safe_credential_placeholders`
+with provenance. The gate allowlists the *decoded* placeholder, not the
+encoded blob, so a real credential for the same username is still
+flagged.
+
+Precedent: the Arris SB8200 `modem-cookie.har` login credential.
+
 ### Assembled fixtures
 
 Not every fixture is a wire capture. Before har-capture existed,

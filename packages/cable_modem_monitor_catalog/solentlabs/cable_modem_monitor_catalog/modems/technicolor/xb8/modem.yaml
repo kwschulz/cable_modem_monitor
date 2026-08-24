@@ -13,20 +13,31 @@ auth:
   action: "/check.jst"
   username_field: username
   password_field: password
-  cookie_name: "session"
+  cookie_name: "DUKSID"
 
   success:
     redirect: "/at_a_glance.jst"
+
+actions:
+  logout:
+    type: http
+    method: GET
+    endpoint: "/home_loggedout.jst"
+    # source_inferred from the toolbar Logout link present on every
+    # captured page and from global.js (no logout request in the capture).
+    # requires_session not set (defaults to false) pending contributor
+    # confirmation whether a Cookie header appears in the logout request.
+
 hardware:
   docsis_version: "3.1"
   release_date: "2022"
 
-status: awaiting_verification
+status: confirmed
 
 sources:
   brands: "Xfinity: [FCC XB8/CGM4981COM user guide](https://fcc.report/FCC-ID/G954981X/5542915.pdf); Panoramic Wifi: [Cox Technicolor CGM4981 support page](https://www.cox.com/residential/support/technicolor-cgm4981.html)"
   model_aliases: "[FCC XB8/CGM4981COM user guide](https://fcc.report/FCC-ID/G954981X/5542915.pdf); [DSLReports — Next Gateway XB8 Technicolor CGM4981COM](https://www.dslreports.com/forum/r33227126-Next-Gateway-XB8-Technicolor-CGM4981COM-Wi-Fi-6E)"
-  auth_config: "[#101 Technicolor CGM4981COM](https://github.com/solentlabs/cable_modem_monitor/issues/101) diagnostics (auth_discovery: form_plain to /check.jst, fields observed)"
+  auth_config: "[#194 XB8 error graphs](https://github.com/solentlabs/cable_modem_monitor/issues/194) HAR capture (POST /check.jst with plain username and password fields, 302 to at_a_glance.jst, DUKSID session cookie)"
   release_date: "Xfinity rollout began 2022: [DSLReports — Next Gateway XB8](https://www.dslreports.com/forum/r33227126-Next-Gateway-XB8-Technicolor-CGM4981COM-Wi-Fi-6E); [Xfinity Community Forum — NEW xFi Gateway XB8](https://forums.xfinity.com/conversations/your-home-network/new-xfi-gateway-xb8/6216d91580db9c3cdd5e96fc)"
 attribution:
   contributors:
@@ -34,6 +45,10 @@ attribution:
       contribution:
         "[Issue #101](https://github.com/solentlabs/cable_modem_monitor/issues/101)
         diagnostics captures and XB7-parser field test"
+    - github: https://github.com/Boby360
+      contribution:
+        "[Issue #194](https://github.com/solentlabs/cable_modem_monitor/issues/194)
+        first XB8 wire capture and hardware confirmation diagnostics"
 
 isps:
   - Rogers
@@ -42,31 +57,28 @@ isps:
   - Cox
 notes: |
   DOCSIS 3.1 Wi-Fi 6E cable modem + router gateway (CGM4981COM),
-  successor to the XB7 (CGM4331COM). Same web UI family: form-based
-  authentication to /check.jst, transposed channel tables on
-  /network_setup.jst, spaced-colon uptime format "X days Xh: Xm: Xs".
-  Reconstructed fixture — not a wire capture. No XB8 HAR has been
-  contributed. test_data/modem.har uses the XB7 fixture as the
-  structural template with real CGM4981COM values substituted from the
-  issue #101 diagnostics (v3.12.0 live parse: 34/34 downstream and 5/5
-  upstream channels parsed on real hardware, which is the empirical
-  basis for the shared page structure). Observed values: channel IDs,
-  frequencies, SNR, power, modulation, upstream channel types, error
-  codewords, uptime, software/BOOT/hardware versions, model string.
-  Unobserved template filler: per-channel lock status, upstream symbol
-  rates, unerrored codewords, check.jst POST mechanics, and the
-  /at_a_glance.jst landing the login redirects to. That landing entry
-  records only that following the login's own 302 Location returns 200,
-  inferred from the XB6 and XB10 captures of the same firmware family. Its
-  body is never parsed (parser.yaml declares only /network_setup.jst), so
-  it is left empty rather than invented. Replace the
-  fixture with a real HAR when an XB8 owner contributes one.
+  successor to the XB7 (CGM4331COM). Same web UI family as the XB6 and
+  XB10: form authentication to /check.jst with a DUKSID session cookie,
+  transposed channel tables on /network_setup.jst, spaced-colon uptime
+  format "X days Xh:Xm:Xs".
   Firmware renders the SC-QAM fallback "TDMA" channel type for OFDMA
-  upstream channels (observed on channel 11, modulation OFDMA).
-  Quirk — error count duplication observed on XB8 as on XB7: primary
-  QAM channel 23 reports corrected/uncorrected counts identical to
-  OFDM channel 34. Aggregate intentionally omitted for the same reason
-  as the XB7 entry.
+  upstream channels (upstream channel 4 reports Modulation OFDMA with
+  Channel Type TDMA, symbol rate 0).
+  Quirk, error count duplication, observed on XB8 as on XB7: QAM
+  channel 29 reports correctable and uncorrectable codeword counts
+  identical to OFDM channel 34 (1811327204 and 137079716 on both).
+  Aggregate intentionally omitted for the same reason as the XB7 entry:
+  a downstream.qam sum reads 1.81 billion against a true QAM total of
+  841 thousand, so the modem exposes no error-total or error-rate
+  sensors. Per-channel error counts are unaffected.
+  The Logout endpoint is source_inferred; the capture contains no
+  logout request. No reboot control was captured, so the entry ships
+  without a restart action.
+  The factory Wi-Fi SSID, default password, WPS PIN and serial number
+  in the Device Label Information block on network_setup.jst were
+  redacted by hand: har-capture had no labeled-credential detector at
+  capture time.
 references:
   issues:
     - "[#101 — [Modem Request] Technicolor CGM4981COM](https://github.com/solentlabs/cable_modem_monitor/issues/101)"
+    - "[#194 — [Bug] XB8 error graphs are not generating](https://github.com/solentlabs/cable_modem_monitor/issues/194)"

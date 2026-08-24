@@ -10,8 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
-      issues: write
 
     steps:
       - name: Checkout code
@@ -40,64 +38,35 @@ jobs:
           # Validate each commit message
           npx commitlint --from origin/${{ github.base_ref }} --to HEAD --verbose
 
-      - name: Comment on PR (if validation fails)
+      # Reported through the run summary rather than a PR comment: a fork's
+      # token is read-only, so createComment 403s and the contributor sees a
+      # red check with no explanation of what to change.
+      - name: Explain the expected format
         if: failure()
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const message = `## ❌ Commit Message Validation Failed
-
-            Your commit messages don't follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.
-
-            ### Expected Format:
-            \`\`\`
-            <type>(<optional scope>): <description>
-
-            [optional body]
-
-            [optional footer]
-            \`\`\`
-
-            ### Valid Types:
-            - **feat**: A new feature
-            - **fix**: A bug fix
-            - **docs**: Documentation changes
-            - **style**: Code style changes (formatting, missing semi-colons, etc)
-            - **refactor**: Code refactoring without changing functionality
-            - **perf**: Performance improvements
-            - **test**: Adding or updating tests
-            - **build**: Build system changes
-            - **ci**: CI/CD configuration changes
-            - **chore**: Other changes that don't modify src or test files
-            - **deps**: Dependency updates
-
-            ### Examples:
-            \`\`\`
-            feat: add support for ARRIS SB8200 modem
-            fix: resolve authentication timeout on Motorola modems
-            docs: update installation instructions
-            refactor: simplify parser discovery logic
-            test: add tests for TC4400 parser
-            ci: add CodeQL security scanning
-            deps: update beautifulsoup4 to 4.12.3
-            \`\`\`
-
-            ### How to Fix:
-            1. Amend your commit messages to follow the format above
-            2. Use \`git commit --amend\` for the most recent commit
-            3. Use \`git rebase -i\` for older commits
-            4. Force push with \`git push --force-with-lease\`
-
-            For more details, see the [Contributing Guide](https://github.com/solentlabs/cable_modem_monitor/blob/main/CONTRIBUTING.md).`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: message
-            });
+        run: |
+          {
+            echo "## Commit message validation failed"
+            echo ""
+            echo "Commits follow Conventional Commits:"
+            echo ""
+            echo '```'
+            echo "<type>(<optional scope>): <description>"
+            echo '```'
+            echo ""
+            echo "Valid types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert, deps"
+            echo ""
+            echo "Examples:"
+            echo ""
+            echo '```'
+            echo "fix: treat channels without lock_status as locked"
+            echo "feat(catalog): add Arris SB8200"
+            echo '```'
+            echo ""
+            echo "Amend with \`git commit --amend\`, then push with \`--force-with-lease\`."
+            echo "See CONTRIBUTING.md section Commit Message Format."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Success message
         if: success()
         run: |
-          echo "✅ All commit messages are valid!"
+          echo "All commit messages are valid."

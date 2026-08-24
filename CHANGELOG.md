@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.23] - 2026-08-24
+
+### Fixed
+
+- **The fixture PII gate now scans HAR request URLs.** A credential in a
+  URL carries no field name, so har-capture's strict rules have nothing
+  to match on, and its propagation sweep only rewrites values already
+  redacted elsewhere in the same capture — a secret that appears *only*
+  in a URL has no redacted copy to propagate from and shipped intact.
+  `check_fixture_pii` read just the `text`, `value` and `content` keys
+  and stopped recursion at bare strings, so `request.url` and
+  `queryString` were never examined at all. It now checks every path
+  segment and query entry — keys as well as values, in both literal and
+  percent-encoded form — for base64 basic-auth pairs and opaque
+  high-entropy tokens, skipping static asset filenames. Scanning the
+  committed catalog under the new rule found one real leak: the Arris
+  SB8200 `modem-cookie.har` login URL carried plaintext-equivalent
+  credentials, which are now replaced with a format-preserving
+  placeholder that keeps the bare-base64 wire shape the fixture exists
+  to document. The gate previously reported that file as clean.
+
+- **Three catalog fixtures no longer carry factory Wi-Fi credentials.**
+  har-capture 0.12.2 closes two holes in its sanitizer: labeled default
+  Wi-Fi passwords and SSIDs survived redaction, and `check_content`
+  skipped an entire response body whenever it hit a stray placeholder,
+  leaving 209 of 750 fleet entries unscanned. Re-running the fixture gate
+  on the upgraded scanner found real credentials in three committed
+  Technicolor captures. The Device Label Information block these gateways
+  render carries factory Wi-Fi credentials in plain text: the XB7 and
+  XB10 fixtures each kept a default SSID and password, the XB10 also its
+  serial number, and the XB6 fixture kept a private network name. The
+  serial had slipped past this project's own gate because
+  `check_fixture_pii.py` treats any finding containing a colon as a code
+  false positive, and har-capture returns that finding with its label
+  attached. Every value is now replaced with `[REDACTED]`; nothing
+  structural changed and none of them is parsed. The declared har-capture
+  floor moves to 0.12.2 as a hard minimum, not a refresh. Redaction stops
+  these values reaching new checkouts. It does not remove them from
+  history, and the fixtures have never shipped to PyPI or HACS, which
+  exclude `test_data`.
+
+- **Dashboards are no longer empty on modems that do not report channel
+  lock status.** In Channel Number mode the dashboard generator kept only
+  channels whose `lock_status` read `locked`, so a modem that never emits
+  the field lost every channel and
+  `cable_modem_monitor.generate_dashboard` returned a card list with no
+  channel graphs, even though the entities existed and held good data.
+  Core and the entity mapping layer already treat a missing `lock_status`
+  as locked, as the channel identification spec requires of every
+  consumer; the dashboard generator was the last one that did not.
+  Channels reported as explicitly unlocked are still left out. Found and
+  fixed by a contributor on a Hitron CODA56.
+
+- **The documented setup path now installs the packages it says it
+  installs.** `scripts/setup.sh` stopped after the development
+  requirements and never installed Core, Catalog, and Catalog Tools into
+  the virtual environment, so `solentlabs` imports resolved to whatever
+  was published on PyPI rather than the working copy, and tests ran
+  against the released build. `make setup` had always installed all
+  three; the two paths had drifted apart. `scripts/verify-setup.sh`, the
+  script the setup guide points to when something looks wrong, checked
+  only Core, so it reported a healthy environment while the other two
+  were missing. It now checks all three and names the one to install.
+
+- **The Technicolor XB8 no longer logs in on every poll.** Its catalog
+  entry named the session cookie `session`, inherited from the XB7
+  fixture it was reconstructed from; the gateway issues `DUKSID`. Core
+  never recognized the session it had just established, so it posted
+  credentials again on every poll. The first real XB8 capture,
+  contributed by an owner on Rogers, corrects the cookie name, adds the
+  logout endpoint, and confirms the entry against their gateway, which
+  moves it from awaiting verification to confirmed. It also confirms on
+  XB8 hardware the firmware quirk the entry had assumed from the XB7:
+  one OFDM channel's error counts appear again on a QAM channel. That is
+  why this modem reports no error totals and has no error total or error
+  rate sensors.
+
+### Changed
+
+- **Checks on pull requests from forks now report their own result.**
+  A pull request from a fork runs with a read-only token, so the two
+  workflows that post an informational comment received a permission
+  error and reported failure even when the underlying check had passed.
+  The commit email check now runs with the repository's own token, and
+  reads commit metadata only; it never checks out or runs anything from
+  the pull request. Commit message validation keeps the restricted token,
+  because it installs packages, and writes its guidance to the run
+  summary where a fork contributor can read it. The contributing guide's
+  commit message example also did not satisfy the project's own commit
+  message rules, and now does.
+
+- **A changelog entry is required only on pull requests into `main`.**
+  Entries are written at release time, so requiring one on every pull
+  request failed contributions that were never going to carry one. The
+  structure of this file is now validated on every pull request instead,
+  reporting only on lines a branch actually touches.
+
 ## [3.14.0-beta.22] - 2026-08-21
 
 ### Added

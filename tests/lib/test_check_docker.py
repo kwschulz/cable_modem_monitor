@@ -21,21 +21,11 @@ Coverage breakdown per docs/CODE_REVIEW.md § Test File Standards:
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-from pathlib import Path
-
 import pytest
 
-# Load the checker module by file path — it lives in scripts/dev/, not in
-# any package (and its filename is not a valid module name), so we cannot
-# import it normally.
-_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "dev" / "check-docker.py"
-_spec = importlib.util.spec_from_file_location("check_docker", _SCRIPT)
-assert _spec is not None and _spec.loader is not None
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules["check_docker"] = _mod
-_spec.loader.exec_module(_mod)
+from tests.fixture_helpers import load_script
+
+_mod = load_script("scripts/dev/check-docker.py")
 
 
 # ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ This document defines the standards for code review in this project.
 |--------------------------|-------------------------------------------------------------|
 | Design Principles        | DRY, SoC, SOLID, no shortcuts, quality gates are not negotiable |
 | Source File Standards    | Docstrings, type hints, async, forward refs, suppression discipline |
-| Test File Standards      | Table-driven tests, fixtures vs inline, no data blobs, test overrides as code smell |
+| Test File Standards      | Table-driven tests, fixtures vs inline, no data blobs, test overrides as code smell, gate scripts require tests |
 | Error Handling           | Consistent patterns, meaningful messages                    |
 | Naming Conventions       | Clear, descriptive, consistent                              |
 
@@ -287,6 +287,12 @@ custom_components/cable_modem_monitor/services.py
     → tests/components/test_services.py
 custom_components/cable_modem_monitor/dev_tools.py
     → tests/components/test_services.py
+
+# Gate scripts (loaded by path — scripts/ is not an importable package)
+scripts/check_changelog.py
+    → tests/lib/test_check_changelog.py
+packages/cable_modem_monitor_catalog/scripts/check_fixture_pii.py
+    → packages/cable_modem_monitor_catalog/tests/test_check_fixture_pii_urls.py
 ```
 
 ---
@@ -363,6 +369,37 @@ def test_validation(input: str, expected: bool, desc: str):
 - **Core components**: Target 100% where sensible
 - **Parsers**: Focus on parse logic, not every edge case
 - **Integration tests**: Cover happy path + critical error paths
+- **Gate scripts**: Required — see below
+
+### Gate Scripts Require Tests
+
+Anything wired into `.pre-commit-config.yaml` or a `make` check target
+needs a test file, even though `scripts/` sits outside every `--cov`
+target and no coverage floor will notice its absence.
+
+These scripts are what enforce quality on everything else, which makes
+them the one category where a silent failure is invisible by
+construction: a broken gate does not report an error, it reports
+success. `check_fixture_pii.py` announced "120 fixture files clean"
+while a live credential sat in a HAR URL, because nothing was watching
+the watcher.
+
+A gate test must prove the gate **fires**, not merely that it stays
+quiet:
+
+- Every guard case (input that must NOT be flagged) is paired with a
+  live counterpart asserting the same rule still fires outside the
+  guard. Otherwise a rule that has stopped working passes both.
+- Verify by mutation before trusting a new gate test: break the rule in
+  the script, confirm tests fail, revert. A test suite that passes
+  against a deliberately broken gate is testing nothing — see the
+  0.12.2 case where guard inputs never matched the pattern under test
+  and passed for the wrong reason.
+
+Scripts are loaded by path with `importlib.util.spec_from_file_location`
+(`scripts/` is not an importable package). Existing examples:
+`tests/lib/test_check_changelog.py`,
+`tests/lib/test_check_suppression_discipline.py`.
 
 ### Test Overrides Are a Code Smell
 

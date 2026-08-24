@@ -344,6 +344,35 @@ reduced; later beta merges become more situational.
 
 Creates one clean commit on main.
 
+### Contributor PRs target the open beta branch
+
+Contributors open PRs against `main` (GitHub's default); the maintainer
+retargets each to the open `feature/vX.Y.0-beta.N` branch with
+`gh api repos/solentlabs/cable_modem_monitor/pulls/<n> -X PATCH -f base=<branch>`
+(`gh pr edit --base` fails on a GitHub GraphQL deprecation). The beta
+branch is then the only PR into `main`, so a release arrives as one
+reviewed range.
+
+### CHANGELOG ownership
+
+Contributors don't write CHANGELOG entries. The maintainer reconciles
+`[Unreleased]` against `git log <last-tag>..HEAD` before running
+`release.py`, which promotes the section verbatim (see
+[Release Checklist](#release-checklist)).
+
+`changelog-check.yml` (required on `main`) enforces two things:
+
+- `scripts/check_changelog.py` validates structure on every PR:
+  `[Unreleased]` first, version headings well-formed and descending,
+  Keep a Changelog sections only, no roadmap P-numbers or placeholders.
+  It reports only on lines the branch touches, so entries published
+  before these rules existed are read for context (version order,
+  duplicate detection) but never flagged; `--all` covers the whole file.
+  Local mirror: `make changelog-check`, part of `make validate-ci`.
+- A PR into `main` that changes code under `custom_components/` or
+  `packages/` must also change `CHANGELOG.md`. PRs into a beta branch
+  are exempt; that is where contributor work lands.
+
 ## Hotfix Releases
 
 For urgent fixes to a released version:

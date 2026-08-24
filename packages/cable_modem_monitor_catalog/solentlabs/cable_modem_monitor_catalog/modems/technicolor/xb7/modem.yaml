@@ -53,6 +53,9 @@ notes: |
   Confirmed per-model (observed across two independent units). Same
   chipset-level pattern as SB8200. Aggregate intentionally omitted because
   the duplicated OFDM data makes QAM totals unreliable.
+  The factory Wi-Fi SSID and default password in the Device Label
+  Information block on network_setup.jst were redacted by hand:
+  har-capture had no labeled-credential detector at capture time.
   Assembled fixture — not a full wire capture. test_data/modem.har holds a
   real har-capture response for /network_setup.jst; the /check.jst login
   and the /at_a_glance.jst landing are hand-built. The login's 302 Location

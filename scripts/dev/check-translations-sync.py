@@ -22,6 +22,11 @@ Checks:
 Exit codes:
 - 0: All files in sync
 - 1: Structural drift or untranslated values detected
+- 2: Cannot check — strings.json or translations/ is missing
+
+2 is deliberately not 0. Collapsing "couldn't check" into "passed"
+makes an unverified run indistinguishable from a verified one, and a
+gate that wrongly passes generates no signal to correct it.
 """
 
 from __future__ import annotations
@@ -31,7 +36,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-_COMPONENT_DIR = Path("custom_components/cable_modem_monitor")
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_COMPONENT_DIR = _REPO_ROOT / "custom_components" / "cable_modem_monitor"
 _STRINGS = _COMPONENT_DIR / "strings.json"
 _TRANSLATIONS_DIR = _COMPONENT_DIR / "translations"
 
@@ -182,11 +188,11 @@ def _check_diacritics(trans: dict[str, Any], locale: str, name: str) -> list[str
 def main() -> int:
     """Compare strings.json against all translation files."""
     if not _STRINGS.is_file():
-        print(f"SKIP: {_STRINGS} not found")
-        return 0
+        print(f"ERROR: {_STRINGS} not found — this check verified nothing.", file=sys.stderr)
+        return 2
     if not _TRANSLATIONS_DIR.is_dir():
-        print(f"SKIP: {_TRANSLATIONS_DIR} not found")
-        return 0
+        print(f"ERROR: {_TRANSLATIONS_DIR} not found — this check verified nothing.", file=sys.stderr)
+        return 2
 
     strings = json.loads(_STRINGS.read_text(encoding="utf-8"))
     strings_keys = _extract_keys(strings)

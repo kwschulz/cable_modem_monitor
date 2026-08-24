@@ -1,4 +1,4 @@
-.PHONY: help setup test test-quick test-simple clean lint lint-fix fix-imports lint-all type-check format format-check check validate validate-ci validate-host intake-regression catalog-field-sweep pii-check spell-check catalog-readme-check suppression-check import-check ha-compat-check install-hooks docker-start docker-stop docker-restart docker-logs docker-status docker-clean docker-shell
+.PHONY: help setup test test-quick test-simple clean lint lint-fix fix-imports lint-all type-check format format-check check validate validate-ci validate-host intake-regression catalog-field-sweep pii-check spell-check catalog-readme-check suppression-check import-check ha-compat-check changelog-check install-hooks docker-start docker-stop docker-restart docker-logs docker-status docker-clean docker-shell
 
 # Pin tool invocations to the project venv so that subprocesses
 # without venv on PATH (release.py shelling out, fresh clones, CI
@@ -32,6 +32,7 @@ help:
 	@echo "  make validate-host - Cross-platform validation (auto-installs tools)"
 	@echo "  make validate-ci   - Full CI-like validation (lint + tests + ha-compat)"
 	@echo "  make spell-check   - Spell check catalog modem YAML files (requires Node.js)"
+	@echo "  make changelog-check - Validate CHANGELOG.md structure"
 	@echo "  make install-hooks - Install optional pre-push hook (runs validate-ci)"
 	@echo ""
 	@echo "Catalog Reports (informational, never gates):"
@@ -128,7 +129,7 @@ validate:
 # hacs/action@main, which runs in a GitHub-hosted Docker context with
 # external network checks against home-assistant/brands and HACS APIs;
 # not reasonably reproducible locally — same exception class as hassfest).
-validate-ci: check test intake-regression pii-check spell-check catalog-readme-check suppression-check import-check ha-compat-check autoclose-check link-check
+validate-ci: check test intake-regression pii-check spell-check catalog-readme-check suppression-check import-check ha-compat-check autoclose-check link-check changelog-check
 	@echo "✅ Full CI validation passed!"
 	@echo "🔍 Checking declared dependencies for available updates..."
 	@$(VENV_BIN)/python scripts/check_owned_deps.py
@@ -216,6 +217,16 @@ catalog-readme-check:
 autoclose-check:
 	@echo "🔍 Scanning commit bodies for auto-close keywords..."
 	@$(VENV_BIN)/python scripts/check_auto_close_keywords.py --base origin/main
+
+# CHANGELOG.md structure check — mirrors the structure step of the CI
+# changelog-check job. Reports only on lines this branch touches (working
+# tree vs branch point), so published entries that predate the rules are
+# read for context but never flagged. The job's second step (a PR into
+# main that changes code must also change CHANGELOG.md) needs the PR base
+# and has no local mirror. See RELEASING.md § CHANGELOG ownership.
+changelog-check:
+	@echo "📝 Validating CHANGELOG.md structure..."
+	@$(VENV_BIN)/python scripts/check_changelog.py
 
 # Markdown link check — mirrors CI link-check job. Validates that intra-repo
 # relative and repo-absolute links resolve, and that the HACS-rendered root

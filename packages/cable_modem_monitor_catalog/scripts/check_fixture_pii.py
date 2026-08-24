@@ -22,12 +22,15 @@ Exit codes:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import re
 import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 import yaml
 from har_capture.patterns import load_allowlist
@@ -513,6 +516,182 @@ def check_cert_identifiers(har_data: dict | list) -> list[str]:
     return issues
 
 
+# ---------------------------------------------------------------------------
+# URL-surface scanning
+# ---------------------------------------------------------------------------
+#
+# A path segment or query key carries no field name, so har-capture's
+# strict rules have nothing to match on. Its 0.11.1 sweep only
+# *propagates* — it rewrites verbatim copies of values already redacted
+# elsewhere in the same HAR. A secret that appears ONLY in a URL has no
+# such copy, so nothing propagates and the value ships intact. Detecting
+# it is therefore this gate's job.
+#
+# Two shapes are recognised:
+#   1. base64 that decodes to ``user:password`` (HTTP basic-auth style,
+#      how Arris SB8200 firmware passes credentials in the login URL)
+#   2. an opaque high-entropy token (the Sagemcom F3896LG-ZG session
+#      token in a logout path)
+
+# Asset names dominate the false-positive surface: versioned library
+# files, fonts and images all look like high-entropy tokens. Matched on
+# the final extension only — a substring test would let a real token
+# hide behind an embedded ".js".
+_ASSET_EXTENSIONS: tuple[str, ...] = (
+    ".js",
+    ".css",
+    ".map",
+    ".json",
+    ".xml",
+    ".txt",
+    ".htm",
+    ".html",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".ico",
+    ".bmp",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".otf",
+)
+
+# Mirrors har-capture's _is_propagation_eligible: long enough to be a
+# secret, URL-safe charset, and at least one digit so that word-shaped
+# identifiers (GetDeviceInformation) stay out.
+_URL_TOKEN_MIN_LENGTH = 16
+_URL_TOKEN_CHARSET_RE = re.compile(r"^[A-Za-z0-9._~+/=:-]+$")
+_URL_TOKEN_DIGIT_RE = re.compile(r"\d")
+_BASE64_RE = re.compile(r"^[A-Za-z0-9+/]{12,}={0,2}$")
+_ALL_DIGITS_RE = re.compile(r"^\d+$")
+
+
+def _is_asset_name(candidate: str) -> bool:
+    """True when the candidate is a static asset filename."""
+    return candidate.lower().endswith(_ASSET_EXTENSIONS)
+
+
+def _decoded_credential(candidate: str) -> str | None:
+    """Return ``user:password`` if the candidate is base64 basic-auth.
+
+    Returns None when the candidate is not base64, does not decode to
+    printable text, or carries no ``:`` separator.
+    """
+    if not _BASE64_RE.match(candidate):
+        return None
+    try:
+        decoded = base64.b64decode(candidate + "=" * (-len(candidate) % 4), validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    try:
+        text = decoded.decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    if ":" not in text or not text.isprintable():
+        return None
+    return text
+
+
+def _is_safe_credential_pair(pair: str) -> bool:
+    """True when the password half of ``user:password`` is a placeholder.
+
+    Allowlisting the decoded password rather than the base64 blob keeps
+    the guard general: any sanctioned placeholder encodes to a different
+    blob per username, and a real password for the same user still
+    fails this check.
+    """
+    password = pair.split(":", 1)[1].strip()
+    return not password or password.startswith("***") or password == "[REDACTED]" or password.lower() in SAFE_VALUES
+
+
+def _looks_like_opaque_token(candidate: str) -> bool:
+    """True when the candidate has the shape of a bare secret."""
+    if len(candidate) < _URL_TOKEN_MIN_LENGTH:
+        return False
+    if _ALL_DIGITS_RE.match(candidate):  # timestamps, cache busters
+        return False
+    if not _URL_TOKEN_CHARSET_RE.match(candidate):
+        return False
+    if not _URL_TOKEN_DIGIT_RE.search(candidate):
+        return False
+    return candidate.lower() not in SAFE_VALUES
+
+
+def _url_candidates(url: str, query_string: list[dict] | None = None) -> list[str]:
+    """Every substring of a URL that could independently carry a secret.
+
+    Query *keys* are included, not just values: the SB8200 login URL is
+    ``?<base64>`` with no ``=``, which HAR records as a queryString entry
+    whose name holds the credential and whose value is empty.
+    """
+    parts = urlsplit(url)
+    candidates: list[str] = [segment for segment in parts.path.split("/") if segment]
+
+    if parts.query:
+        for pair in parts.query.split("&"):
+            key, _, value = pair.partition("=")
+            candidates.extend([key, value])
+
+    for item in query_string or []:
+        if isinstance(item, dict):
+            candidates.extend([str(item.get("name", "")), str(item.get("value", ""))])
+
+    # A secret escaped to sit in a path is the same secret; check both
+    # forms, the way har-capture's propagation sweep does.
+    decoded = [unquote(c) for c in candidates]
+    seen: dict[str, None] = {}
+    for candidate in [*candidates, *decoded]:
+        if candidate:
+            seen.setdefault(candidate, None)
+    return list(seen)
+
+
+def find_url_secrets(url: str, query_string: list[dict] | None = None) -> list[str]:
+    """Report secrets carried on a request URL.
+
+    Args:
+        url: The request URL
+        query_string: The HAR ``request.queryString`` array, if present
+
+    Returns:
+        Human-readable findings, one per distinct secret
+    """
+    findings: list[str] = []
+    for candidate in _url_candidates(url, query_string):
+        if _is_asset_name(candidate):
+            continue
+
+        # A credential may sit behind a prefix (``login_<base64>``), so
+        # test the separator-delimited chunks as well as the whole.
+        chunks = [candidate, *(c for c in re.split(r"[_\-.]", candidate) if c)]
+        credential = next((pair for chunk in chunks if (pair := _decoded_credential(chunk))), None)
+        if credential is not None:
+            if not _is_safe_credential_pair(credential):
+                user = credential.split(":", 1)[0]
+                findings.append(f"url_credential: base64 credentials for '{user}' in URL ({candidate})")
+            continue
+
+        if _looks_like_opaque_token(candidate):
+            findings.append(f"url_token: opaque token in URL ({candidate})")
+
+    return findings
+
+
+def check_har_urls(har_data: dict | list) -> list[str]:
+    """Scan every request URL in a HAR for secrets."""
+    issues: list[str] = []
+    entries = har_data.get("log", {}).get("entries", []) if isinstance(har_data, dict) else []
+    for index, entry in enumerate(entries):
+        request = entry.get("request", {}) if isinstance(entry, dict) else {}
+        for finding in find_url_secrets(request.get("url", ""), request.get("queryString")):
+            issues.append(f"  {finding} (in log.entries[{index}].request)")
+    return issues
+
+
 def check_har_file(filepath: Path) -> list[str]:  # noqa: C901
     """Check a HAR file for PII."""
     issues = []
@@ -555,6 +734,7 @@ def check_har_file(filepath: Path) -> list[str]:  # noqa: C901
 
     extract_text(har_data)
     issues.extend(check_cert_identifiers(har_data))
+    issues.extend(check_har_urls(har_data))
     return issues
 
 

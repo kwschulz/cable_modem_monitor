@@ -19,6 +19,7 @@ ignoreWords:
   - Anthranilic
   - BADHASH
   - Bowles
+  - Sadowski
   - Cabe
   - ccpk
   - chairstacker
@@ -373,6 +374,7 @@ words:
   - unprovisioned
   - unrecovered
   - unresp
+  - unscanned
   - unschedules
   - unsub
   - unsuffixed
@@ -394,7 +396,12 @@ words:
   - asyncio
   - autouse
   - backoffs
+  - backticked
+  - basenames
+  - syspath
   - beautifulsoup
+  - unsmudged
+  - webinspector
   - caplog
   - capsys
   - ciphertext
@@ -593,6 +600,7 @@ words:
 
   # Dev tooling, linters, pytest/config keys, shell flags
   - addopts
+  - commitlint
   - aiohttp
   - asynccontextmanager
   - callspec
@@ -611,6 +619,9 @@ words:
   - monkeypatching
   - originalname
   - Pyflakes
+  - retarget
+  - retargets
+  - shfmt
   - pythonpath
   - rootdir
   - semgrep
