@@ -74,6 +74,10 @@ jobs:
       - name: Install Catalog
         run: |
           pip install -e packages/cable_modem_monitor_catalog
+          # check_fixture_pii.py imports har_capture, and the catalog test
+          # suite imports that script. Floor matches pyproject.toml: below
+          # 0.12.2 the scanner skips whole bodies on a stray placeholder.
+          pip install "har-capture~=0.12.2"
 
       - name: Run Catalog tests
         working-directory: packages/cable_modem_monitor_catalog
@@ -125,7 +129,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff==0.15.2 black==26.1.0 mypy==2.1.0 types-requests types-PyYAML pytest-socket pydantic types-cryptography requests-mock har-capture~=0.10.2
+          pip install ruff==0.15.2 black==26.1.0 mypy==2.1.0 types-requests types-PyYAML pytest-socket pydantic types-cryptography requests-mock har-capture~=0.12.2
           pip install -e packages/cable_modem_monitor_core
           pip install -e packages/cable_modem_monitor_catalog
 
@@ -191,7 +195,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install beautifulsoup4 har-capture~=0.10.2 pyyaml
+          pip install beautifulsoup4 har-capture~=0.12.2 pyyaml
 
       - name: Check fixtures for PII
         run: |
