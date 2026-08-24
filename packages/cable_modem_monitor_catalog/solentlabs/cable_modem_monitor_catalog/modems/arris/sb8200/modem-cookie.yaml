@@ -40,6 +40,19 @@ notes: |
   Cookie name is "credential" instead of "sessionId".
   Same page structure and parser as other SB8200 variants.
 
+  Hand-applied sanitization (modem-cookie.har): the login credential
+  in log.entries[13] was replaced in request.url and in
+  request.queryString[0].name — YWRtaW46c2FuaXRpemVk, base64 of
+  admin:sanitized. har-capture's automated pass missed it because the
+  credential appears ONLY in the URL: a bare query key carries no field
+  name for the strict rules to match, and 0.11.1's propagation sweep
+  rewrites only values already redacted elsewhere in the same capture,
+  so there was no redacted copy to propagate from. Format-preserving
+  substitution rather than [REDACTED] keeps the bare-base64 wire shape
+  this variant exists to document. Substitution only — no entry,
+  header or field was removed. Detection now lives in
+  check_fixture_pii.find_url_secrets.
+
 references:
   issues:
     - "[#124 — Arris SB8200 HTTPS variant (bare base64 token)](https://github.com/solentlabs/cable_modem_monitor/issues/124)"

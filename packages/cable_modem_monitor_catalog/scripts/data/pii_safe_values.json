@@ -128,10 +128,14 @@
   "safe_credential_placeholders": {
     "_description": "Values that appear in credential fields but are publicly documented placeholders, not real credentials. Each entry must cite where it's documented as public.",
     "values": [
-      "nologin"
+      "nologin",
+      "sanitized",
+      "redacted"
     ],
     "_provenance": {
-      "nologin": "Hitron CODA56 guest mode (user=nologin/pws=nologin) — modem.yaml sources.auth_config cites issue #89"
+      "nologin": "Hitron CODA56 guest mode (user=nologin/pws=nologin) — modem.yaml sources.auth_config cites issue #89",
+      "sanitized": "Sanitization placeholder, not a credential — the password half of the format-preserving base64 substitution sanctioned by MODEM_INTAKE_WORKFLOW.md § Hand-applied sanitization (e.g. YWRtaW46c2FuaXRpemVk = admin:sanitized)",
+      "redacted": "Sanitization placeholder, not a credential — the lowercase form of the [REDACTED] substitution prescribed by MODEM_INTAKE_WORKFLOW.md § Hand-applied sanitization"
     }
   },
 

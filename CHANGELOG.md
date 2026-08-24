@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The fixture PII gate now scans HAR request URLs.** A credential in a
+  URL carries no field name, so har-capture's strict rules have nothing
+  to match on, and its propagation sweep only rewrites values already
+  redacted elsewhere in the same capture — a secret that appears *only*
+  in a URL has no redacted copy to propagate from and shipped intact.
+  `check_fixture_pii` read just the `text`, `value` and `content` keys
+  and stopped recursion at bare strings, so `request.url` and
+  `queryString` were never examined at all. It now checks every path
+  segment and query entry — keys as well as values, in both literal and
+  percent-encoded form — for base64 basic-auth pairs and opaque
+  high-entropy tokens, skipping static asset filenames. Scanning the
+  committed catalog under the new rule found one real leak: the Arris
+  SB8200 `modem-cookie.har` login URL carried plaintext-equivalent
+  credentials, which are now replaced with a format-preserving
+  placeholder that keeps the bare-base64 wire shape the fixture exists
+  to document. The gate previously reported that file as clean.
+
 - **Dashboards are no longer empty on modems that do not report channel
   lock status.** In Channel Number mode the dashboard generator kept only
   channels whose `lock_status` read `locked`, so a modem that never emits
