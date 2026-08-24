@@ -26,6 +26,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   placeholder that keeps the bare-base64 wire shape the fixture exists
   to document. The gate previously reported that file as clean.
 
+- **Three catalog fixtures no longer carry factory Wi-Fi credentials.**
+  har-capture 0.12.2 closes two holes in its sanitizer: labeled default
+  Wi-Fi passwords and SSIDs survived redaction, and `check_content`
+  skipped an entire response body whenever it hit a stray placeholder,
+  leaving 209 of 750 fleet entries unscanned. Re-running the fixture gate
+  on the upgraded scanner found real credentials in three committed
+  Technicolor captures. The Device Label Information block these gateways
+  render carries factory Wi-Fi credentials in plain text: the XB7 and
+  XB10 fixtures each kept a default SSID and password, the XB10 also its
+  serial number, and the XB6 fixture kept a private network name. The
+  serial had slipped past this project's own gate because
+  `check_fixture_pii.py` treats any finding containing a colon as a code
+  false positive, and har-capture returns that finding with its label
+  attached. Every value is now replaced with `[REDACTED]`; nothing
+  structural changed and none of them is parsed. The declared har-capture
+  floor moves to 0.12.2 as a hard minimum, not a refresh. Redaction stops
+  these values reaching new checkouts. It does not remove them from
+  history, and the fixtures have never shipped to PyPI or HACS, which
+  exclude `test_data`.
+
 - **Dashboards are no longer empty on modems that do not report channel
   lock status.** In Channel Number mode the dashboard generator kept only
   channels whose `lock_status` read `locked`, so a modem that never emits
