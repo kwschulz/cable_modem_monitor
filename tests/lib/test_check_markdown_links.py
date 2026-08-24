@@ -66,7 +66,7 @@ RESOLVED = [
 
 
 @pytest.mark.parametrize("target", SKIPPED)
-def test_offchecker_targets_are_skipped(target: str, tmp_path: Path) -> None:
+def test_external_targets_are_skipped(target: str, tmp_path: Path) -> None:
     """External and in-page targets are not this checker's concern."""
     assert _mod._resolve(target, tmp_path / "docs" / "a.md", tmp_path) is None
 
@@ -218,7 +218,8 @@ def _scan(repo_root: Path, md_file: Path) -> list[str]:
     basenames: dict[str, list[Path]] = {}
     for path in repo_root.rglob("*.md"):
         basenames.setdefault(path.name, []).append(path)
-    return _mod._scan_file(md_file, repo_root, set(), basenames, {})
+    problems: list[str] = _mod._scan_file(md_file, repo_root, set(), basenames, {})
+    return problems
 
 
 def test_pointer_at_a_bold_inline_is_reported(tmp_path: Path) -> None:

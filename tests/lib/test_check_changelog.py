@@ -165,7 +165,7 @@ def test_violation_is_reported(lines: list[str], expected: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_wellformed_changelog_is_clean() -> None:
+def test_well_formed_changelog_is_clean() -> None:
     """A minimal correct changelog produces no violations."""
     lines = [
         *_HEADER,

@@ -395,7 +395,11 @@ words:
   - asyncio
   - autouse
   - backoffs
+  - backticked
+  - basenames
   - beautifulsoup
+  - unsmudged
+  - webinspector
   - caplog
   - capsys
   - ciphertext

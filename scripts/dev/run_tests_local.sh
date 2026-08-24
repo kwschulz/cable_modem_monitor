@@ -30,13 +30,34 @@ source .venv/bin/activate
 echo -e "${GREEN}✓ Virtual environment activated${NC}"
 echo ""
 
-# Run linting
-echo -e "${YELLOW}Running code quality checks (ruff)...${NC}"
-if ruff check custom_components/cable_modem_monitor/ --select E,F,W,C90 && ruff check packages/; then
-    echo -e "${GREEN}✓ Code quality checks passed${NC}"
+# Every check below records failure here; nothing sets it back to true, so
+# one red step cannot be masked by a later green one.
+TEST_PASSED=true
+
+# Run linting — these three commands are exactly what CI's lint job runs
+# (.github/workflows/tests.yml § Lint with ruff / black / mypy). Any
+# narrower local form can pass a tree CI rejects. Concretely: the
+# pre-commit mypy hook is scoped to ^packages/[^/]+/solentlabs/, so a type
+# error in custom_components/ clears every local hook and fails CI, and
+# black was not run locally at all. Keep these three identical to CI.
+echo -e "${YELLOW}Running code quality checks (ruff, black, mypy)...${NC}"
+if ruff check .; then
+    echo -e "${GREEN}✓ ruff passed${NC}"
 else
-    echo -e "${RED}✗ Code quality checks failed${NC}"
-    echo -e "${YELLOW}Fix linting errors before committing${NC}"
+    echo -e "${RED}✗ ruff failed${NC}"
+    TEST_PASSED=false
+fi
+if black --check .; then
+    echo -e "${GREEN}✓ black passed${NC}"
+else
+    echo -e "${RED}✗ black failed — run: black .${NC}"
+    TEST_PASSED=false
+fi
+if mypy . --config-file=mypy.ini; then
+    echo -e "${GREEN}✓ mypy passed${NC}"
+else
+    echo -e "${RED}✗ mypy failed${NC}"
+    TEST_PASSED=false
 fi
 echo ""
 
@@ -44,7 +65,6 @@ echo ""
 echo -e "${YELLOW}Running HA integration tests...${NC}"
 if pytest tests/ -v --tb=short --cov=custom_components/cable_modem_monitor --cov-report=term --cov-report=html --cov-fail-under=95; then
     echo -e "${GREEN}✓ HA integration tests passed!${NC}"
-    TEST_PASSED=true
 else
     echo -e "${RED}✗ HA integration tests failed${NC}"
     TEST_PASSED=false
