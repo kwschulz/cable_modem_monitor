@@ -74,14 +74,10 @@ notes: |
   The Logout endpoint is source_inferred; the capture contains no
   logout request. No reboot control was captured, so the entry ships
   without a restart action.
-  Hand-applied sanitization: the Device Label Information block on
-  /network_setup.jst renders the factory Wi-Fi SSID, the default Wi-Fi
-  password, the WPS PIN, and the unit serial number in plain text. All
-  four values are substituted with [REDACTED] in the fixture. The
-  capture was sanitized with har-capture 0.8.2, which redacted none of
-  them; 0.12.1 redacts the WPS PIN and the serial but still passes the
-  default password through, and its validate reports no error on the
-  file. None of the four is parsed.
+  The factory Wi-Fi SSID, default password, WPS PIN and serial number
+  in the Device Label Information block on network_setup.jst were
+  redacted by hand: har-capture had no labeled-credential detector at
+  capture time.
 references:
   issues:
     - "[#101 — [Modem Request] Technicolor CGM4981COM](https://github.com/solentlabs/cable_modem_monitor/issues/101)"

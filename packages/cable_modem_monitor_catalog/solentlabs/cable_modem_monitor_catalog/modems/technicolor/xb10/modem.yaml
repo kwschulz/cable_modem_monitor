@@ -97,6 +97,11 @@ notes: |
   "774000000") rather than in MHz like QAM channels; stored as-is in Hz.
   System uptime format: "X days Xh: Xm: Xs" (spaces after colons);
   uptime parser handles this via flexible whitespace matching.
+  The factory Wi-Fi SSID, default password and serial number in the
+  Device Label Information block on network_setup.jst were redacted by
+  hand, along with the SSID where it repeats on connection_status.jst
+  and the wireless config page: har-capture had no labeled-credential
+  detector at capture time.
 
 references:
   issues:

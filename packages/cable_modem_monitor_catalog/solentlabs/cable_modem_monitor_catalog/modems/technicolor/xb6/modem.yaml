@@ -47,6 +47,9 @@ notes: |
   Default IP: 10.0.0.1 (router mode).
   One third-party author email in a bundled JS library was redacted
   by hand: har-capture does not scan strings inside bundled assets.
+  The private Wi-Fi network name on connection_status.jst was redacted
+  by hand: har-capture had no labeled-SSID detector at capture time.
+  The same string in a bundled jQuery author comment is left intact.
 
 references:
   issues:
