@@ -69,7 +69,7 @@ jobs:
       - name: Run Core tests
         working-directory: packages/cable_modem_monitor_core
         run: |
-          pytest tests/ -v --tb=short --cov=solentlabs/cable_modem_monitor_core --cov-report=term-missing --cov-fail-under=92
+          pytest tests/ -v --tb=short --cov=solentlabs/cable_modem_monitor_core --cov-report=term-missing --cov-fail-under=95
 
       - name: Install Catalog
         run: |

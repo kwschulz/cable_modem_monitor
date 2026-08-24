@@ -51,9 +51,9 @@ else
 fi
 echo ""
 
-# Run Core package tests (coverage gate mirrors CI tests.yml: --cov-fail-under=92)
+# Run Core package tests (coverage gate mirrors CI tests.yml: --cov-fail-under=95)
 echo -e "${YELLOW}Running Core package tests...${NC}"
-if (cd packages/cable_modem_monitor_core && pytest tests/ -v --tb=short --cov=solentlabs/cable_modem_monitor_core --cov-report=term-missing --cov-fail-under=92); then
+if (cd packages/cable_modem_monitor_core && pytest tests/ -v --tb=short --cov=solentlabs/cable_modem_monitor_core --cov-report=term-missing --cov-fail-under=95); then
     echo -e "${GREEN}✓ Core package tests passed!${NC}"
 else
     echo -e "${RED}✗ Core package tests failed${NC}"

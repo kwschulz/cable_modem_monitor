@@ -16,6 +16,9 @@ depends on (see docs/reference/RELEASING.md § CHANGELOG ownership):
 - body text sits under a ``###`` section, never directly under a version
 - no roadmap ``P<n>`` identifiers (CLAUDE.md § No P-numbers in public
   artifacts) and no TODO / TBD / FIXME / XXX placeholders
+- every code fence is closed. Fenced content is skipped as
+  documentation, so an unclosed fence silently suppresses every rule
+  below it — including the rest of the entry being added.
 
 Only lines this branch touches are reported. Entries published before
 these rules existed use free-form sections and prose under the version
@@ -156,12 +159,21 @@ def validate(lines: list[str]) -> list[Problem]:
     """Return (line_number, message) violations for the whole file."""
     validator = _Validator()
     in_fence = False
+    fence_opened_at = 0
     for lineno, line in enumerate(lines, start=1):
         if line.startswith("```"):
             in_fence = not in_fence
+            fence_opened_at = lineno if in_fence else 0
         elif not in_fence:
             validator.feed(lineno, line)
-    return validator.finish()
+    problems = validator.finish()
+    if in_fence:
+        # Everything after an unclosed fence is skipped, so the author
+        # loses validation on the rest of their own entry and the file
+        # still reports OK. Flagged at the opening line, which the
+        # author just touched, so it lands in the default diff scope.
+        problems.append((fence_opened_at, "unclosed code fence — validation stops here", None))
+    return problems
 
 
 def _run_git(args: list[str]) -> str:
