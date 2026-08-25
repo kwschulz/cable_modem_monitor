@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.exceptions import ServiceValidationError
 
-from custom_components.cable_modem_monitor.const import DOMAIN
+from custom_components.cable_modem_monitor.const import CONF_ENTITY_PREFIX, DOMAIN, EntityPrefix
 from custom_components.cable_modem_monitor.coordinator import (
     CableModemRuntimeData,
 )
@@ -1784,6 +1784,126 @@ async def test_list_orphaned_execute_clears_statistics(mock_runtime_data) -> Non
     assert len(cleared_batches[0]) == 100
     assert len(cleared_batches[1]) == 50
     assert cleared_batches[0] + cleared_batches[1] == orphaned_ids
+
+
+# A second modem's statistics are not this entry's orphans.
+#
+# ENTITY_MODEL_SPEC § Entity Prefix: every prefix option produces
+# entity_ids under ``cable_modem_``. So the ``none``-prefix entry's
+# ``sensor.cable_modem_`` filter also matches the ``model``-prefix
+# entry's ``sensor.cable_modem_tps_2000_`` statistics. Those belong to
+# another config entry, so they are absent from this entry's registry
+# and land in the orphan set.
+#
+# This is the documented multi-modem setup, not a corner case: the
+# config flow deduplicates on the prefix setting, so two modems must
+# use different prefix modes.
+
+
+def _make_two_modem_entries(mock_runtime_data) -> tuple[MagicMock, MagicMock]:
+    """Entry A on the ``none`` prefix, entry B on ``model`` — the documented pairing."""
+    entry_a = _make_mock_entry(mock_runtime_data, entry_id="entry_a")
+    entry_a.data = {}
+    entry_b = _make_mock_entry(mock_runtime_data, entry_id="entry_b")
+    entry_b.data = {CONF_ENTITY_PREFIX: EntityPrefix.MODEL}
+    return entry_a, entry_b
+
+
+def _registry_lookup_by_entry(by_entry_id: dict[str, list[str]]):
+    """Registry stub that answers per config entry, as the real registry does.
+
+    A single ``return_value`` would hand every entry the same entities and
+    hide whether the caller scoped its lookup correctly.
+    """
+
+    def _lookup(entry_id: str) -> list[MagicMock]:
+        return [MagicMock(entity_id=eid) for eid in by_entry_id.get(entry_id, [])]
+
+    return _lookup
+
+
+@pytest.mark.asyncio
+async def test_list_orphaned_excludes_a_second_modems_statistics(mock_runtime_data) -> None:
+    """A second modem's live statistics are never listed as this entry's orphans."""
+    entry_a, entry_b = _make_two_modem_entries(mock_runtime_data)
+    prefix_a = _get_entity_prefix(entry_a)
+    prefix_b = _get_entity_prefix(entry_b)
+    # The collision this test exists for: B's prefix extends A's.
+    assert prefix_b.startswith(f"{prefix_a}_")
+
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [entry_a, entry_b]
+    handler = create_orphaned_statistics_handler(hass)
+
+    a_live = f"sensor.{prefix_a}_ds_ch_1_power"
+    a_orphan = f"sensor.{prefix_a}_ds_qam_ch_21_power"
+    b_live = [f"sensor.{prefix_b}_ds_ch_1_power", f"sensor.{prefix_b}_ds_ch_2_power"]
+    stat_ids = [{"statistic_id": sid} for sid in [a_live, a_orphan, *b_live]]
+
+    with (
+        patch(
+            "homeassistant.components.recorder.statistics.async_list_statistic_ids",
+            new_callable=AsyncMock,
+            return_value=stat_ids,
+        ),
+        patch("homeassistant.helpers.entity_registry.async_get") as mock_er,
+    ):
+        mock_er.return_value.entities.get_entries_for_config_entry_id.side_effect = _registry_lookup_by_entry(
+            {"entry_a": [a_live], "entry_b": b_live}
+        )
+        result = await handler(_make_mock_call())
+
+    assert result["count"] == 1, "only entry A's own orphan is an orphan"
+    assert a_orphan in result["yaml"]
+    for sid in b_live:
+        assert sid not in result["yaml"], f"{sid} belongs to the other modem"
+
+
+@pytest.mark.asyncio
+async def test_list_orphaned_execute_never_purges_a_second_modems_statistics(mock_runtime_data) -> None:
+    """execute=True must not clear statistics belonging to another config entry."""
+    entry_a, entry_b = _make_two_modem_entries(mock_runtime_data)
+    prefix_a = _get_entity_prefix(entry_a)
+    prefix_b = _get_entity_prefix(entry_b)
+
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [entry_a, entry_b]
+    handler = create_orphaned_statistics_handler(hass)
+    hass.loop.call_soon_threadsafe.side_effect = lambda fn: fn()
+
+    a_orphan = f"sensor.{prefix_a}_ds_qam_ch_21_power"
+    b_live = [f"sensor.{prefix_b}_ds_ch_1_power", f"sensor.{prefix_b}_ds_ch_2_power"]
+    stat_ids = [{"statistic_id": sid} for sid in [a_orphan, *b_live]]
+
+    cleared: list[str] = []
+
+    def fake_async_clear_statistics(ids: list[str], *, on_done=None) -> None:
+        cleared.extend(ids)
+        if on_done:
+            hass.loop.call_soon_threadsafe(on_done)
+
+    mock_recorder = MagicMock()
+    mock_recorder.async_clear_statistics.side_effect = fake_async_clear_statistics
+
+    with (
+        patch(
+            "homeassistant.components.recorder.statistics.async_list_statistic_ids",
+            new_callable=AsyncMock,
+            return_value=stat_ids,
+        ),
+        patch("homeassistant.helpers.entity_registry.async_get") as mock_er,
+        patch(
+            "custom_components.cable_modem_monitor.dev_tools.get_instance",
+            return_value=mock_recorder,
+        ),
+    ):
+        mock_er.return_value.entities.get_entries_for_config_entry_id.side_effect = _registry_lookup_by_entry(
+            {"entry_a": [], "entry_b": b_live}
+        )
+        result = await handler(_make_mock_call({"execute": True}))
+
+    assert cleared == [a_orphan], "purge reached another modem's history"
+    assert result["count"] == 1
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `orphaned_statistics` service no longer offers a second modem's
+  live statistics for deletion.** It collected candidates by entity-ID
+  prefix but checked them against a single config entry's registered
+  entities. Every prefix option produces IDs under `cable_modem_`, so on
+  a two-modem setup the first modem's scan swept in the second modem's
+  statistics, found them unregistered to itself, and listed them as
+  orphans. Running it with `execute: true` then cleared that modem's
+  long-term history permanently. The scan now checks registered entities
+  across every configured modem.
+
 - **Netgear CM2000, CM2500 and CM3000 no longer report "Internet Access:
   Down" on a working connection.** This firmware hides that indicator on
   its own diagnostic page and shows a cable-modem indicator instead, so
