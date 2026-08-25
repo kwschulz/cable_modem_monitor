@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sensor is removed for these three models. Downstream and upstream
   power, SNR and partial-service status are unaffected.
 
+- **The device page now shows the model your modem reports.** The
+  integration read that value from the modem, left it out of the entity
+  list as device metadata, and then never wrote it anywhere. It now
+  appears as the device's model ID. The model stays the name the unit
+  was sold under, so a modem reporting an internal code (XB7 reports
+  `CGM4331COM`) keeps the recognizable name and gains the code
+  alongside it.
+
 ## [3.14.0-beta.23] - 2026-08-24
 
 ### Fixed
