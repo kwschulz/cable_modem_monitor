@@ -439,4 +439,4 @@ Ensure the tag follows the pattern `v*` (e.g., `v3.14.0`). Check `.github/workfl
 
 ---
 
-Last updated: 2026-04-02
+Last updated: 2026-08-24

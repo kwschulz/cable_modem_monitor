@@ -384,6 +384,31 @@ def run_validate_ci(repo_root: Path) -> bool:
         return False
 
 
+def revalidate_rewritten_files(repo_root: Path) -> bool:
+    """Re-check the files this script just rewrote.
+
+    `run_validate_ci` above ran against the pre-bump tree, so nothing has
+    yet read the promoted CHANGELOG. Without this, CI on the version-bump
+    commit is the first check to see it.
+    """
+    steps = [
+        ("CHANGELOG structure", ["make", "changelog-check"]),
+        (
+            "CHANGELOG tests",
+            [sys.executable, "-m", "pytest", "tests/lib/test_check_changelog.py", "-q", "--no-header"],
+        ),
+    ]
+    for label, command in steps:
+        try:
+            print_info(f"Re-checking {label} against the rewritten files...")
+            subprocess.run(command, cwd=repo_root, check=True)
+        except subprocess.CalledProcessError:
+            print_error(f"{label} failed on the rewritten files.")
+            return False
+    print_success("Rewritten files pass their checks")
+    return True
+
+
 def _generate_catalog_index(repo_root: Path) -> None:
     """Regenerate the v3.14 catalog package README.md."""
     catalog_script = repo_root / "packages" / "cable_modem_monitor_catalog" / "scripts" / "generate_catalog_index.py"
@@ -616,7 +641,7 @@ def _run_release(args: argparse.Namespace, repo_root: Path) -> None:
     # Validate preconditions
     validate_release_preconditions(version, repo_root)
 
-    # Full CI mirror — gates the release on what CI will see
+    # Full CI mirror against the pre-bump tree; rewritten files re-checked below
     _exit_on_failure(run_validate_ci(repo_root))
 
     # Verify translations
@@ -627,6 +652,9 @@ def _run_release(args: argparse.Namespace, repo_root: Path) -> None:
 
     # Regenerate catalog README from modem.yaml files
     _generate_catalog_index(repo_root)
+
+    # Re-check what was just rewritten; validate-ci above saw the pre-bump tree
+    _exit_on_failure(revalidate_rewritten_files(repo_root))
 
     # Verify version consistency (prevents CI tag/manifest mismatch error)
     _exit_on_failure(verify_version_consistency(repo_root, version))
