@@ -471,8 +471,12 @@ but never minted as entities (#178):
   every poll.
 - `hardware_version`, `model_name` — immutable identity strings. A
   sensor whose state cannot change is device metadata: the device
-  registry carries them natively (`hw_version`, `model`), set in
-  `_update_device_registry`. `software_version` is the deliberate
+  registry carries them natively (`hw_version`, `model_id`), set in
+  `_update_device_registry`. `model_id` is the modem's reported
+  `model_name`; `model` stays the catalog entry's model. The two differ
+  whenever the reported value is an OEM code rather than a retail name
+  (XB7 reports `CGM4331COM`), so the reported one must never take over
+  `model`. `software_version` is the deliberate
   contrast — it also appears on the device card (`sw_version`) but
   **keeps its sensor**, because a firmware push is a state change
   users automate on and the sensor is the only timeline of it.
@@ -566,8 +570,9 @@ Each config entry creates one HA device:
 DeviceInfo(
     identifiers={(DOMAIN, entry.entry_id)},
     name=device_name,
-    manufacturer=detected_manufacturer,
-    model=stripped_model,
+    manufacturer=identity.manufacturer,
+    model=identity.model,
+    model_id=reported_model_name,
     configuration_url=f"{protocol}://{host}",
 )
 ```
