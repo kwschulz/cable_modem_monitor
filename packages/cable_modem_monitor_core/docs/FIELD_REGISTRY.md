@@ -146,9 +146,6 @@ registered_fields:
     tftp_status:
       type: string
       description: "TFTP configuration file download state"
-    internet_access:
-      type: string
-      description: "Global internet connectivity indicator"
     model_name:
       type: string
       description: "Modem model identifier as reported by the device"

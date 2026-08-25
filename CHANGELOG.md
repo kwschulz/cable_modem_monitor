@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Netgear CM2000, CM2500 and CM3000 no longer report "Internet Access:
+  Down" on a working connection.** This firmware hides that indicator on
+  its own diagnostic page and shows a cable-modem indicator instead, so
+  the value was never one the modem displayed. The `Internet Access`
+  sensor is removed for these three models. Downstream and upstream
+  power, SNR and partial-service status are unaffected.
+
 ## [3.14.0-beta.23] - 2026-08-24
 
 ### Fixed
