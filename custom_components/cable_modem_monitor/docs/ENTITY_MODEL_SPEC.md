@@ -486,17 +486,20 @@ but never minted as entities (#178):
   **keeps its sensor**, because a firmware push is a state change
   users automate on and the sensor is the only timeline of it.
 
-**Discontinued entities:** sensors the integration used to create and
+**Discontinued entities:** entities the integration used to create and
 no longer does (`System Uptime`, `Current Time`, `Hardware Version`,
-`Model Name`, `Docsis Status`) leave orphaned registry entries on
-in-place upgrades. Two cleanup paths:
+`Model Name`, `Docsis Status`, the `Capture HTML` button) leave
+orphaned registry entries on in-place upgrades. Two cleanup paths:
 
 - **v1 (3.13) entries**: the v1→v2 config-entry migration removes the
-  v1-era System Uptime row (`V1_DISCONTINUED_UNIQUE_ID_SUFFIXES` in
+  v1-era rows (`V1_DISCONTINUED_UNIQUE_ID_SUFFIXES` in
   `migrations/v1_to_v2.py`) — 3.13 upgraders never see the orphan.
-  `Docsis Status` needs no migration entry: 3.13 exposed DOCSIS status
-  only as a Status-sensor attribute, never as a standalone sensor, so
-  a 3.13 upgrader has no `_docsis_status` row to orphan.
+  The Restart button is conditional rather than listed: its unique_id
+  is unchanged, so it strands only on modems whose yaml declares no
+  restart action, which `modem_declares_restart()` checks at migration
+  time. `Docsis Status` needs no migration entry: 3.13 exposed DOCSIS
+  status only as a Status-sensor attribute, never as a standalone
+  sensor, so a 3.13 upgrader has no `_docsis_status` row to orphan.
 - **v2 (3.14 beta) entries**: no automatic cleanup — remove and
   re-add the integration (or press Reset Entities), which
   re-registers from the current sensor classes. This is the path for

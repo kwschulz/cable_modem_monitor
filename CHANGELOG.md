@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Upgrading from 3.13 no longer leaves dead buttons on the device
+  page.** The Capture HTML button is gone in 3.14 (HAR capture replaced
+  it), and the Restart button is now only created for modems that
+  declare a restart action, so both could linger as unavailable
+  leftovers. Upgrading clears them, and the Restart button is left
+  alone on modems that do support it.
+
 - **Error rate sensors no longer show a dozen decimal places.** A rate
   is a counter delta over elapsed seconds, so it landed on screen as
   `1,730,730.4592256 errors/min`. It now displays to two decimals. The

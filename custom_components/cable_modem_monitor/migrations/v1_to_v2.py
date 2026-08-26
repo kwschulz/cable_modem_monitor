@@ -22,17 +22,27 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from solentlabs.cable_modem_monitor_catalog import CATALOG_PATH
 from solentlabs.cable_modem_monitor_core.catalog_manager import list_modems, list_variants
+from solentlabs.cable_modem_monitor_core.config_loader import load_modem_config
 
 from ..const import DEFAULT_HEALTH_CHECK_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
-# unique_id suffixes of v1-era sensors that v2 (3.14) no longer creates.
-# v3.13 minted a per-poll System Uptime sensor; 3.14 derives uptime from
-# Last Boot Time at display time (#178). Removed here so 3.13 upgraders
-# don't inherit a permanently-unavailable orphan. v2 entries created on
-# 3.14 betas clear theirs via remove-and-re-add (see CHANGELOG).
-V1_DISCONTINUED_UNIQUE_ID_SUFFIXES = ("_cable_modem_system_uptime",)
+# unique_id suffixes of v1-era entities that v2 (3.14) never creates.
+# v3.13 minted a per-poll System Uptime sensor (3.14 derives uptime from
+# Last Boot Time at display time, #178) and a Capture HTML button (HAR
+# intake replaced it). Removed here so 3.13 upgraders don't inherit
+# permanently-unavailable orphans. v2 entries created on 3.14 betas
+# clear theirs via remove-and-re-add (see CHANGELOG).
+V1_DISCONTINUED_UNIQUE_ID_SUFFIXES = (
+    "_cable_modem_system_uptime",
+    "_capture_modem_data_button",
+)
+
+# The restart button kept its v1 unique_id, so it is only an orphan on
+# modems whose yaml declares no restart action; 3.14 gates creation on
+# that declaration (button.py) while v3.13 created the button always.
+V1_RESTART_BUTTON_SUFFIX = "_restart_button"
 
 # v1 keys that do not exist in v2 and must be removed.
 V1_STALE_KEYS = frozenset(
@@ -120,10 +130,14 @@ async def async_migrate(
 
     hass.config_entries.async_update_entry(entry, data=new_data, version=2)
 
-    # --- Drop registry rows for sensors v2 no longer creates ---
+    # --- Drop registry rows for entities v2 no longer creates ---
+    discontinued: tuple[str, ...] = V1_DISCONTINUED_UNIQUE_ID_SUFFIXES
+    if not await hass.async_add_executor_job(modem_declares_restart, resolved.modem_dir, variant):
+        discontinued += (V1_RESTART_BUTTON_SUFFIX,)
+
     registry = er.async_get(hass)
     for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
-        if reg_entry.unique_id.endswith(V1_DISCONTINUED_UNIQUE_ID_SUFFIXES):
+        if reg_entry.unique_id.endswith(discontinued):
             _LOGGER.info("Removing discontinued v1 entity %s", reg_entry.entity_id)
             registry.async_remove(reg_entry.entity_id)
 
@@ -274,6 +288,20 @@ def resolve_variant(
         modem_dir_relative,
     )
     return None
+
+
+def modem_declares_restart(modem_dir_relative: str, variant: str | None) -> bool:
+    """Whether the resolved catalog entry declares a restart action."""
+    # Mirrors Orchestrator.supports_restart, which is what button.py
+    # gates creation on.  An unreadable config returns True: never
+    # delete a user's registry row on the strength of a failed read.
+    modem_yaml = CATALOG_PATH / modem_dir_relative / (f"modem-{variant}.yaml" if variant else "modem.yaml")
+    try:
+        actions = load_modem_config(modem_yaml).actions
+    except Exception:
+        _LOGGER.warning("Could not read %s — keeping the Restart button", modem_yaml)
+        return True
+    return actions is not None and actions.restart is not None
 
 
 def _has_alias(summary: Any, model_lower: str) -> bool:
