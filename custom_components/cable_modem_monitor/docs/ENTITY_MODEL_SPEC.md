@@ -103,14 +103,12 @@ place regardless of source. See
 
 ⁴ Error-rate sensors are gated by SC-QAM **capability** (the
 presence of `total_corrected` in `system_info`), not by immediate
-rate-field presence. HA's data-dependent entity creation is one-shot
-at first-data-available, and the orchestrator deliberately omits
-`rate_corrected` / `rate_uncorrected` on the first poll (no prior
-baseline), across counter resets, and when monotonic elapsed time
-is non-positive. Gating on rate-field presence would leave the
-sensors permanently absent. Instead, the rate sensors are created
+rate-field presence — see [Capability Gating](#capability-gating).
+The orchestrator omits `rate_corrected` / `rate_uncorrected` on the
+first poll (no prior baseline), across counter resets, and when
+monotonic elapsed time is non-positive. The rate sensors are created
 alongside the totals; `native_value` returns `None` (HA renders
-`unknown`) on polls where the orchestrator omits the field. See
+`unknown`) on those polls. See
 [ORCHESTRATION_SPEC.md § Derived Fields](../../../packages/cable_modem_monitor_core/docs/ORCHESTRATION_SPEC.md#derived-fields).
 
 ⁵ Last Boot Time derives from `now − system_uptime` (or, for modems
@@ -185,15 +183,19 @@ One entity per metric per channel. Entity creation and unique_id
 format depend on the user's channel identity mode — see
 [Channel Identity](#channel-identity).
 
+**If published** means the direction publishes the metric on any
+channel, not that this channel carried a value in the creating poll —
+see [Capability Gating](#capability-gating).
+
 **Position mode** (`channel_identity: "number"`):
 
 | Entity | unique_id suffix | Unit | device_class | state_class | Condition |
 |--------|-----------------|------|--------------|-------------|-----------|
 | Power | `_ds_ch_{n}_power` | dBmV | — | MEASUREMENT | Always |
 | SNR | `_ds_ch_{n}_snr` | dB | — | MEASUREMENT | Always |
-| Frequency | `_ds_ch_{n}_frequency` | Hz | FREQUENCY | MEASUREMENT | If present |
-| Corrected | `_ds_ch_{n}_corrected` | — | — | TOTAL_INCREASING | If present |
-| Uncorrected | `_ds_ch_{n}_uncorrected` | — | — | TOTAL_INCREASING | If present |
+| Frequency | `_ds_ch_{n}_frequency` | Hz | FREQUENCY | MEASUREMENT | If published |
+| Corrected | `_ds_ch_{n}_corrected` | — | — | TOTAL_INCREASING | If published |
+| Uncorrected | `_ds_ch_{n}_uncorrected` | — | — | TOTAL_INCREASING | If published |
 
 **ID mode** (`channel_identity: "id"`):
 
@@ -201,9 +203,9 @@ format depend on the user's channel identity mode — see
 |--------|-----------------|------|--------------|-------------|-----------|
 | Power | `_ds_{type}_ch_{id}_power` | dBmV | — | MEASUREMENT | Always |
 | SNR | `_ds_{type}_ch_{id}_snr` | dB | — | MEASUREMENT | Always |
-| Frequency | `_ds_{type}_ch_{id}_frequency` | Hz | FREQUENCY | MEASUREMENT | If present |
-| Corrected | `_ds_{type}_ch_{id}_corrected` | — | — | TOTAL_INCREASING | If present |
-| Uncorrected | `_ds_{type}_ch_{id}_uncorrected` | — | — | TOTAL_INCREASING | If present |
+| Frequency | `_ds_{type}_ch_{id}_frequency` | Hz | FREQUENCY | MEASUREMENT | If published |
+| Corrected | `_ds_{type}_ch_{id}_corrected` | — | — | TOTAL_INCREASING | If published |
+| Uncorrected | `_ds_{type}_ch_{id}_uncorrected` | — | — | TOTAL_INCREASING | If published |
 
 **Attributes on every DS channel sensor:** `channel_number`,
 `channel_id`, `channel_type`. Both identifiers are always present
@@ -217,14 +219,14 @@ regardless of mode. Additional Tier 2/3 fields from parser output
 | Entity | unique_id suffix | Unit | device_class | state_class | Condition |
 |--------|-----------------|------|--------------|-------------|-----------|
 | Power | `_us_ch_{n}_power` | dBmV | — | MEASUREMENT | Always |
-| Frequency | `_us_ch_{n}_frequency` | Hz | FREQUENCY | MEASUREMENT | If present |
+| Frequency | `_us_ch_{n}_frequency` | Hz | FREQUENCY | MEASUREMENT | If published |
 
 **ID mode** (`channel_identity: "id"`):
 
 | Entity | unique_id suffix | Unit | device_class | state_class | Condition |
 |--------|-----------------|------|--------------|-------------|-----------|
 | Power | `_us_{type}_ch_{id}_power` | dBmV | — | MEASUREMENT | Always |
-| Frequency | `_us_{type}_ch_{id}_frequency` | Hz | FREQUENCY | MEASUREMENT | If present |
+| Frequency | `_us_{type}_ch_{id}_frequency` | Hz | FREQUENCY | MEASUREMENT | If published |
 
 **Attributes on every US channel sensor:** `channel_number`,
 `channel_id`, `channel_type`. Both identifiers are always present
@@ -614,7 +616,7 @@ two modems, HA auto-suffixes entity_ids (`_2`, `_3`, etc.). Recommend
 | Modem unreachable | unavailable | available | available | available³ | available |
 | Modem unreachable at startup | deferred⁴ | deferred⁴ | available | available³ | available |
 | Parse error | unavailable | available | available | available³ | available |
-| Field not parsed by this modem | never created | never created | n/a | n/a | n/a |
+| Field not parsed by this modem | never created⁵ | never created⁵ | n/a | n/a | n/a |
 
 ¹ **Continuous data sensors** carry a `state_class` or `unit`
 (channel metrics, error totals/rates, channel counts, and continuous
@@ -641,6 +643,32 @@ remain available during the outage. A delayed re-notification (1
 second after creation) ensures deferred entities receive their initial
 coordinator update, avoiding an "Unknown" state window until the next
 scheduled poll. See HA_ADAPTER_SPEC § Deferred Entity Creation.
+
+⁵ See [Capability Gating](#capability-gating) for what "not parsed by
+this modem" means at creation time.
+
+### Capability Gating
+
+Entity creation is one-shot at first-data-available, so gates read
+**capability** — whether the modem publishes the metric at all — not
+whether a value arrived in that poll.
+
+A per-poll gate strands the entity: firmware printing a placeholder
+(`----`, `N/A`) makes the parser drop the field
+([PARSING_SPEC.md § Field Guarantees](../../../packages/cable_modem_monitor_core/docs/PARSING_SPEC.md#field-guarantees)),
+so the sensor is never created and any registry entry from an earlier
+run restores as `unavailable`, while an always-created sensor on the
+same channel renders `unknown` for the same missing field.
+
+| Metric | Capability signal |
+| ------ | ----------------- |
+| Per-channel DS/US metrics | Any locked channel in that direction publishes the field |
+| Error rates | `total_corrected` in `system_info` |
+
+Unlocked channels are excluded: Core strips their metrics, so the
+capability set would only add rows reading `unknown`. They keep Power
+and SNR downstream, Power upstream. A channel unlocked at setup
+therefore gains nothing when it later locks, until Reset Entities.
 
 ### Sensor Availability Logic
 

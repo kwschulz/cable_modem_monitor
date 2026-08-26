@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A channel showing `----` no longer leaves its sensors
+  unavailable.** Each channel got sensors only for the values it
+  carried when entities were first created, so a channel with a
+  placeholder in its Correcteds or Uncorrectables cell got none, while
+  Power and SNR on that same channel showed Unknown. Per-channel
+  sensors are now created for every metric the modem publishes, and
+  show Unknown where a channel's own cell is empty. Existing installs
+  pick them back up on upgrade, history intact.
+
 - **The `orphaned_statistics` service no longer offers a second modem's
   live statistics for deletion.** It collected candidates by entity-ID
   prefix but checked them against a single config entry's registered
