@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0] - 2026-08-28
+
 ### Overview
 
 The stable release of the v3.14 line, after more than three months in
