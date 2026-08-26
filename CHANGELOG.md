@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.24] - 2026-08-26
+
 ### Fixed
 
 - **Upgrading from 3.13 no longer leaves dead buttons on the device
