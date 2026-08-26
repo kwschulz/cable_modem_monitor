@@ -108,7 +108,10 @@ The orchestrator omits `rate_corrected` / `rate_uncorrected` on the
 first poll (no prior baseline), across counter resets, and when
 monotonic elapsed time is non-positive. The rate sensors are created
 alongside the totals; `native_value` returns `None` (HA renders
-`unknown`) on those polls. See
+`unknown`) on those polls. A counter delta over elapsed seconds carries
+no meaningful digits past two decimals, so the sensors set
+`suggested_display_precision = 2`; the recorder keeps the full value.
+See
 [ORCHESTRATION_SPEC.md § Derived Fields](../../../packages/cable_modem_monitor_core/docs/ORCHESTRATION_SPEC.md#derived-fields).
 
 ⁵ Last Boot Time derives from `now − system_uptime` (or, for modems

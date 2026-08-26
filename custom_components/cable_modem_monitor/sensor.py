@@ -541,6 +541,10 @@ class ModemErrorTotalSensor(_SystemInfoSensor):
 class ModemErrorRateSensor(_SystemInfoSensor):
     """Per-minute corrected or uncorrected error rate sensor (#164)."""
 
+    # A counter delta divided by elapsed seconds carries no meaningful
+    # digits past this; the recorder keeps the full float.
+    _attr_suggested_display_precision = 2
+
     def __init__(
         self,
         coordinator: DataUpdateCoordinator[ModemSnapshot],

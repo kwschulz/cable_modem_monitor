@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Error rate sensors no longer show a dozen decimal places.** A rate
+  is a counter delta over elapsed seconds, so it landed on screen as
+  `1,730,730.4592256 errors/min`. It now displays to two decimals. The
+  full value is still recorded, and the displayed precision can be
+  changed per entity in its settings.
+
 - **A channel showing `----` no longer leaves its sensors
   unavailable.** Each channel got sensors only for the values it
   carried when entities were first created, so a channel with a

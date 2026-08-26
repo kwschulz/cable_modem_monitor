@@ -388,8 +388,8 @@ def test_error_rate_sensor_value(mock_runtime_data, error_type, field_value, exp
 
 
 @pytest.mark.parametrize("error_type", ["corrected", "uncorrected"])
-def test_error_rate_sensor_unit_and_state_class(mock_runtime_data, error_type):
-    """Rate sensor exposes errors/min as MEASUREMENT (point-in-time)."""
+def test_error_rate_sensor_display_metadata(mock_runtime_data, error_type):
+    """Rate sensor exposes errors/min as MEASUREMENT (point-in-time), 2dp."""
     from homeassistant.components.sensor import SensorStateClass
 
     from custom_components.cable_modem_monitor.sensor import ModemErrorRateSensor
@@ -397,6 +397,9 @@ def test_error_rate_sensor_unit_and_state_class(mock_runtime_data, error_type):
     sensor = _make_sensor(ModemErrorRateSensor, mock_runtime_data, error_type=error_type)
     assert sensor._attr_native_unit_of_measurement == "errors/min"
     assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
+    # An inter-poll delta divided by elapsed time carries no meaningful
+    # digits past this; HA renders the raw float without it.
+    assert sensor.suggested_display_precision == 2
 
 
 def test_software_version_sensor_value(mock_runtime_data):
