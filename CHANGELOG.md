@@ -7,6 +7,112 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Overview
+
+The stable release of the v3.14 line, after more than three months in
+public beta.
+
+**v3.14 rebuilds the modem engine from the ground up.** In v3.13, 19 of
+the 21 supported modems each carried a hand-written Python parser inside
+the integration. All 40 catalog entries are now described declaratively
+in YAML instead, two of them adding a small post-processor hook for
+firmware quirks the declarative layer cannot yet express. The parsing,
+authentication, and orchestration those descriptions drive live in a
+standalone library that Home Assistant is one consumer of, and the
+integration itself became an adapter over that engine. None of this asks
+you to start over. Config entries, entity IDs, history, and automations
+all carry forward.
+
+Per-beta detail is kept below, each beta under its own heading.
+
+### Upgrade Notes
+
+**Coming from v3.13.1.** Upgrade in place. The config entry migrates
+automatically: entity IDs, history, and automations are preserved, the
+entities and buttons v3.14 retired are cleaned up for you, and the two
+modems whose catalog entry was renamed during the beta run resolve to
+their new location on their own. Two things to know:
+
+- **Regenerate your dashboard** with the `generate_dashboard` service.
+  Sensors that used to have their own cards are now attribute rows or
+  have been retired, so a dashboard built on v3.13 will show gaps.
+- **You are also receiving the v3.13.2 changes.** That section exists in
+  this file but was never tagged or released, so its HNAP session reuse,
+  CM1200 HTTPS support, and firmware lockout detection reach stable
+  installs for the first time here.
+
+**Coming from a v3.14 beta.** Most testers need one action: press the
+**Reset Entities** button on the integration's device page. Sensors
+retired during the beta run (Docsis Status, System Uptime, Current Time)
+linger as unavailable until the entity registry is rebuilt. Reset
+Entities rebuilds it while keeping your config, history, and automations
+intact. Prefer it to removing the integration.
+
+Three cases need more than that, all of them narrow:
+
+- **Arris SB8200 entries on the `v7` or URL Token (body-token)
+  variant.** Both variant files were renamed mid-beta, `v7` in beta.6
+  and body-token in beta.12, and neither rename shipped a config-entry
+  migration. Remove and re-add once. Host and entity prefix are
+  unchanged, so history carries over.
+- **Arris G54 and Virgin Media Hub 5 entries created on a beta before
+  beta.13.** Both moved catalog location, to `commscope/g54` and
+  `sagemcom/f3896lg-vmb`. Remove and re-add once.
+- **Provisioned speed sensors created before beta.19** keep displaying
+  bit/s. Change the unit in the entity's own settings; installs that
+  create these sensors fresh get Mbit/s automatically.
+
+If you do remove and re-add an integration, the `orphaned_statistics`
+service reports long-term statistics left behind by the old entities.
+
+**If something looks wrong after upgrading, press Reset Entities
+first.** Removing and re-adding the integration is the last resort
+rather than the first step: it issues a new config entry ID, and every
+entity's unique ID is derived from it.
+
+### Highlights since v3.13.1
+
+- **The catalog grew from 21 entries to 40**, 28 of them confirmed
+  against real hardware. New this cycle: the Technicolor XB6, XB8 and
+  XB10, the Ziggo Sagemcom F3896LG, the Sercomm DM1000, the Hitron
+  CODA56, the Arris SB6183 and TG3442DE, the Netgear CM1100, CM2050V
+  and CM3000, and the Compal CH7465MT, among others.
+- **Authentication became data-driven.** Bearer tokens, PBKDF2 and
+  nonce and SJCL form logins, URL-token variants, per-action auth, and
+  credential-cookie injection are now catalog-selected strategies rather
+  than per-modem code.
+- **Login failures say what actually failed.** A busy modem, a login
+  endpoint returning 404, a firmware lockout, and a refused data page
+  each used to report rejected credentials. Each now reports its own
+  cause, and auth failures emit a single sanitized log line carrying the
+  modem's real response with the password redacted.
+- **Recovery is one concept.** A recovery state machine owns the
+  post-disruption polling window, entered by a dispatched restart, an
+  observed outage, or a 2-of-3 reboot-signal vote. Restart is a one-shot
+  command that no longer blocks while probing.
+- **Less recorder load.** Per-minute error rate sensors answer rate
+  questions without querying the lifetime counters, which remain,
+  supporting entities are categorized as Diagnostic, Docsis Status
+  folded into Status, and System Uptime and Current Time were retired
+  as values with no historical worth. (Related to #178)
+- **Less collected about you.** Serial number and MAC address are no
+  longer collected at all, and passwords are scrubbed from auth failure
+  logs before those logs are trimmed.
+- **Stable channel entity IDs.** New installs number channels by
+  position, so entity IDs survive a modem reboot renumbering its
+  channels. Existing installs keep ID-based naming, and the
+  `convert_channel_identity` service migrates statistics if you switch.
+- **Core is a standalone library.** The modem layer publishes to PyPI as
+  `solentlabs-cable-modem-monitor-core` and Home Assistant is one
+  consumer of it. HACS installs from a zip release asset of about 130 KB
+  instead of the full source archive.
+- **Dashboard and notifications.** The status card contents are
+  configurable, restart asks for confirmation, and the integration
+  raises a notification when bonded channel totals change so a stale
+  dashboard can be refreshed.
+
+Every change is listed in the beta sections below.
+
 ## [3.14.0-beta.24] - 2026-08-26
 
 ### Fixed

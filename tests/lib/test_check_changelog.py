@@ -182,6 +182,60 @@ def test_well_formed_changelog_is_clean() -> None:
     assert _messages(lines) == []
 
 
+# ┌────────────────────────────────┬──────────────────────────────────────┐
+# │ narrative heading              │ description                          │
+# ├────────────────────────────────┼──────────────────────────────────────┤
+# fmt: off
+NARRATIVE_SECTIONS = [
+    ("### Overview",                 "release front door intro"),
+    ("### Upgrade Notes",            "what an upgrader must do"),
+    ("### Highlights since v1.0.0",  "highlights, qualified by version"),
+]
+# fmt: on
+# └────────────────────────────────┴──────────────────────────────────────┘
+
+
+@pytest.mark.parametrize(
+    ("heading", "desc"),
+    NARRATIVE_SECTIONS,
+    ids=[case[1] for case in NARRATIVE_SECTIONS],
+)
+def test_narrative_sections_are_accepted(heading: str, desc: str) -> None:
+    """A release front door carries prose sections the six cannot express."""
+    lines = [*_HEADER, "## [1.0.0] - 2026-01-01", "", heading, "", "Prose.", ""]
+    assert _messages(lines) == [], f"Failed: {desc}"
+
+
+def test_narrative_allowance_does_not_open_the_section_list() -> None:
+    """Live counterpart: an unknown section is still rejected."""
+    lines = [*_HEADER, "## [1.0.0] - 2026-01-01", "", "### Notes", "", "Prose.", ""]
+    assert any("unknown section 'Notes'" in message for message in _messages(lines))
+
+
+def test_narrative_allowance_does_not_permit_orphan_prose() -> None:
+    """Live counterpart: prose still needs a section above it."""
+    lines = [*_HEADER, "## [1.0.0] - 2026-01-01", "", "Prose with no section.", ""]
+    assert any("body text must be under a ### section" in message for message in _messages(lines))
+
+
+def test_repeated_narrative_section_is_reported() -> None:
+    """The repeat rule covers narrative sections too."""
+    lines = [
+        *_HEADER,
+        "## [1.0.0] - 2026-01-01",
+        "",
+        "### Upgrade Notes",
+        "",
+        "- x.",
+        "",
+        "### Upgrade Notes",
+        "",
+        "- y.",
+        "",
+    ]
+    assert any("repeated within the same version" in message for message in _messages(lines))
+
+
 def test_prerelease_versions_order_correctly() -> None:
     """release < rc < beta < alpha, descending, is a valid sequence."""
     lines = [*_HEADER]
@@ -318,7 +372,7 @@ def test_real_changelog_sections_are_known_in_the_unreleased_block() -> None:
     # An empty Unreleased block is the normal state between a release bump and
     # the next entry, so only the names are asserted, never their presence.
     sections = [line[4:] for line in lines[start:end] if line.startswith("### ")]
-    assert all(name in _mod._SECTIONS for name in sections), sections
+    assert all(_mod._is_known_section(name) for name in sections), sections
 
 
 # ---------------------------------------------------------------------------
