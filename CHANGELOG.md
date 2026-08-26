@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.0-beta.24] - 2026-08-26
+
+### Fixed
+
+- **Upgrading from 3.13 no longer leaves dead buttons on the device
+  page.** The Capture HTML button is gone in 3.14 (HAR capture replaced
+  it), and the Restart button is now only created for modems that
+  declare a restart action, so both could linger as unavailable
+  leftovers. Upgrading clears them, and the Restart button is left
+  alone on modems that do support it.
+
+- **Error rate sensors no longer show a dozen decimal places.** A rate
+  is a counter delta over elapsed seconds, so it landed on screen as
+  `1,730,730.4592256 errors/min`. It now displays to two decimals. The
+  full value is still recorded, and the displayed precision can be
+  changed per entity in its settings.
+
+- **A channel showing `----` no longer leaves its sensors
+  unavailable.** Each channel got sensors only for the values it
+  carried when entities were first created, so a channel with a
+  placeholder in its Correcteds or Uncorrectables cell got none, while
+  Power and SNR on that same channel showed Unknown. Per-channel
+  sensors are now created for every metric the modem publishes, and
+  show Unknown where a channel's own cell is empty. Existing installs
+  pick them back up on upgrade, history intact.
+
+- **The `orphaned_statistics` service no longer offers a second modem's
+  live statistics for deletion.** It collected candidates by entity-ID
+  prefix but checked them against a single config entry's registered
+  entities. Every prefix option produces IDs under `cable_modem_`, so on
+  a two-modem setup the first modem's scan swept in the second modem's
+  statistics, found them unregistered to itself, and listed them as
+  orphans. Running it with `execute: true` then cleared that modem's
+  long-term history permanently. The scan now checks registered entities
+  across every configured modem.
+
+- **Netgear CM2000, CM2500 and CM3000 no longer report "Internet Access:
+  Down" on a working connection.** This firmware hides that indicator on
+  its own diagnostic page and shows a cable-modem indicator instead, so
+  the value was never one the modem displayed. The `Internet Access`
+  sensor is removed for these three models. Downstream and upstream
+  power, SNR and partial-service status are unaffected.
+
+- **The device page now shows the model your modem reports.** The
+  integration read that value from the modem, left it out of the entity
+  list as device metadata, and then never wrote it anywhere. It now
+  appears as the device's model ID. The model stays the name the unit
+  was sold under, so a modem reporting an internal code (XB7 reports
+  `CGM4331COM`) keeps the recognizable name and gains the code
+  alongside it.
+
 ## [3.14.0-beta.23] - 2026-08-24
 
 ### Fixed

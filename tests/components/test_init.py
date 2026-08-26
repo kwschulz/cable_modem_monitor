@@ -599,6 +599,46 @@ def test_update_device_registry():
     assert kwargs["hw_version"] == "V1.0"
 
 
+# Device model split: `model` is the catalog name the user bought, `model_id`
+# is the manufacturer identifier the modem reports for the same box. The
+# reported value must never take over `model` — on the Technicolor entries it
+# is an OEM board code (XB7 reports "CGM4331COM"), and promoting it would
+# replace a name users recognize with one they do not.
+# fmt: off
+DEVICE_MODEL_CASES = [
+    # (system_info,                 expected_model, expected_model_id, id)
+    ({"model_name": "CM3200A"},     "TPS-2000",     "CM3200A",   "reported-differs"),
+    ({"model_name": "CGM4331COM"},  "TPS-2000",     "CGM4331COM", "oem-board-code"),
+    ({"model_name": "TPS-2000"},    "TPS-2000",     "TPS-2000",  "reported-matches"),
+    ({},                            "TPS-2000",     None,        "no-model-name"),
+    ({"model_name": ""},            "TPS-2000",     None,        "empty-model-name"),
+    ({"model_name": None},          "TPS-2000",     None,        "null-model-name"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    "system_info,expected_model,expected_model_id",
+    [(c[0], c[1], c[2]) for c in DEVICE_MODEL_CASES],
+    ids=[c[3] for c in DEVICE_MODEL_CASES],
+)
+def test_update_device_registry_model(system_info, expected_model, expected_model_id):
+    """Catalog model stays on `model`; the reported one lands on `model_id`."""
+    hass = MagicMock()
+    entry = _make_registry_entry({"system_info": system_info})
+    mock_registry = MagicMock()
+
+    with patch(
+        "custom_components.cable_modem_monitor.dr.async_get",
+        return_value=mock_registry,
+    ):
+        _update_device_registry(hass, entry)
+
+    kwargs = mock_registry.async_get_or_create.call_args.kwargs
+    assert kwargs["model"] == expected_model
+    assert kwargs["model_id"] == expected_model_id
+
+
 def test_update_device_registry_no_modem_data():
     """Version fields stay empty when the first poll returned no data."""
     hass = MagicMock()
@@ -612,6 +652,8 @@ def test_update_device_registry_no_modem_data():
         _update_device_registry(hass, entry)
 
     kwargs = mock_registry.async_get_or_create.call_args.kwargs
+    assert kwargs["model"] == "TPS-2000"
+    assert kwargs["model_id"] is None
     assert kwargs["sw_version"] is None
     assert kwargs["hw_version"] is None
 

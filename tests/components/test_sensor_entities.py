@@ -103,6 +103,65 @@ MODEM_DATA_RATE_FIELDS_ABSENT: dict[str, Any] = {
     "upstream": [],
 }
 
+# Channel shapes for the capability-gating table below.  A placeholder
+# cell ("----") makes Core omit the key, so the channel arrives without
+# it; an unlocked channel arrives with its metrics stripped.
+_FULL: dict[str, Any] = {
+    "channel_number": 1,
+    "channel_id": 1,
+    "channel_type": "qam",
+    "lock_status": "locked",
+    "frequency": 555000000,
+    "power": 2.5,
+    "snr": 38.0,
+    "corrected": 100,
+    "uncorrected": 2,
+}
+_GAPS: dict[str, Any] = {
+    "channel_number": 2,
+    "channel_id": 2,
+    "channel_type": "qam",
+    "lock_status": "locked",
+    "frequency": 563000000,
+}
+_UNLOCKED: dict[str, Any] = {
+    "channel_number": 3,
+    "lock_status": "not_locked",
+}
+_NO_FEC: dict[str, Any] = {
+    "channel_number": 1,
+    "channel_id": 1,
+    "channel_type": "qam",
+    "lock_status": "locked",
+    "frequency": 555000000,
+    "power": 2.5,
+    "snr": 38.0,
+}
+
+_ALL_METRICS = ["corrected", "frequency", "power", "snr", "uncorrected"]
+_ALWAYS_ONLY = ["power", "snr"]
+_NO_FEC_METRICS = ["frequency", "power", "snr"]
+
+# fmt: off
+CHANNEL_GATING_CASES = [
+    # (channels,           identity mode,          slot key,   created,          description)
+    ([_FULL, _GAPS],       ChannelIdentity.ID,     ("qam", 2), _ALL_METRICS,     "placeholder cells, id mode"),
+    ([_FULL, _GAPS],       ChannelIdentity.NUMBER, 2,          _ALL_METRICS,     "placeholder cells, position mode"),
+    ([_FULL, _UNLOCKED],   ChannelIdentity.NUMBER, 3,          _ALWAYS_ONLY,     "unlocked channel, always-set only"),
+    ([_NO_FEC],            ChannelIdentity.NUMBER, 1,          _NO_FEC_METRICS,  "modem without FEC columns"),
+]
+# fmt: on
+
+
+def _downstream_only(channels: list[dict[str, Any]]) -> dict[str, Any]:
+    """Wrap a downstream channel list as modem_data."""
+    return {
+        "system_info": {"software_version": "1.0"},
+        "downstream": channels,
+        "upstream": [],
+    }
+
+
 # -----------------------------------------------------------------------
 # _create_channel_sensors
 # -----------------------------------------------------------------------
@@ -126,13 +185,13 @@ def _make_coord_and_entry(modem_data, runtime_data):
 
 
 def test_create_channel_sensors_downstream(mock_runtime_data):
-    """Downstream channels create power+SNR sensors (always) + conditional metrics."""
+    """Downstream channels create power+SNR sensors (always) + published metrics."""
     coord, entry = _make_coord_and_entry(MOCK_MODEM_DATA, mock_runtime_data)
     sensors = _create_channel_sensors(coord, entry, MOCK_MODEM_DATA)
 
     # ID mode (from MOCK_ENTRY_DATA):
-    # 2 DS channels × (power, snr always + frequency, corrected, uncorrected present) = 2 × 5 = 10
-    # 1 US channel × (power always + frequency present) = 1 × 2 = 2
+    # 2 DS channels × (power, snr always + frequency, corrected, uncorrected published) = 2 × 5 = 10
+    # 1 US channel × (power always + frequency published) = 1 × 2 = 2
     # Total = 12
     assert len(sensors) == 12
 
@@ -166,6 +225,56 @@ def test_create_channel_sensors_position_mode(mock_runtime_data):
     ds_power = [s for s in sensors if "_ds_ch_1_power" in str(s._attr_unique_id)]
     assert len(ds_power) == 1
     assert ds_power[0]._attr_name == "DS Ch 1 Power"
+
+
+@pytest.mark.parametrize(
+    "channels,identity_mode,slot_key,expected,desc",
+    CHANNEL_GATING_CASES,
+    ids=[case[4] for case in CHANNEL_GATING_CASES],
+)
+def test_create_channel_sensors_capability_gating(
+    mock_runtime_data,
+    channels,
+    identity_mode,
+    slot_key,
+    expected,
+    desc,
+):
+    """Metric creation follows what the direction publishes.
+
+    Creation is one-shot, so a per-channel gate strands a channel whose
+    cell held a placeholder.  See ENTITY_MODEL_SPEC.md, Capability
+    Gating.
+    """
+    modem_data = _downstream_only(channels)
+    coord, entry = _make_coord_and_entry(modem_data, mock_runtime_data)
+    entry.data = {**MOCK_ENTRY_DATA, CONF_CHANNEL_IDENTITY: identity_mode}
+
+    sensors = _create_channel_sensors(coord, entry, modem_data)
+
+    created = sorted(s._field for s in sensors if isinstance(s, ChannelSensor) and s._slot_key == slot_key)
+    assert created == expected, f"Failed: {desc}"
+
+
+def test_channel_sensor_placeholder_cell_reads_none(mock_runtime_data):
+    """A placeholder cell carries no value, so HA renders `unknown`."""
+    modem_data = _downstream_only([_FULL, _GAPS])
+    coord, entry = _make_coord_and_entry(modem_data, mock_runtime_data)
+    mock_runtime_data.channel_map = build_channel_map(
+        modem_data["downstream"],
+        modem_data["upstream"],
+        ChannelIdentity.ID,
+    )
+
+    sensors = _create_channel_sensors(coord, entry, modem_data)
+
+    placeholder = [s for s in sensors if isinstance(s, ChannelSensor) and s._slot_key == ("qam", 2)]
+    assert sorted(s._field for s in placeholder if s.native_value is None) == [
+        "corrected",
+        "power",
+        "snr",
+        "uncorrected",
+    ]
 
 
 def test_create_channel_sensors_empty_data(mock_runtime_data):
@@ -279,8 +388,8 @@ def test_error_rate_sensor_value(mock_runtime_data, error_type, field_value, exp
 
 
 @pytest.mark.parametrize("error_type", ["corrected", "uncorrected"])
-def test_error_rate_sensor_unit_and_state_class(mock_runtime_data, error_type):
-    """Rate sensor exposes errors/min as MEASUREMENT (point-in-time)."""
+def test_error_rate_sensor_display_metadata(mock_runtime_data, error_type):
+    """Rate sensor exposes errors/min as MEASUREMENT (point-in-time), 2dp."""
     from homeassistant.components.sensor import SensorStateClass
 
     from custom_components.cable_modem_monitor.sensor import ModemErrorRateSensor
@@ -288,6 +397,9 @@ def test_error_rate_sensor_unit_and_state_class(mock_runtime_data, error_type):
     sensor = _make_sensor(ModemErrorRateSensor, mock_runtime_data, error_type=error_type)
     assert sensor._attr_native_unit_of_measurement == "errors/min"
     assert sensor._attr_state_class == SensorStateClass.MEASUREMENT
+    # An inter-poll delta divided by elapsed time carries no meaningful
+    # digits past this; HA renders the raw float without it.
+    assert sensor.suggested_display_precision == 2
 
 
 def test_software_version_sensor_value(mock_runtime_data):

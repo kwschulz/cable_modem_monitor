@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any, NamedTuple
 
@@ -169,7 +170,7 @@ _LAN_METRICS = [
 # fmt: on
 
 # Power and SNR are always created for downstream; power for upstream.
-# Other metrics are created only when the field is present on the channel.
+# Other metrics follow ENTITY_MODEL_SPEC.md, Capability Gating.
 _DS_ALWAYS_FIELDS = frozenset(("power", "snr"))
 _US_ALWAYS_FIELDS = frozenset(("power",))
 
@@ -539,6 +540,10 @@ class ModemErrorTotalSensor(_SystemInfoSensor):
 
 class ModemErrorRateSensor(_SystemInfoSensor):
     """Per-minute corrected or uncorrected error rate sensor (#164)."""
+
+    # A counter delta divided by elapsed seconds carries no meaningful
+    # digits past this; the recorder keeps the full float.
+    _attr_suggested_display_precision = 2
 
     def __init__(
         self,
@@ -979,6 +984,26 @@ class HttpLatencySensor(HealthSensorBase):
 # ------------------------------------------------------------------
 
 
+def _published_fields(slots: Mapping[Any, dict[str, Any]]) -> frozenset[str]:
+    """Return every field any channel in one direction publishes."""
+    # Creation is one-shot: a channel whose cell held a placeholder
+    # ("----") would otherwise never get the entity.
+    return frozenset(field for channel in slots.values() for field in channel)
+
+
+def _fields_for_channel(
+    channel: dict[str, Any],
+    always: frozenset[str],
+    published: frozenset[str],
+) -> frozenset[str]:
+    """Return the metric fields to create entities for on one channel."""
+    # Core strips an unlocked channel's metrics, so the capability set
+    # would only add rows reading `unknown` (#178).
+    if channel.get("lock_status") == "not_locked":
+        return always
+    return always | published
+
+
 def _create_channel_sensors(
     data_coord: DataUpdateCoordinator[ModemSnapshot],
     entry: CableModemConfigEntry,
@@ -1001,9 +1026,11 @@ def _create_channel_sensors(
     entities: list[SensorEntity] = []
 
     # Downstream
+    ds_published = _published_fields(slots.downstream)
     for slot_key, ch in slots.downstream.items():
+        ds_fields = _fields_for_channel(ch, _DS_ALWAYS_FIELDS, ds_published)
         for field, name, unit, dev_cls, state_cls, icon, val_type in _DS_METRICS:
-            if field in _DS_ALWAYS_FIELDS or field in ch:
+            if field in ds_fields:
                 entities.append(
                     ChannelSensor(
                         data_coord,
@@ -1022,9 +1049,11 @@ def _create_channel_sensors(
                 )
 
     # Upstream
+    us_published = _published_fields(slots.upstream)
     for slot_key, ch in slots.upstream.items():
+        us_fields = _fields_for_channel(ch, _US_ALWAYS_FIELDS, us_published)
         for field, name, unit, dev_cls, state_cls, icon, val_type in _US_METRICS:
-            if field in _US_ALWAYS_FIELDS or field in ch:
+            if field in us_fields:
                 entities.append(
                     ChannelSensor(
                         data_coord,

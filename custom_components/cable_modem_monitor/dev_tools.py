@@ -942,7 +942,16 @@ def create_orphaned_statistics_handler(
             }
 
         registry = er.async_get(hass)
-        registered_entity_ids = {e.entity_id for e in registry.entities.get_entries_for_config_entry_id(entry.entry_id)}
+        # Registered entities come from every config entry, not just this
+        # one. Each modem's entity_ids start with `cable_modem_`
+        # (ENTITY_MODEL_SPEC § Entity Prefix), so the prefix filter above
+        # also matches a second modem's statistics; scoping the registry
+        # to one entry would report those as orphans and purge them.
+        registered_entity_ids = {
+            e.entity_id
+            for other in hass.config_entries.async_entries(DOMAIN)
+            for e in registry.entities.get_entries_for_config_entry_id(other.entry_id)
+        }
 
         orphaned = sorted(our_stat_ids - registered_entity_ids)
 

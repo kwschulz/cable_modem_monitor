@@ -15,6 +15,7 @@ catalog test suite.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -29,6 +30,7 @@ from custom_components.cable_modem_monitor.migrations.v1_to_v2 import (
     async_migrate,
     derive_protocol,
     extract_model,
+    modem_declares_restart,
     resolve_modem_dir,
     resolve_variant,
 )
@@ -473,6 +475,72 @@ class TestFullMigrationShape:
         assert v2["health_check_interval"] == 30
 
 
+# ┌───────────────────┬────────────────────────────────────────────────────────┐
+# │ declares restart  │ description                                            │
+# ├───────────────────┼────────────────────────────────────────────────────────┤
+# fmt: off
+ORPHAN_REMOVAL_CASES = [
+    (True,  {"sensor.modem_system_uptime", "button.modem_capture_data"},
+     "restart declared, its button survives"),
+    (False, {"sensor.modem_system_uptime", "button.modem_capture_data", "button.modem_restart"},
+     "no restart action, its button is dropped"),
+]
+# fmt: on
+# └───────────────────┴────────────────────────────────────────────────────────┘
+
+
+# =============================================================================
+# modem_declares_restart — does the catalog entry declare actions.restart?
+# =============================================================================
+
+# ┌──────────────────────────────┬──────────┬────────────────────────────────┐
+# │ config.actions               │ expected │ description                    │
+# ├──────────────────────────────┼──────────┼────────────────────────────────┤
+# fmt: off
+RESTART_DECLARATION_CASES = [
+    (SimpleNamespace(restart={}),  True,      "restart action declared"),
+    (SimpleNamespace(restart=None), False,    "actions block without restart"),
+    (None,                          False,    "no actions block"),
+]
+# fmt: on
+# └──────────────────────────────┴──────────┴────────────────────────────────┘
+
+
+class TestModemDeclaresRestart:
+    """Test the restart-declaration probe used to spot orphaned buttons."""
+
+    @pytest.mark.parametrize(
+        "actions,expected,desc",
+        RESTART_DECLARATION_CASES,
+        ids=[case[2] for case in RESTART_DECLARATION_CASES],
+    )
+    def test_declaration(self, actions, expected, desc):
+        """Restart support mirrors Orchestrator.supports_restart."""
+        with patch(
+            "custom_components.cable_modem_monitor.migrations.v1_to_v2.load_modem_config",
+            return_value=SimpleNamespace(actions=actions),
+        ):
+            assert modem_declares_restart("vendor/model", None) is expected, f"Failed: {desc}"
+
+    def test_unreadable_config_keeps_the_button(self):
+        """A load failure must not delete the user's registry row."""
+        with patch(
+            "custom_components.cable_modem_monitor.migrations.v1_to_v2.load_modem_config",
+            side_effect=OSError("no such file"),
+        ):
+            assert modem_declares_restart("vendor/model", None) is True
+
+    def test_variant_selects_its_own_yaml(self):
+        """A variant entry reads modem-{variant}.yaml, not modem.yaml."""
+        with patch(
+            "custom_components.cable_modem_monitor.migrations.v1_to_v2.load_modem_config",
+            return_value=SimpleNamespace(actions=None),
+        ) as loader:
+            modem_declares_restart("vendor/model", "basic")
+
+        assert loader.call_args.args[0].name == "modem-basic.yaml"
+
+
 # =============================================================================
 # async_migrate — HA wrapper (mocked executor + catalog)
 # =============================================================================
@@ -527,10 +595,13 @@ class TestAsyncMigrate:
         assert new_data["model"] == "Model"
         assert new_data["health_check_interval"] == 30
 
-    async def test_removes_discontinued_v1_entities(self):
-        """Migration drops the v1 System Uptime registry row; others survive."""
-        from types import SimpleNamespace
-
+    @pytest.mark.parametrize(
+        "declares_restart,removed,desc",
+        ORPHAN_REMOVAL_CASES,
+        ids=[case[2] for case in ORPHAN_REMOVAL_CASES],
+    )
+    async def test_removes_discontinued_v1_entities(self, declares_restart, removed, desc):
+        """Migration drops the registry rows v2 no longer creates."""
         hass = MagicMock()
         entry = MagicMock()
         entry.data = _build_v1_entry()
@@ -549,6 +620,14 @@ class TestAsyncMigrate:
                 entity_id="sensor.modem_last_boot_time",
                 unique_id="test_id_cable_modem_last_boot_time",
             ),
+            SimpleNamespace(
+                entity_id="button.modem_capture_data",
+                unique_id="test_id_capture_modem_data_button",
+            ),
+            SimpleNamespace(
+                entity_id="button.modem_restart",
+                unique_id="test_id_restart_button",
+            ),
         ]
 
         with (
@@ -560,11 +639,15 @@ class TestAsyncMigrate:
                 "custom_components.cable_modem_monitor.migrations.v1_to_v2.resolve_variant",
                 return_value="basic",
             ),
+            patch(
+                "custom_components.cable_modem_monitor.migrations.v1_to_v2.modem_declares_restart",
+                return_value=declares_restart,
+            ),
         ):
             assert await async_migrate(hass, entry) is True
 
-        removed = {call.args[0] for call in self.registry.async_remove.call_args_list}
-        assert removed == {"sensor.modem_system_uptime"}
+        actual = {call.args[0] for call in self.registry.async_remove.call_args_list}
+        assert actual == removed, f"Failed: {desc}"
 
     async def test_success_uses_catalog_manufacturer(self):
         """Migration uses canonical catalog manufacturer, not raw v1 value."""

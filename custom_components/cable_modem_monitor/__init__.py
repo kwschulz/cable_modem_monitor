@@ -796,6 +796,16 @@ def _update_device_registry(
     if snapshot is not None and snapshot.modem_data is not None:
         system_info = snapshot.modem_data.get("system_info", {})
 
+    # model vs model_id: the catalog model is the name the user bought
+    # ("XB7"), the modem's reported model_name is the manufacturer's
+    # identifier for the same box ("CGM4331COM"). HA has a field for each,
+    # so neither has to lose. Reported must not take over `model` — on the
+    # Technicolor and Sagemcom entries it is the OEM board code, and
+    # promoting it would replace a name users recognize with one they do
+    # not. Device name is deliberately not derived from either: entities
+    # build their DeviceInfo before the first poll, so a name from
+    # system_info would disagree with the registry and break the device
+    # link.
     registry = dr.async_get(hass)
     registry.async_get_or_create(
         config_entry_id=entry.entry_id,
@@ -803,6 +813,7 @@ def _update_device_registry(
         name=device_name,
         manufacturer=identity.manufacturer,
         model=identity.model,
+        model_id=system_info.get("model_name") or None,
         configuration_url=f"{protocol}://{host}",
         sw_version=system_info.get("software_version"),
         hw_version=system_info.get("hardware_version"),

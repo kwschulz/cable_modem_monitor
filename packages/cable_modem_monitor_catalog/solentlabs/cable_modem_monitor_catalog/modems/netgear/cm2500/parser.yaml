@@ -151,12 +151,10 @@ system_info:
         - name: "InitCableDiagTagValue"
           delimiter: "|"
           fields:
-            - offset: 0
-              field: internet_access
-              type: string
-              map:
-                "0": "Down"
-                "1": "Up"
+            # Offsets 1-5. Offset 0 is the internet indicator, which
+            # InitCableDiagUpdateView renders only when offset 6 is
+            # non-zero; offset 6 is "0" on all observed firmware, so the
+            # page shows the offset 7 cable-modem indicator instead.
             - offset: 1
               field: ds_power_status
               type: string
