@@ -11,8 +11,9 @@ depends on (see docs/reference/RELEASING.md § CHANGELOG ownership):
 - every other version heading is ``## [X.Y.Z] - YYYY-MM-DD`` (optional
   ``-alpha.N`` / ``-beta.N`` / ``-rc.N``) with a real date, versions are
   strictly descending, and no version appears twice
-- ``###`` headings are only the six Keep a Changelog sections, each at
-  most once per version
+- ``###`` headings are only the six Keep a Changelog sections plus the
+  release-narrative ones (``Overview``, ``Upgrade Notes``,
+  ``Highlights...``), each at most once per version
 - body text sits under a ``###`` section, never directly under a version
 - no roadmap ``P<n>`` identifiers (CLAUDE.md § No P-numbers in public
   artifacts) and no TODO / TBD / FIXME / XXX placeholders
@@ -46,6 +47,14 @@ import sys
 from pathlib import Path
 
 _SECTIONS = ("Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
+
+# A stable release carries what the six sections cannot say: what the
+# release is, and what an upgrader has to do about it. These headings
+# are allowed alongside them; prose still needs a heading above it, and
+# every other name is still rejected. "Highlights" matches by prefix so
+# it can name the version it is measured against.
+_NARRATIVE_SECTIONS = ("Overview", "Upgrade Notes")
+_NARRATIVE_PREFIXES = ("Highlights",)
 _PRERELEASE_RANK = {"alpha": 0, "beta": 1, "rc": 2}
 _RELEASE_RANK = 3
 
@@ -63,6 +72,11 @@ _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(?P<start>\d+)(?:,(?P<count>\d+))? @@")
 # either line was touched, so adding a heading above an existing one
 # still reports.
 Problem = tuple[int, str, int | None]
+
+
+def _is_known_section(name: str) -> bool:
+    """Whether a ``###`` heading is one the changelog allows."""
+    return name in _SECTIONS or name in _NARRATIVE_SECTIONS or name.startswith(_NARRATIVE_PREFIXES)
 
 
 def _version_key(match: re.Match[str]) -> tuple[int, ...]:
@@ -121,8 +135,9 @@ class _Validator:
         self._start_block()
 
     def _section(self, lineno: int, name: str) -> None:
-        if name not in _SECTIONS:
-            self._add(lineno, f"unknown section '{name}' (expected one of {', '.join(_SECTIONS)})")
+        if not _is_known_section(name):
+            allowed = ", ".join((*_SECTIONS, *_NARRATIVE_SECTIONS, *_NARRATIVE_PREFIXES))
+            self._add(lineno, f"unknown section '{name}' (expected one of {allowed})")
         elif name in self.sections_in_block:
             self._add(lineno, f"section '{name}' repeated within the same version", self.sections_in_block[name])
         self.sections_in_block[name] = lineno

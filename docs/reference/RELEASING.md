@@ -364,7 +364,9 @@ Contributors don't write CHANGELOG entries. The maintainer reconciles
 
 - `scripts/check_changelog.py` validates structure on every PR:
   `[Unreleased]` first, version headings well-formed and descending,
-  Keep a Changelog sections only, no roadmap P-numbers or placeholders.
+  Keep a Changelog sections plus the release-narrative ones (`Overview`,
+  `Upgrade Notes`, `Highlights...`) only, no roadmap P-numbers or
+  placeholders. Prose always sits under a `###` heading.
   It reports only on lines the branch touches, so entries published
   before these rules existed are read for context (version order,
   duplicate detection) but never flagged; `--all` covers the whole file.
