@@ -127,9 +127,14 @@ betas — by design, each beta is a deliberate per-version install.
 **Where tags live:**
 
 All tags live on `main`, beta and stable alike. A release is cut on a
-short-lived branch off current `main` (`feature/vX.Y.0-beta.N` for a
+short-lived branch off current `main` (`feature/vX.Y.Z-beta.N` for a
 beta), opened as a PR, gated by required-status-checks + commitlint,
 then merged and tagged on the merge commit. Delete the branch after.
+
+Patch releases may carry a beta when the fix is behavior-changing
+enough to want field testing first. Earlier patch lines (3.8.1 through
+3.8.6, 3.9.1, 3.9.2, 3.10.2, 3.12.1, 3.13.1) shipped straight to
+stable; that is precedent, not a rule.
 
 - `require-pr-approval` can't be self-satisfied (GitHub never counts the
   author's own approval), so the maintainer merges with admin bypass.
@@ -142,7 +147,7 @@ then merged and tagged on the merge commit. Delete the branch after.
 
   ```bash
   git fetch origin
-  git checkout -b feature/vX.Y.0-beta.N origin/main
+  git checkout -b feature/vX.Y.Z-beta.N origin/main
   ```
 
   To bring local `main` current without checking it out, run
@@ -347,7 +352,7 @@ Creates one clean commit on main.
 ### Contributor PRs target the open beta branch
 
 Contributors open PRs against `main` (GitHub's default); the maintainer
-retargets each to the open `feature/vX.Y.0-beta.N` branch with
+retargets each to the open `feature/vX.Y.Z-beta.N` branch with
 `gh api repos/solentlabs/cable_modem_monitor/pulls/<n> -X PATCH -f base=<branch>`
 (`gh pr edit --base` fails on a GitHub GraphQL deprecation). The beta
 branch is then the only PR into `main`, so a release arrives as one

@@ -1563,10 +1563,10 @@ If no obtainable artifact would close it, it is not a gap.
 gaps:
   - capability: system_uptime
     needs: "HAR capture that includes the status.html page"
-    issue: "https://github.com/solentlabs/cable_modem_monitor/issues/92"
+    issue: "https://github.com/solentlabs/cable_modem_monitor/issues/{issue}"
   - capability: reboot action
     needs: "HAR capture of the Reboot button click (advanced page)"
-    issue: "https://github.com/solentlabs/cable_modem_monitor/issues/92"
+    issue: "https://github.com/solentlabs/cable_modem_monitor/issues/{issue}"
 ```
 
 | Field | Required | Description |
