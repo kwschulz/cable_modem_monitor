@@ -1084,7 +1084,7 @@ def _login_failure(status: int | None, *, busy: bool = False) -> dict[str, Any]:
 # ├────────┼───────┼─────────────────────┼──────────────────────────────────────┤
 # │ 200    │ False │ AUTH_FAILED         │ criterion rejected the landing       │
 # │        │       │                     │ (UC-87c); HNAP's LoginResult FAILED  │
-# │ 200    │ True  │ AUTH_UNAVAILABLE    │ body matched login_busy (UC-87a)     │
+# │ 200    │ True  │ AUTH_UNAVAILABLE    │ strategy marked busy (UC-87a)        │
 # │ 401    │ False │ AUTH_FAILED         │ credential examined and rejected     │
 # │ 403    │ False │ AUTH_FAILED         │ credential examined and rejected     │
 # │ 404    │ False │ AUTH_FAILED         │ login endpoint absent (UC-87b)       │
@@ -1097,10 +1097,13 @@ def _login_failure(status: int | None, *, busy: bool = False) -> dict[str, Any]:
 #
 # Neither 200 row is hypothetical: a form entry with a success criterion
 # fails on a 2xx landing, HNAP answers a rejected credential with 200 and
-# LoginResult "FAILED", and the CGA6444VF refuses a second session with
-# 200 and MSG_LOGIN_150 (#120). Status alone cannot split the two 200
-# rows; only the strategy's busy flag can. auth_status_code carries the
-# 2xx through, so only a 404 changes the blocked-poll message (UC-87b).
+# LoginResult "FAILED", the CGA6444VF refuses a second session with 200
+# and MSG_LOGIN_150 (#120), and the S33v3 answers 200 with LoginResult
+# "RELOAD" (#201). Status alone cannot split the two 200 rows; only the
+# strategy's busy flag can. Two strategies set it, from different
+# evidence: form_pbkdf2 from the entry's declared login_busy body, hnap
+# from a protocol token. auth_status_code carries the 2xx through, so
+# only a 404 changes the blocked-poll message (UC-87b).
 #
 # fmt: off
 LOGIN_STATUS_CASES = [

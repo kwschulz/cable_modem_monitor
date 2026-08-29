@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Arris S33v3 stopped polling after a single transient login response
+  (#201).** The S33v3 firmware line answers a login with
+  `LoginResult: "RELOAD"` when its session state is stale. Its own
+  `Login.js` responds by reloading the login page and trying again,
+  which is why the modem's web interface recovers from it without the
+  user noticing. Core did not recognise the token, treated it as a
+  rejected credential, and the auth circuit breaker stopped polling on
+  the first occurrence and asked for credentials that were correct.
+  `RELOAD` is now classified as the modem declining to serve the login,
+  so polling continues and the condition clears on its own. Only the
+  `AT01.01.*` firmware line emits this token; the other Arris and
+  Motorola HNAP entries are unaffected.
+
+### Added
+
+- **Catalog gate: HNAP login outcomes are checked against firmware.**
+  Every HNAP entry whose capture includes `Login.js` now has the
+  `LoginResult` values that firmware branches on read back out and
+  compared with what Core handles. `RELOAD` had been sitting in a
+  committed capture since 2026-07-10 while the spec listed the same
+  file as its source. A firmware line that adds a token now fails a
+  test instead of a user's integration.
+
 ## [3.14.0] - 2026-08-28
 
 ### Overview
