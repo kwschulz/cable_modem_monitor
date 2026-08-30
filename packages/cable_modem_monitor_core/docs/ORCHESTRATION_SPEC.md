@@ -381,7 +381,7 @@ failure modes are captured in `ModemResult.signal`. Internally, the
 collector catches exceptions from auth, loader, and parser, logs them,
 classifies them into the appropriate signal, and returns a result.
 
-The one exception: `LoginLockoutError` is raised by HNAP auth strategies
+The one exception: `LoginLockoutError` is raised by an auth strategy
 when firmware anti-brute-force triggers. ModemDataCollector catches it and
 returns `CollectorSignal.AUTH_LOCKOUT`. The orchestrator never sees the
 exception directly.
@@ -1321,9 +1321,11 @@ attempt, circuit trips immediately. User sees error, opens a GitHub
 issue or reconfigures.
 
 **Transient auth failure:**
-Modem is busy and declines to serve the login: a 5xx, or a response
-body the entry declares busy (`login_busy`, MODEM_YAML_SPEC
-§ `form_pbkdf2`).
+Modem is busy and declines to serve the login: a 5xx, a response body
+the entry declares busy (`login_busy`, MODEM_YAML_SPEC
+§ `form_pbkdf2`), or a protocol token the strategy reads as a
+restart-the-login (`hnap` `RELOAD`; `form_cbn` `cbnLogin` and
+`cbnFirstInstall`).
 
 ```text
 Poll N:   AUTH_UNAVAILABLE — unreachable (streak unchanged, circuit closed)

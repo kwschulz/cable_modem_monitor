@@ -10,7 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-from solentlabs.cable_modem_monitor_core.auth.form_cbn import FormCbnAuthManager
+from solentlabs.cable_modem_monitor_core.auth.base import LoginLockoutError
+from solentlabs.cable_modem_monitor_core.auth.form_cbn import HANDLED_LOGIN_TOKENS, FormCbnAuthManager
 from solentlabs.cable_modem_monitor_core.models.modem_config.auth import FormCbnAuth
 
 
@@ -111,10 +112,8 @@ class TestSuccessfulLogin:
 # ├────────────────────────────┼────────────────────────────────────────────┤
 # │ login page HTTP error      │ "Login page returned HTTP 500"             │
 # │ missing session cookie     │ "did not set 'sessionToken' cookie"        │
-# │ login POST failed          │ "Login POST failed"                        │
 # │ login body not successful  │ "Login failed: idloginincorrect"           │
 # │ no SID in response         │ "SID not found in response"                │
-# │ login page network error   │ "Failed to fetch login page"               │
 # │ login POST 302 redirect    │ "Login POST returned HTTP 302"             │
 # └────────────────────────────┴────────────────────────────────────────────┘
 
@@ -193,6 +192,8 @@ def _setup_login_post_redirect(session: requests.Session) -> None:
 
 
 # fmt: off
+# Connectivity failures are absent by design: they raise rather than
+# returning an AuthResult, so they live in CONNECTIVITY_SITES below.
 FAILURE_CASES = [
     # (description, setup_fn, expected_error_substring, expects_response)
     # expects_response: True when a Response was in scope at failure
@@ -201,10 +202,8 @@ FAILURE_CASES = [
     # any response object existed.
     ("login_page_http_error",   _setup_login_page_error,    "Login page returned HTTP 500",                 True),
     ("missing_session_cookie",  _setup_missing_cookie,      "did not set 'sessionToken' cookie",            True),
-    ("login_post_failed",       _setup_post_failure,        "Login POST failed: ConnectionError",           False),
     ("login_body_rejected",     _setup_login_rejected,      "Login failed: idloginincorrect",               True),
     ("no_sid_in_response",      _setup_no_sid,              "SID not found in response",                    True),
-    ("login_page_network_error", _setup_network_error,      "Failed to fetch login page: ConnectionError",  False),
     ("login_post_302_redirect",  _setup_login_post_redirect, "Login POST returned HTTP 302",                True),
 ]
 # fmt: on
@@ -302,3 +301,153 @@ class TestPostBody:
         manager.authenticate(session, "http://192.168.0.1", "", "pw")
 
         assert captured_data[0].startswith(f"token={token}")
+
+
+# ---------------------------------------------------------------------------
+# Connectivity is not a credential verdict (#200)
+# ---------------------------------------------------------------------------
+
+# form_cbn was the only strategy converting an unreachable modem into
+# AuthResult(success=False, response=None). The collector reads that as
+# status=None -> AUTH_FAILED, which trips the circuit breaker on the first
+# occurrence: polling stops and the user is sent to reconfigure a password
+# that was never wrong. UC-30/UC-31 want CONNECTIVITY, which backs off and
+# recovers unattended.
+#
+# Both request sites need their own row. The cross-strategy gate in
+# test_auth_failure_modes.py only ever reaches the first one, because auth
+# never gets past a login page it cannot fetch.
+#
+# fmt: off
+CONNECTIVITY_SITES = [
+    # (description,      setup_fn,             raised)
+    ("login_page_get",   _setup_network_error, requests.ConnectionError),
+    ("login_post",       _setup_post_failure,  requests.ConnectionError),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    "desc,setup_fn,raised",
+    CONNECTIVITY_SITES,
+    ids=[c[0] for c in CONNECTIVITY_SITES],
+)
+def test_connectivity_propagates_from_every_request_site(
+    session: requests.Session,
+    desc: str,
+    setup_fn: Any,
+    raised: type[Exception],
+) -> None:
+    """A network failure at either request leaves authenticate() unconverted."""
+    setup_fn(session)
+    manager = FormCbnAuthManager(FormCbnAuth(strategy="form_cbn"))
+
+    with pytest.raises(raised):
+        manager.authenticate(session, "http://192.168.100.1", "admin", "pw")
+
+
+# ---------------------------------------------------------------------------
+# Login token vocabulary
+# ---------------------------------------------------------------------------
+
+# The firmware distinguishes five outcomes; Core collapsed the middle four
+# into "wrong password", so one restart token stopped polling and told the
+# user to reconfigure a credential that was never judged. Evidence is the
+# CH7465MT capture: the inline handler in common_page/login.html and
+# js/common_api.js. See AUTH_CBN_SPEC.md § Login Token Vocabulary.
+#
+# ┌──────────────────┬────────────────────────┬──────────────────────────┐
+# │ body token       │ firmware does          │ Core reports             │
+# ├──────────────────┼────────────────────────┼──────────────────────────┤
+# │ "successful"     │ index.html             │ success                  │
+# │ lockedout        │ Access-denied.html     │ raises LoginLockoutError │
+# │ cbnAccessDenied  │ Access-denied.html     │ raises LoginLockoutError │
+# │ cbnLogin         │ login.html             │ busy -> AUTH_UNAVAILABLE │
+# │ cbnFirstInstall  │ login.html             │ busy -> AUTH_UNAVAILABLE │
+# │ cbnBlockContent  │ Blocked-content.html   │ rejected, token named    │
+# │ anything else    │ ShowPasswordError()    │ rejected                 │
+# └──────────────────┴────────────────────────┴──────────────────────────┘
+
+
+def _setup_login_body(session: requests.Session, body: str) -> None:
+    """Configure session: login page OK, login POST returns ``body``."""
+    page_resp = _mock_response(text="<html>login</html>")
+    post_resp = _mock_response(text=body)
+
+    def mock_get(url: str, **kwargs: Any) -> MagicMock:
+        session.cookies.set("sessionToken", "tok")
+        return page_resp
+
+    session.get = mock_get  # type: ignore[assignment]  # rationale: stubbing the Session verbs by assignment is this file's idiom; mypy sees a bound method replaced by a plain function, which is the substitution intended
+    session.post = lambda *a, **k: post_resp  # type: ignore[assignment]  # rationale: same substitution as the line above, for the login POST
+
+
+# fmt: off
+LOGIN_TOKEN_CASES = [
+    # (description,      body,                  outcome)
+    ("success",          "successful SID=12345", "success"),
+    ("lockedout",        "lockedout",            "lockout"),
+    ("access_denied",    "cbnAccessDenied",      "lockout"),
+    ("login",            "cbnLogin",             "restart"),
+    ("first_install",    "cbnFirstInstall",      "restart"),
+    ("block_content",    "cbnBlockContent",      "blocked"),
+    ("wrong_password",   "idloginincorrect",     "rejected"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    "desc,body,outcome",
+    LOGIN_TOKEN_CASES,
+    ids=[c[0] for c in LOGIN_TOKEN_CASES],
+)
+def test_login_token_dispatch(
+    session: requests.Session,
+    desc: str,
+    body: str,
+    outcome: str,
+) -> None:
+    """Each login body token produces its defined outcome."""
+    _setup_login_body(session, body)
+    manager = FormCbnAuthManager(_make_config())
+
+    if outcome == "lockout":
+        # Mirrors hnap: lockout raises rather than returning a failed
+        # AuthResult, so the orchestrator can tell firmware anti-brute-force
+        # from a rejected credential (#117). The two have different remedies.
+        with pytest.raises(LoginLockoutError, match=body):
+            manager.authenticate(session, "http://192.168.0.1", "admin", "pw")
+        return
+
+    result = manager.authenticate(session, "http://192.168.0.1", "admin", "pw")
+
+    if outcome == "success":
+        assert result.success is True
+        assert session.cookies.get("SID") == "12345"
+        return
+
+    assert result.success is False
+    assert result.response is not None
+    # busy keeps the collector on AUTH_UNAVAILABLE: no streak, no breaker,
+    # polling continues so the condition clears itself (UC-87a).
+    assert result.busy is (outcome == "restart")
+    if outcome == "blocked":
+        # Its own error string, not the generic wrong-password one that
+        # merely echoes the body: a field occurrence must be
+        # distinguishable from a real bad password in the logs. What the
+        # token means is unestablished, so Core claims no recovery.
+        # AUTH_CBN_SPEC.md § Known Gaps.
+        assert result.error == "CBN login refused: cbnBlockContent"
+    if outcome == "rejected":
+        assert result.error.startswith("Login failed:")
+
+
+def test_handled_tokens_is_the_union_of_the_groups() -> None:
+    """The fleet gate reads HANDLED_LOGIN_TOKENS; it must cover every group."""
+    assert sorted(HANDLED_LOGIN_TOKENS) == [
+        "cbnAccessDenied",
+        "cbnBlockContent",
+        "cbnFirstInstall",
+        "cbnLogin",
+        "lockedout",
+    ]

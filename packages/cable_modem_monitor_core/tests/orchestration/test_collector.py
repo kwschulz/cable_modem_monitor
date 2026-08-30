@@ -1084,7 +1084,7 @@ def _login_failure(status: int | None, *, busy: bool = False) -> dict[str, Any]:
 # ├────────┼───────┼─────────────────────┼──────────────────────────────────────┤
 # │ 200    │ False │ AUTH_FAILED         │ criterion rejected the landing       │
 # │        │       │                     │ (UC-87c); HNAP's LoginResult FAILED  │
-# │ 200    │ True  │ AUTH_UNAVAILABLE    │ body matched login_busy (UC-87a)     │
+# │ 200    │ True  │ AUTH_UNAVAILABLE    │ strategy marked busy (UC-87a)        │
 # │ 401    │ False │ AUTH_FAILED         │ credential examined and rejected     │
 # │ 403    │ False │ AUTH_FAILED         │ credential examined and rejected     │
 # │ 404    │ False │ AUTH_FAILED         │ login endpoint absent (UC-87b)       │
@@ -1097,10 +1097,13 @@ def _login_failure(status: int | None, *, busy: bool = False) -> dict[str, Any]:
 #
 # Neither 200 row is hypothetical: a form entry with a success criterion
 # fails on a 2xx landing, HNAP answers a rejected credential with 200 and
-# LoginResult "FAILED", and the CGA6444VF refuses a second session with
-# 200 and MSG_LOGIN_150 (#120). Status alone cannot split the two 200
-# rows; only the strategy's busy flag can. auth_status_code carries the
-# 2xx through, so only a 404 changes the blocked-poll message (UC-87b).
+# LoginResult "FAILED", the CGA6444VF refuses a second session with 200
+# and MSG_LOGIN_150 (#120), and the S33v3 answers 200 with LoginResult
+# "RELOAD" (#201). Status alone cannot split the two 200 rows; only the
+# strategy's busy flag can. Three strategies set it, from different
+# evidence: form_pbkdf2 from the entry's declared login_busy body, hnap
+# and form_cbn from a protocol token. auth_status_code carries the 2xx
+# through, so only a 404 changes the blocked-poll message (UC-87b).
 #
 # fmt: off
 LOGIN_STATUS_CASES = [
@@ -1470,3 +1473,85 @@ class TestSystemInfoFieldOutcomes:
 
         assert collector.last_system_info_fields_missing == []
         assert collector.system_info_fields_failed == {}
+
+
+# ------------------------------------------------------------------
+# Tests — CBN load path through the real loader (UC-30, #200)
+# ------------------------------------------------------------------
+
+
+class TestCbnLoadConnectivity:
+    """The CBN transport reports an unreachable modem as CONNECTIVITY.
+
+    Every other collector connectivity test patches ``_load_resources``
+    itself, so the loader's own behaviour never reaches the
+    classification under test. That mocked-neighbour seam is where #200
+    lived: the real CBNLoader swallowed the error, the resource dict came
+    back short, and the poll ended as LOAD_INTEGRITY — auth streak
+    incremented, status AUTH_FAILED, reauth prompt raised for a modem
+    that had judged nothing.
+    """
+
+    @staticmethod
+    def _cbn_collector() -> ModemDataCollector:
+        """A collector wired for the cbn transport with a real FormCbnAuth config."""
+        from solentlabs.cable_modem_monitor_core.models.modem_config.auth import FormCbnAuth
+
+        config = _make_config(transport="cbn")
+        config.auth = FormCbnAuth(strategy="form_cbn")
+        return ModemDataCollector(config, MagicMock(), None, "http://127.0.0.1:1", "", "pw")
+
+    _FUNS = ("10", "11", "2", "144")
+
+    def _run(self, side_effect: Any) -> Any:
+        """Execute a poll whose CBN fetches all fail, with the real loader in the path."""
+        collector = self._cbn_collector()
+        targets = [ResourceTarget(path=f, format="xml") for f in self._FUNS]
+
+        def _parse(resources: dict[str, Any]) -> Any:
+            # Stands in for the coordinator, which is covered by its own
+            # tests. Reproduces what d6cd3246 made it do: every declared
+            # path the loader did not return is accounted for as zero
+            # fulfillment, which is what reaches LOAD_INTEGRITY.
+            counts = {f: AnchorCount(expected=1, fulfilled=1 if f in resources else 0) for f in self._FUNS}
+            return {"downstream": [], "upstream": [], "system_info": {}}, ParseDiagnostics(by_resource=counts)
+
+        with (
+            patch.object(collector, "authenticate", return_value=AuthResult(success=True)),
+            patch(
+                "solentlabs.cable_modem_monitor_core.orchestration.collector.collect_fetch_targets",
+                return_value=targets,
+            ),
+            patch.object(collector, "_parse", side_effect=_parse),
+            patch.object(collector._session, "post", side_effect=side_effect),
+        ):
+            return collector.execute()
+
+    def test_the_defect_chain_is_reproduced(self) -> None:
+        """Guard on the guard: without the parse stub this class would red on PARSE_ERROR.
+
+        Pins that a swallowed fetch really does reach LOAD_INTEGRITY here,
+        so the two tests below are red for mtheli's reason and not an
+        artefact of the harness. Delete this when the loader raises and
+        the branch becomes unreachable.
+        """
+        collector = self._cbn_collector()
+        diagnostics = ParseDiagnostics(by_resource={f: AnchorCount(expected=1, fulfilled=0) for f in self._FUNS})
+
+        assert diagnostics.has_zero_fulfillment
+        assert collector._build_load_integrity_result(diagnostics, {}).signal == CollectorSignal.LOAD_INTEGRITY
+
+    def test_connection_error_is_connectivity_not_load_integrity(self) -> None:
+        """UC-30: the modem is unreachable, so nothing about auth is in question."""
+        result = self._run(requests.ConnectionError("[Errno 113] Host is unreachable"))
+
+        assert result.signal == CollectorSignal.CONNECTIVITY, (
+            "a network error on the CBN data path was classified as a stub page, "
+            "which counts toward the auth streak and reports AUTH_FAILED (#200)"
+        )
+
+    def test_timeout_is_connectivity(self) -> None:
+        """UC-31: same for a modem too slow to answer."""
+        result = self._run(requests.Timeout("timed out"))
+
+        assert result.signal == CollectorSignal.CONNECTIVITY

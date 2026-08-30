@@ -7,6 +7,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.1-beta.1] - 2026-08-30
+
+### Fixed
+
+- **Arris S33v3 stopped polling after a single transient login response
+  (#201).** The S33v3 firmware line answers a login with
+  `LoginResult: "RELOAD"` when its session state is stale. Its own
+  `Login.js` responds by reloading the login page and trying again,
+  which is why the modem's web interface recovers from it without the
+  user noticing. Core did not recognise the token, treated it as a
+  rejected credential, and the auth circuit breaker stopped polling on
+  the first occurrence and asked for credentials that were correct.
+  `RELOAD` is now classified as the modem declining to serve the login,
+  so polling continues and the condition clears on its own. Only the
+  `AT01.01.*` firmware line emits this token; the other Arris and
+  Motorola HNAP entries are unaffected.
+
+- **CBN modems stopped polling after a few seconds of unreachability
+  (#200).** On a Compal CH7465MT that briefly drops off the network, a
+  connection error during a poll was reported as an authentication
+  failure, so the circuit breaker stopped polling on the first
+  occurrence and Home Assistant asked for credentials that were never
+  wrong. Two places converted the error: `form_cbn` was the only auth
+  strategy that turned an unreachable modem into a failed login, and the
+  CBN loader turned a failed data fetch into a missing resource, which
+  the parse layer then read as a stub page. Both now surface the error
+  so it is classified as a connectivity failure, which backs off and
+  recovers on its own. A CBN data fetch answered 4xx or 5xx is also
+  reported the way the HTTP transport already reports it, rather than
+  counting toward the authentication failure streak.
+
+- **CBN modems stopped polling on a lockout or a restart-the-login
+  response.** Compal CBN firmware answers a login five different ways,
+  and Core recognised only one of them: any body without `successful`
+  was reported as a wrong password. So a modem saying it had locked
+  itself out after too many attempts, or asking the client to start the
+  login over, tripped the auth circuit breaker on the first occurrence,
+  stopped polling, and asked for credentials that were never judged.
+  The four other outcomes are now read as the firmware's own handler
+  reads them: `lockedout` and `cbnAccessDenied` report a firmware
+  lockout, whose remedy is waiting rather than a new password;
+  `cbnLogin` and `cbnFirstInstall` are the modem declining to serve the
+  login, so polling continues and the condition clears on its own.
+
+- **A connection failure did not name the resource it failed on.** The
+  warning rendered as `Resource load error [MB7621] — : Failed to fetch
+  /MotoSwInfo.asp`, with an empty field where the resource path belongs,
+  because the HTTP loader's connection-error branch was the only raise that
+  left the path unset. The other four raises in that loader and both in the
+  CBN loader already carried it.
+
+- **An unreachable modem was logged as an authentication failure.** A
+  connection error during the auth phase carries no HTTP response and no
+  verdict on the credential, but the warning still read `Auth failed
+  [MODEL] strategy=...`, pointing at a password for what is a
+  reachability problem. It now reads `Connection failed during auth`,
+  which is also the line the bundled log analyser had always looked for
+  and never been able to match. A modem that answers and rejects the
+  credential still reports `Auth failed` with the request and response
+  detail.
+
+### Added
+
+- **Catalog gate: HNAP login outcomes are checked against firmware.**
+  Every HNAP entry whose capture includes `Login.js` now has the
+  `LoginResult` values that firmware branches on read back out and
+  compared with what Core handles. `RELOAD` had been sitting in a
+  committed capture since 2026-07-10 while the spec listed the same
+  file as its source. A firmware line that adds a token now fails a
+  test instead of a user's integration.
+
+- **Catalog gate: CBN login outcomes are checked against firmware.**
+  The same gate for the CBN fleet: every `form_cbn` entry whose capture
+  includes the firmware's login JavaScript now has the tokens it
+  branches on read back out and compared with what Core handles. The
+  vocabulary rests on a single capture, so the gate ships with an
+  extractor test that fails if it silently stops matching.
+
+### Removed
+
+- **The channel-bond change notification (#197).** A persistent
+  notification fired whenever the bonded channel totals moved away from
+  the stored baseline. It watched the wrong value in both directions: a
+  DOCSIS 3.1 OFDM carrier that briefly drops and returns produced two
+  notifications for a single poll of missing data, while the case it was
+  built for, an ID-mode channel reassignment, can leave the totals
+  unchanged and go undetected entirely. The DS and US Channel Count
+  sensors still publish the totals on every poll, so an automation can
+  watch them directly. The one-time onboarding notification is
+  unaffected.
+
+### Upgrade Notes
+
+**Coming from v3.14.0.** The channel-bond change notification is gone. If
+you built an automation that triggers on it, move the trigger to the DS
+Channel Count and US Channel Count sensors, which carry the same totals
+on every poll.
+
 ## [3.14.0] - 2026-08-28
 
 ### Overview

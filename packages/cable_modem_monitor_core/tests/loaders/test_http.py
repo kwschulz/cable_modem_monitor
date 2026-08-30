@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64 as b64mod
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 import requests
@@ -231,6 +232,28 @@ class TestHTTPResourceLoader:
             targets = [ResourceTarget(path="/status.html", format="table")]
             with pytest.raises(ResourceLoadError):
                 loader.fetch(targets)
+
+    def test_connection_error_carries_path(self) -> None:
+        """A connection failure names the resource it failed on.
+
+        The ResourceLoadError log line renders ``path`` as its own field, so a
+        raise that leaves it empty prints "Resource load error [model] — :" with
+        a hole where the resource belongs. Every other raise in this loader and
+        in the CBN loader sets it; this branch did not.
+        """
+        entries = _build_entries({"/status.html": ("text/html", "<html>OK</html>")})
+
+        with HARMockServer(entries) as server:
+            session = requests.Session()
+            loader = HTTPResourceLoader(session, server.base_url, timeout=10)
+            targets = [ResourceTarget(path="/status.html", format="table")]
+            with (
+                patch.object(session, "get", side_effect=requests.ConnectTimeout("timed out")),
+                pytest.raises(ResourceLoadError) as excinfo,
+            ):
+                loader.fetch(targets)
+
+        assert excinfo.value.path == "/status.html"
 
     def test_auth_response_reuse(self) -> None:
         """Auth response is reused when its URL matches a target."""

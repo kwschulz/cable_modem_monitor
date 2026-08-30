@@ -223,14 +223,77 @@ def test_login_failure(
     assert result.response is not None
 
 
-@pytest.mark.parametrize("login_result", ["LOCKUP", "REBOOT"])
-def test_firmware_lockout_raises(hnap_server: str, login_result: str) -> None:
-    """LOCKUP/REBOOT raise rather than returning a failed AuthResult (#117)."""
+# Every ``LoginResult`` token the firmware emits, and what each must produce.
+# The token list is not ours to choose: Login.js branches on exactly these
+# five plus a catch-all, so a token missing from this table is a token the
+# code has never been shown. test_hnap_login_result_coverage.py gates the
+# table against the Login.js captured in each HNAP entry's HAR.
+#
+# ┌──────────────┬─────────────┬──────────────────────────────────────────────┐
+# │ LoginResult  │ outcome     │ firmware meaning (Login.js)                  │
+# ├──────────────┼─────────────┼──────────────────────────────────────────────┤
+# │ OK           │ success     │ authenticated                                │
+# │ OK_CHANGED   │ success     │ authenticated; UI redirects to password page │
+# │ FAILED       │ rejected    │ "Incorrect username or password"             │
+# │ LOCKUP       │ lockout     │ "Login will be locked for a period of time"  │
+# │ REBOOT       │ lockout     │ "restart your modem" to clear the lock       │
+# │ RELOAD       │ busy        │ reloads Login.html; no message to the user   │
+# │ NOT_A_TOKEN  │ unexpected  │ absent from Login.js — protocol state we      │
+# │              │             │ have never observed                          │
+# └──────────────┴─────────────┴──────────────────────────────────────────────┘
+#
+# RELOAD is `busy`, not `rejected`: the firmware neither blames the credential
+# nor alerts the user, it restarts the login flow. UC-87a gives that
+# AUTH_UNAVAILABLE, so polling survives it. Reading it as a verdict trips the
+# breaker on the first occurrence and stops polling for good (#201).
+#
+# fmt: off
+LOGIN_RESULT_CASES = [
+    # (login_result, outcome)
+    ("OK",          "success"),
+    ("OK_CHANGED",  "success"),
+    ("FAILED",      "rejected"),
+    ("LOCKUP",      "lockout"),
+    ("REBOOT",      "lockout"),
+    ("RELOAD",      "busy"),
+    ("NOT_A_TOKEN", "unexpected"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    "login_result,outcome",
+    LOGIN_RESULT_CASES,
+    ids=[c[0] for c in LOGIN_RESULT_CASES],
+)
+def test_login_result_dispatch(hnap_server: str, login_result: str, outcome: str) -> None:
+    """Each LoginResult token produces its defined outcome."""
     _HNAPHandler.login_result = login_result
     manager = _make_manager()
+    session = requests.Session()
 
-    with pytest.raises(LoginLockoutError, match=login_result):
-        manager.authenticate(requests.Session(), hnap_server, "admin", "pw")
+    if outcome == "lockout":
+        # LOCKUP/REBOOT raise rather than returning a failed AuthResult, so
+        # the orchestrator can tell firmware lockout from a rejected
+        # credential (#117); the two have different remedies.
+        with pytest.raises(LoginLockoutError, match=login_result):
+            manager.authenticate(session, hnap_server, "admin", "pw")
+        return
+
+    result = manager.authenticate(session, hnap_server, "admin", "pw")
+
+    if outcome == "success":
+        assert result.success is True
+        assert result.auth_context.private_key != ""
+        return
+
+    assert result.success is False
+    assert result.response is not None
+    assert result.busy is (outcome == "busy")
+    if outcome == "rejected":
+        assert "incorrect username or password" in result.error.lower()
+    if outcome == "unexpected":
+        assert "unexpected result" in result.error.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +364,7 @@ def _setup_login_not_dict_int(mock_post: MagicMock) -> None:
 
 
 def _setup_login_unexpected_result(mock_post: MagicMock) -> None:
-    """LoginResult is dict-shaped but value isn't OK/OK_CHANGED/FAILED/LOCKUP/REBOOT."""
+    """LoginResult is dict-shaped but the value is not one Login.js branches on."""
     mock_post.side_effect = [
         _challenge_ok(),
         _resp_with_json({"LoginResponse": {"LoginResult": "UNKNOWN_STATUS"}}),
@@ -316,7 +379,7 @@ def _setup_login_unexpected_result(mock_post: MagicMock) -> None:
 # │ challenge_missing_fields       │ challenge dict lacks required      │ "missing required"     │ True             │
 # │ login_request_exception        │ non-connectivity on login POST     │ "login request failed" │ False            │
 # │ login_not_dict_*               │ login body is non-dict JSON        │ "expected json object" │ True             │
-# │ login_unexpected_result        │ LoginResult value is unrecognized  │ "unexpected result"    │ True             │
+# │ login_unexpected_result        │ LoginResult absent from Login.js   │ "unexpected result"    │ True             │
 # └────────────────────────────────┴────────────────────────────────────┴────────────────────────┴──────────────────┘
 # expects_response: True when a Response was in scope at failure (collector's
 # _log_auth_failure_detail can dump request/response detail). False when the

@@ -33,11 +33,12 @@ class AuthFailureMode(StrEnum):
 class LoginLockoutError(Exception):
     """Firmware anti-brute-force triggered.
 
-    Raised by HNAP auth strategies when the modem responds with
-    ``LoginResult: "LOCKUP"`` or ``"REBOOT"``. The orchestrator
-    catches this and applies backoff policy. Defined here rather than
-    in orchestration so the auth layer can raise it without importing
-    upward.
+    Raised by an auth strategy when the modem reports that it is
+    refusing logins to protect itself rather than judging the
+    credential; each strategy's spec names the responses that mean it.
+    The orchestrator catches this and applies backoff policy. Defined
+    here rather than in orchestration so the auth layer can raise it
+    without importing upward.
     """
 
 
@@ -79,10 +80,10 @@ class AuthResult:
         response_url: URL path the login response corresponds to.
             May differ from the login URL if a redirect occurred.
         busy: The modem declined to serve the login without judging
-            the credential, signalled in a 2xx body the catalog entry
-            declares (``login_busy``). The collector classifies it
-            ``AUTH_UNAVAILABLE``, as it does a 5xx (UC-87a). Only
-            meaningful with ``success=False``.
+            the credential, under a 2xx the status rule cannot read;
+            each strategy's spec names the responses that mean it. The
+            collector classifies it ``AUTH_UNAVAILABLE``, as it does a
+            5xx (UC-87a). Only meaningful with ``success=False``.
 
     **Reuse contract — load-bearing.** ``response`` and ``response_url``
     advertise an auth-response-reuse opportunity to the loader, which

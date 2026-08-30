@@ -2275,7 +2275,7 @@ over from config-flow validation 342 ms earlier.
 
 | Poll | What happens | Streak | Status |
 |------|-------------|--------|--------|
-| N | Login answers 5xx, or the body matches `login_busy` | 0 | UNREACHABLE |
+| N | Login answers 5xx, or the strategy marks it busy | 0 | UNREACHABLE |
 | N+1..N+k | Still busy; polling continues at normal cadence | 0 | UNREACHABLE |
 | N+k+1 | Condition clears; login succeeds | 0 | ONLINE |
 
@@ -2304,6 +2304,27 @@ the session and 65546 for customer care, and its own UI renders separate
 messages for each — but Core does not need the distinction to choose the
 right behavior, and encoding those codes would be modem-specific
 behavior (MODEM_YAML_SPEC § Principles).
+
+**A third route to the same signal.** The Arris S33v3 (`AT01.01.*`
+firmware, #201) answers HTTP 200 with `LoginResult: "RELOAD"`. Its own
+`Login.js` handles that by navigating back to `/Login.html` with no
+alert --- the only branch that neither blames the credential nor
+reports a lock, so the browser recovers from it silently on every
+occurrence. HNAP's token set is fixed by the protocol rather than
+declared per entry, so the strategy sets `busy` directly
+(AUTH_HNAP_SPEC.md § Restart the login). Read as a verdict it produced
+this use case's exact anti-pattern: one occurrence, breaker tripped,
+polling stopped, and a reauth form for a password that was never wrong.
+
+**A fourth route, on the same reasoning.** The CBN firmware line
+(Compal CH7465MT capture) answers HTTP 200 with `cbnLogin` or
+`cbnFirstInstall`. Its own `common_api.js` handles both by navigating
+back to `login.html`, the branch that neither blames the credential nor
+reports a lock. `form_cbn` read every body without `"successful"` as a
+wrong password, so these produced this use case's exact anti-pattern.
+Like HNAP, the token set comes from firmware shared across the platform
+rather than from entry config, so the strategy sets `busy` directly
+(AUTH_CBN_SPEC.md § Login Token Vocabulary).
 
 **Why a declared body criterion, not a Core error table:** firmware
 that refuses under HTTP 200 gives the status rule nothing to read, and
@@ -2342,8 +2363,10 @@ in about 20 s, so classification alone breaks the loop.
 > **Status:** Implemented. The collector classifies a 5xx login
 > response, or an `AuthResult` the strategy marked `busy`, as
 > `AUTH_UNAVAILABLE`; `SignalPolicy.apply` maps it to `UNREACHABLE`
-> with no side effects, matching `LOAD_ERROR`. `form_pbkdf2` marks
-> busy when the body matches `login_busy`.
+> with no side effects, matching `LOAD_ERROR`. Three strategies mark
+> busy: `form_pbkdf2` when the body matches the entry's `login_busy`,
+> `hnap` on `LoginResult: "RELOAD"`, and `form_cbn` on a `cbnLogin` or
+> `cbnFirstInstall` login body.
 
 ---
 

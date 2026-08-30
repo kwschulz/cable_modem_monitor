@@ -10,6 +10,12 @@ Key constraints:
 - Logout is handled by the collector via ``actions.logout`` config,
   not by the loader (avoids double-logout).
 
+A fetch failure is surfaced, never skipped: connection and timeout
+errors propagate for the collector to read as ``CONNECTIVITY``, and a
+non-2xx raises ``ResourceLoadError`` carrying its status. Only a body
+that will not decode is skipped, which is the case that behaviour was
+built for.
+
 See RESOURCE_LOADING_SPEC.md CBN XML POST Loading section.
 """
 
@@ -25,12 +31,9 @@ import requests
 
 from ..fetch_list import ResourceTarget
 from .diagnostics import describe_request
+from .http import ResourceLoadError
 
 _logger = logging.getLogger(__name__)
-
-
-class CBNLoadError(Exception):
-    """Error during CBN resource loading."""
 
 
 class CBNLoader:
@@ -94,14 +97,7 @@ class CBNLoader:
         return resources
 
     def _fetch_one(self, fun: str) -> Element | None:
-        """Fetch a single resource by fun parameter.
-
-        Args:
-            fun: The ``fun`` parameter value (e.g., ``"10"``).
-
-        Returns:
-            Parsed XML root Element, or None on failure.
-        """
+        """Fetch one resource, returning None only when its body will not decode."""
         token = self._session.cookies.get(self._cookie_name) or ""
         post_body = f"token={token}&fun={fun}"
 
@@ -114,26 +110,39 @@ class CBNLoader:
                 timeout=self._timeout,
             )
         except requests.RequestException as exc:
-            _logger.warning(
-                "CBN fetch failed for fun=%s [%s]: %s: %s",
-                fun,
-                self._model,
-                type(exc).__name__,
-                exc,
-            )
-            return None
+            # An unreachable or unresponsive modem is CONNECTIVITY, not a
+            # short resource dict. Swallowing it here dropped the key, the
+            # coordinator counted 0/N anchors, and the poll ended as
+            # LOAD_INTEGRITY — auth streak, AUTH_FAILED, reauth prompt for a
+            # modem that judged nothing (#200). RESOURCE_LOADING_SPEC
+            # § Error Signals: the loader surfaces, policy decides.
+            if isinstance(exc, requests.ConnectionError | requests.Timeout):
+                raise
+            # Everything else becomes LOAD_ERROR, the same conversion
+            # loaders/http.py makes. A CBN-specific error type would need
+            # its own collector branch to be caught at all, and the status
+            # is the only thing that branch would read.
+            raise ResourceLoadError(
+                f"Failed to fetch fun={fun}: {type(exc).__name__}: {exc}",
+                path=fun,
+            ) from exc
 
         elapsed_ms = (time.monotonic() - start) * 1000
 
         if not response.ok:
-            _logger.warning(
-                "CBN fetch HTTP %d for fun=%s [%s]\n  request: %s",
-                response.status_code,
-                fun,
-                self._model,
-                describe_request(response.request, headers=self._headers),
+            # Carries the status out so the collector can tell a stale
+            # session (401/403 -> LOAD_AUTH) from the modem declining to
+            # serve (-> LOAD_ERROR, no auth streak). Skipping the target
+            # routed both to LOAD_INTEGRITY, which counts toward the streak
+            # a 5xx must not touch. UC-32, and the all-or-nothing rule.
+            raise ResourceLoadError(
+                f"HTTP {response.status_code} on fun={fun}",
+                status_code=response.status_code,
+                path=fun,
+                request_line=describe_request(response.request, headers=self._headers),
+                response_body=response.text,
+                content_type=response.headers.get("Content-Type", ""),
             )
-            return None
 
         _logger.debug(
             "CBN resource loaded: fun=%s [%s] (%.0fms, %d bytes)",

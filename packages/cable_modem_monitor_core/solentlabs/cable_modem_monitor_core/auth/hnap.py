@@ -37,6 +37,19 @@ _logger = logging.getLogger(__name__)
 # before the private key is derived from the challenge response.
 _PRE_AUTH_KEY = "withoutloginkey"
 
+# LoginResult tokens, grouped by what the firmware means by each.
+# The set is dictated by Login.js, not chosen here; AUTH_HNAP_SPEC.md
+# § Auth Flow step 5 carries the reasoning per group, and the catalog
+# gate test_hnap_login_result_coverage.py reads the tokens back out of
+# each entry's captured Login.js so a new firmware line cannot add one
+# unnoticed.
+_SUCCESS_RESULTS = frozenset({"OK", "OK_CHANGED"})
+_REJECTED_RESULTS = frozenset({"FAILED"})
+_LOCKOUT_RESULTS = frozenset({"LOCKUP", "REBOOT"})
+_RETRY_RESULTS = frozenset({"RELOAD"})
+
+HANDLED_LOGIN_RESULTS = _SUCCESS_RESULTS | _REJECTED_RESULTS | _LOCKOUT_RESULTS | _RETRY_RESULTS
+
 
 class HnapAuthManager(BaseAuthManager):
     """HNAP HMAC challenge-response authentication.
@@ -269,21 +282,35 @@ class HnapAuthManager(BaseAuthManager):
         login_response = data.get("LoginResponse", {})
         login_result = login_response.get("LoginResult", "")
 
-        if login_result in ("LOCKUP", "REBOOT"):
+        if login_result in _LOCKOUT_RESULTS:
             # Distinct from a rejected credential (#117): the modem is
             # refusing logins to protect itself, and retrying is what
             # reboots it. The orchestrator needs to tell the two apart
             # to report the right remedy.
             raise LoginLockoutError(f"HNAP firmware anti-brute-force triggered: LoginResult={login_result}")
 
-        if login_result == "FAILED":
+        if login_result in _REJECTED_RESULTS:
             return AuthResult(
                 success=False,
                 error="HNAP login failed: incorrect username or password",
                 response=response,
             )
 
-        if login_result not in ("OK", "OK_CHANGED"):
+        if login_result in _RETRY_RESULTS:
+            # Login.js answers this one by reloading Login.html, with no
+            # message to the user: the session state is stale, so start
+            # over. It is not a verdict on the credential, and reading it
+            # as one trips the breaker on the first occurrence and stops
+            # polling for good (#201). busy routes it to AUTH_UNAVAILABLE,
+            # which leaves polling running so the condition clears (UC-87a).
+            return AuthResult(
+                success=False,
+                busy=True,
+                error=f"HNAP login must be restarted: LoginResult={login_result}",
+                response=response,
+            )
+
+        if login_result not in _SUCCESS_RESULTS:
             return AuthResult(
                 success=False,
                 error=f"HNAP login unexpected result: {login_result!r}",

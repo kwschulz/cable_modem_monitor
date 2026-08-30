@@ -133,6 +133,7 @@ class HTTPResourceLoader:
             except requests.RequestException as e:
                 raise ResourceLoadError(
                     f"Failed to fetch {target.path}: {type(e).__name__}: {e}",
+                    path=target.path,
                 ) from e
             except ValueError as e:
                 # A malformed request component (e.g. a non-header-safe session

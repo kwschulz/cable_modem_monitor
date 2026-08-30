@@ -75,11 +75,11 @@ When editing either, keep the distinction and the per-file link rule.
 
 ### Process
 
-4. **Only the developer stages files.** Never run `git add`. Show
+5. **Only the developer stages files.** Never run `git add`. Show
    the list of changed files and proposed commit message. Let the
    developer stage them.
 
-5. **No external actions without discussion, per action.** Never
+6. **No external actions without discussion, per action.** Never
    create GitHub issues, PRs, commits, pushes, label changes, or any
    external-facing action without explicit discussion first.
    Approval of a *plan* containing an external action is not approval
@@ -90,7 +90,7 @@ When editing either, keep the distinction and the per-file link rule.
    Local actions (edits, tests, lint) inherit plan-level approval
    normally.
 
-6. **Before deleting or moving ANY file, run `rg <filename>` across
+7. **Before deleting or moving ANY file, run `rg <filename>` across
    the entire project.** Files are referenced by non-Python sources
    (CI workflows, Makefiles, docs, VS Code tasks) that linters don't
    scan. When any task label, script name, or path changes in
@@ -99,34 +99,34 @@ When editing either, keep the distinction and the per-file link rule.
    `docs/setup/GETTING_STARTED.md`. Task name drift is invisible to
    linters and causes silent breakage in the contributor on-ramp.
 
-7. **Always read a file before writing to it. No exceptions.** Even
+8. **Always read a file before writing to it. No exceptions.** Even
    "I just want to overwrite it" — read first. Local-only/gitignored
    files especially: no git recovery path. The Write tool errors if
    you skip the read; do not work around it.
 
-8. **Stop on placeholders.** When reading code, config, or YAML
+9. **Stop on placeholders.** When reading code, config, or YAML
    during analysis, halt and flag immediately on `XXX`, `TODO`,
    `FIXME`, `TBD`, `???`, `undefined`, `placeholder`, `replace_me`.
    Do not summarize the surrounding architecture as "looks good"
    while quietly ignoring unfilled values.
 
-9. **Don't offer "revisit later" as an option.** When presenting
+10. **Don't offer "revisit later" as an option.** When presenting
    design choices, offer "ratify now" or "drop the idea entirely."
    Never present "keep the ambiguity and revisit later" as a third
    option — deferred items pile up and silently expire.
 
-10. **No "pre-existing" framing.** Don't dismiss code gaps as
+11. **No "pre-existing" framing.** Don't dismiss code gaps as
     "pre-existing," "not mine," or "from an earlier session." The
     full working tree is in scope unless explicitly narrowed. The
     only valid scope-narrowing reason is *what* the gap is, never
     *who wrote it first*.
 
-11. **Don't claim unverified fixes** in user-facing replies (GitHub
+12. **Don't claim unverified fixes** in user-facing replies (GitHub
     issues, comments). Use hedged language: "should address," "ready
     to test," "if it works, please post diagnostics." Only claim
     "fixed" after the user confirms on their hardware.
 
-12. **Never read the HA test config `.storage` directory.** The path
+13. **Never read the HA test config `.storage` directory.** The path
     is denied in `.claude/settings.json` (`permissions.deny`) and
     mounted under the `/config` volume in `docker-compose.test.yml`.
     It contains live modem credentials in plaintext (HA stores
@@ -231,7 +231,11 @@ reply, where a skipped one is visible without re-running the work.
   the page: *"CI isn't recording the trend (checked: Makefile, the
   regression script)"* is visibly unsupported, because neither source
   is CI. This is the forcing function from *name the governing spec*,
-  generalised past specs.
+  generalised past specs. Name the *extent*, not just the source:
+  "read: the last 3 comments" is a different claim from "read: the
+  thread." This applies to draft text for a public reply, where each
+  factual claim carries its source when the draft is *presented*, not
+  when it is posted.
 - **An unexplained number stays unexplained.** Report the measurement;
   do not supply a cause you have not verified. "I can't account for
   this yet" is a complete answer. On 2026-07-29 every measurement was
@@ -253,6 +257,13 @@ reply, where a skipped one is visible without re-running the work.
   asked to review a planning doc / status doc / roadmap, summarize
   what's *actually true* (check code, git, issues), not what the
   doc *says*.
+- **Read what already shipped before proposing an edit to it.**
+  Before recommending a change to a catalog entry, spec, or doc, run
+  `git log --follow` on the target file and grep CHANGELOG.md for its
+  subject. A file's last commit was often written to settle exactly
+  the question you are about to reopen, and the changelog may already
+  state the opposite of the caveat you are adding. Neither is visible
+  in the file's current text.
 - **Empty output is not an empty set.** Never assert absence from a
   command whose output you haven't confirmed is well-formed. A `--jq`
   expression that silently emits nothing is indistinguishable from a
@@ -444,10 +455,11 @@ Before pushing ANY commits, run the canonical local CI mirror:
 make validate-ci
 ```
 
-This runs lint + format + type-check + tests + intake regression +
-PII check + catalog README freshness — the same surface CI's Tests
-workflow exercises. `scripts/release.py` runs it automatically before
-every version bump.
+This is the full local mirror of CI's Tests workflow. What it covers
+is the `validate-ci` dependency line in the Makefile, which is the one
+place it changes; do not restate the list here, because a copy drifts
+the moment a job is added. `scripts/release.py` runs it automatically
+before every version bump.
 
 **Why?** CI runs on the entire project. Pre-commit hooks only check
 staged files, and `make test` is a subset of CI.
@@ -569,12 +581,12 @@ bodies *or* commit messages — GitHub scans every commit in a merge
 and closes regardless of qualifier. Use `Related to #X` /
 `Addresses #X` instead.
 
-Before authorizing any merge to main, scan the whole merge range and
-flag every match to the developer as a blocker:
-
-```bash
-git log <base>..<head> --format='%H%n%B%n---' | grep -inE '(clos(e|es|ed)|fix(es|ed)?|resolv(es|ed)?)[[:space:]]+#[0-9]+'
-```
+Commit bodies are gated automatically: `make autoclose-check` runs
+`scripts/check_auto_close_keywords.py` over the merge range, and
+`validate-ci` depends on it. That check scans commit bodies only, by
+design. **PR descriptions are the vector nothing checks** — read the
+body yourself before authorizing any merge to main, and flag every
+match to the developer as a blocker.
 
 The parser doesn't read English: "would resolve #X if…" closes it, and
 so does "doesn't fix #X". This bit PR #145, where "still required to

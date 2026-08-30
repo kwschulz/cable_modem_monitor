@@ -35,8 +35,8 @@ sources:
   chipset: "[ModemGuides S33 review](https://www.modemguides.com/blogs/modemguides-blog/arris-s33-vs-sb8200-comparison) — same BCM3390 platform as S33/S34"
   detection_hints: "[#98 S33v3 HAR capture by jzucker2](https://github.com/solentlabs/cable_modem_monitor/issues/98)"
   hardware: "[SURFboard S33 page](https://www.surfboard.com/products/cable-modems/s33/)"
-  channel_data: "[#98 jzucker2 HAR capture 2026-07-09](https://github.com/solentlabs/cable_modem_monitor/issues/98) — channel data observed on the wire; structure originally established from homeautomater screenshots and wild-confirmed by jzucker2 diagnostics (3.14.0-beta.3, re-confirmed 3.14.0-beta.14)"
-  system_info_software: '[#98 jzucker2 HAR capture 2026-07-09](https://github.com/solentlabs/cable_modem_monitor/issues/98) — GetCustomerStatusSoftware observed with Cmswinfo.html in the capture: CustomerConnSystemUpTime "24 day(s) 10h:33m:56s" and StatusSoftwareHdVer 1.0 on firmware AT01.01.018.042324_S3.03.735'
+  channel_data: "[#201 jzucker2 HAR capture 2026-08-29](https://github.com/solentlabs/cable_modem_monitor/issues/201) — channel data observed on the wire; structure originally established from homeautomater screenshots, wild-confirmed by jzucker2 diagnostics (3.14.0-beta.3, re-confirmed 3.14.0-beta.14). The 2026-08-29 capture that replaced the fixture holds the same 33 downstream and 6 upstream channels; every value is a fresh sample"
+  system_info_software: '[#201 jzucker2 HAR capture 2026-08-29](https://github.com/solentlabs/cable_modem_monitor/issues/201) — GetCustomerStatusSoftware observed with Cmswinfo.html in the capture: CustomerConnSystemUpTime "12 day(s) 19h:53m:41s" and StatusSoftwareHdVer 1.0 on firmware AT01.01.018.042324_S3.03.735, unchanged from the 2026-07-09 capture this replaced'
 attribution:
   contributors:
     - github: https://github.com/jzucker2
@@ -58,16 +58,31 @@ notes: |
   diagnostics, ~2ms) — an earlier note claiming ICMP was blocked was
   inherited from the S33/S34 entries, not observed on this model.
   Uptime format is "day(s)", not the "days" the S33/S33v2 firmware
-  line writes (#98 HAR, 2026-07-09) — don't copy the sibling format
-  here. The S34 shares the AT01.01.* firmware line but has no
-  observed uptime response yet.
+  line writes (#98 HAR, re-observed in the #201 capture that replaced
+  it) — don't copy the sibling format here. The S34 shares the
+  AT01.01.* firmware line but has no observed uptime response yet.
   Reboot params mirrored from S33 fix (#146); pre-fetch defaults
   are the safety net pending variant validation.
   HNAP responses carry debug timing data on the first HTTP header
   line, which Python flags as a malformed header (#98). urllib3
   recovers and the body parses fine; the resulting warning is
   suppressed centrally in Core (log_filters.SuppressHeaderParsingWarning).
+  Fixture replaced 2026-08-29 with a fuller session from the same unit
+  (#201): 133 entries vs 48, and the first to carry
+  GetArrisConfigurationInfo, the restart pre_fetch_action the restart
+  test had only ever seen synthesized.
+  Hand-sanitized, substitutions only: the device serial in
+  SerialNumber and StatusSoftwareSerialNum became [REDACTED] (fields
+  check_fixture_pii does not scan), and the TLS cert subjectName became
+  XXXXXXXXXXXX, the form the cert-identifier gate reads as redacted.
+  HNAP_AUTH is redacted throughout this capture, so the intake
+  pipeline's hmac_algorithm detector has no hash to measure and falls
+  back to md5. The committed sha256 came from the 2026-07-09 capture.
+  Playwright recorded the wrong body for the Action="login" response in
+  both captures: Content-Length 45, a longer GetMultipleHNAPs body. Not
+  edited; the harness synthesizes the HNAP login anyway.
 references:
   issues:
     - "[#98 — [Modem Request] Arris S33v3](https://github.com/solentlabs/cable_modem_monitor/issues/98)"
     - "[#146 — [Bug]: Arris S33 Modem Reboot Not Working](https://github.com/solentlabs/cable_modem_monitor/issues/146)"
+    - "[#201 — [Bug]: Can't connect to Arris S33 anymore](https://github.com/solentlabs/cable_modem_monitor/issues/201)"

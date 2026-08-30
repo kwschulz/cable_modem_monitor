@@ -102,7 +102,11 @@ the other.
 Fields — `StaleSessionRecoveryDisabled`: `model`, `streak: int`
 
 Response-related fields on `AuthFailed` are `None` when auth failed with a
-connection error (no HTTP response). Sanitization happens at event
+connection error (no HTTP response). That case renders as
+`Connection failed during auth [MODEL] strategy=... — <error>` rather
+than `Auth failed`: the modem judged no credential, so the remedy is
+reachability, not a new password. `analysis/log_parser.py` matches this
+line as `auth_fail`, so the two move together. Sanitization happens at event
 construction time (not in the adapter) — the component knows the password
 and strips the query string from `url` and scrubs the password from
 `response_body` before creating the event.

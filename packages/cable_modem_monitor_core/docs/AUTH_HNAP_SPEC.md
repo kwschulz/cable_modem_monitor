@@ -157,6 +157,10 @@ POST to `{base_url}/HNAP1/`:
                             (raises LoginLockoutError, which the
                              collector maps to AUTH_LOCKOUT;
                              see § Lockout behaviour below)
+   "RELOAD"              -> session state stale, restart the login
+                            (AuthResult busy=True, which the collector
+                             maps to AUTH_UNAVAILABLE; see § Restart
+                             the login below)
    anything else         -> unexpected protocol state (AUTH_FAILED)
 
 6. Subsequent requests (resource loads, action executors):
@@ -219,6 +223,34 @@ reached only when a user is already typing credentials into a form, and
 the runtime route no longer sends them there. See ORCHESTRATION_SPEC.md
 § Exceptions and § Auth Circuit Breaker.
 
+### Restart the login
+
+`RELOAD` is the firmware asking the client to start the login over.
+`Login.js` handles it by navigating to `/Login.html` with no alert ---
+the only branch that neither blames the credential nor reports a lock.
+The token appears on the S33v3 firmware line (`AT01.01.*`); the older
+Arris HNAP captures have no such branch.
+
+The manager returns `AuthResult(success=False, busy=True)`, which the
+collector classifies as `AUTH_UNAVAILABLE`: the modem declined to serve
+this login without judging the credential, so polling continues at
+normal cadence and the condition clears on its own (UC-87a). This is
+the same treatment a 5xx login gets, reached from a protocol token
+rather than a status code.
+
+Reading it as a credential verdict is what #201 was: `AUTH_FAILED`
+trips the breaker on the first occurrence, so one `RELOAD` stopped
+polling outright and told the user to reconfigure a password that was
+never wrong, while their browser recovered from the identical response
+by doing what the firmware asked.
+
+`busy` is set in the strategy, not declared per entry: HNAP's token set
+is fixed by the protocol, so there is nothing for a catalog entry to
+declare (§ Config Reference). `form_cbn` sets it the same way and for
+the same reason (AUTH_CBN_SPEC.md § Login Token Vocabulary). The
+structural difference is with `form_pbkdf2`, whose busy body is entry
+data (`login_busy`).
+
 ## Firmware Assumptions
 
 What's hardcoded in `protocol/hnap.py` and `auth/hnap.py` that is
@@ -235,7 +267,8 @@ specific to HNAP firmware family, not inherent to HMAC:
 | `uid` cookie name | `uid` | Login.js (`$.cookie('uid', ...)`) | Hardcoded; firmware variant could pick a different cookie name |
 | `PrivateKey` cookie name | `PrivateKey` | Login.js (`$.cookie('PrivateKey', ...)`) | Needed to avoid HTTP 500 on data requests on some firmware |
 | `LoginResult` success values | `OK`, `OK_CHANGED` | Login.js, observed HAR | Other values currently treated as protocol-unexpected |
-| `LoginResult` lockout values | `LOCKUP`, `REBOOT` | Login.js (`LoginResult == "LOCKUP"` branch) | Variant firmware could emit other lockout tokens --- would currently fall into `unexpected result` path |
+| `LoginResult` lockout values | `LOCKUP`, `REBOOT` | Login.js (`LoginResult == "LOCKUP"` branch) | Variant firmware could emit other lockout tokens --- would fall into `unexpected result` |
+| `LoginResult` restart value | `RELOAD` | Login.js (`LoginResult == "RELOAD"` branch, S33v3 firmware line) | Present only on the AT01.01.* line; older Arris HNAP firmware omits the branch |
 | Timestamp modulo | `2_000_000_000_000` | SOAPAction.js (`Math.floor(Date.now()) % 2000000000000`) | Matches 32-bit integer handling in firmware |
 | HNAP_AUTH header format | `"<HEX> <TIMESTAMP>"` (uppercase hex, single space) | SOAPAction.js | Lowercase hex or alternate separators are rejected |
 | HMAC algorithm family | `md5` or `sha256` only | HnapAuth model Literal | No other algorithms observed; variant firmware would need a new Literal value |
@@ -314,14 +347,18 @@ Each `ModemSummary` carries `manufacturer`, `model`, `status`,
   `Login.js` reference code has a captcha branch for some firmware
   variants; no captured HAR has exercised it and the strategy has
   no config surface to populate a captcha value.
-- **Lockout token coverage**: Only `LOCKUP` and `REBOOT` are
-  recognised as anti-brute-force responses. Any other non-success
-  `LoginResult` value currently falls into the generic
-  `unexpected result` error path and is surfaced as `AUTH_FAILED`
-  rather than `AUTH_LOCKOUT`. Both trip the circuit breaker on the
-  first occurrence, so polling stops either way; what is lost is the
-  lockout WARNING. No alternative lockout tokens have been observed
-  but the protocol spec doesn't enumerate them.
+- **Token coverage beyond the five observed**: `OK`, `OK_CHANGED`,
+  `FAILED`, `LOCKUP`, `REBOOT` and `RELOAD` are the tokens the captured
+  `Login.js` files branch on. Any other value falls into the generic
+  `unexpected result` path and is surfaced as `AUTH_FAILED`, which trips
+  the breaker on the first occurrence. That default is deliberately
+  pessimistic, and it was wrong once: `RELOAD` sat unhandled in the
+  S33v3 capture for seven weeks and stopped a working integration
+  (#201). The catalog gate `test_hnap_login_result_coverage.py` now
+  reads the tokens back out of every HNAP entry's captured `Login.js`
+  and fails when one is unhandled, so a new firmware line cannot repeat
+  it. Firmware that emits a token without shipping the branch in
+  `Login.js` remains invisible.
 - **Timestamp collision within a session**: HNAP_AUTH uses a
   millisecond timestamp modulo `2_000_000_000_000`. Two HMAC
   computations in the same millisecond produce identical
