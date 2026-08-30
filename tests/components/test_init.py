@@ -782,8 +782,15 @@ async def test_channel_bond_upgraded_entry_silent_init():
     hass.services.async_call.assert_not_called()
 
 
-async def test_channel_bond_change_fires_notification():
-    """Totals differing from baseline fire the change notification."""
+async def test_channel_bond_change_no_longer_notifies():
+    """Totals differing from baseline produce no notification and no Store write.
+
+    The change notification was removed in 3.14.1 (#197). A DOCSIS 3.1
+    OFDM carrier that drops for a single poll and returns used to produce
+    two notifications — one for the fall, one when the baseline moved
+    back — on a line that was never degraded. The counts remain on the
+    DS and US Channel Count sensors.
+    """
     from custom_components.cable_modem_monitor.channel_bond_storage import BondState
 
     entry_data = {"channel_onboarding_eligible": True}
@@ -806,11 +813,42 @@ async def test_channel_bond_change_fires_notification():
         await _check_channel_bond_change(hass, entry, snapshot, orchestrator, "TPS-2000")
 
     hass.config_entries.async_update_entry.assert_not_called()
-    assert mock_save.call_args.args[2].baseline_downstream == 23
+    # No re-baseline: the Store is untouched, so the entry stays "onboarded"
+    # and a genuine fresh install is still distinguishable from this one.
+    mock_save.assert_not_awaited()
+    hass.services.async_call.assert_not_called()
 
-    payload = hass.services.async_call.call_args.args[2]
-    assert payload["notification_id"] == "cable_modem_monitor_channel_change_entry_abc"
-    assert "downstream 24 → 23" in payload["message"]
+
+async def test_channel_bond_recovered_totals_no_longer_notify():
+    """The other half of the OFDM blink — totals returning to baseline.
+
+    The old behaviour re-baselined on the drop, so the recovery read as a
+    second change and notified again. With no re-baseline on either side,
+    neither poll does anything.
+    """
+    from custom_components.cable_modem_monitor.channel_bond_storage import BondState
+
+    entry_data = {"channel_onboarding_eligible": True}
+    hass, entry, orchestrator, snapshot = _make_bond_test_harness(
+        entry_data=entry_data,
+        snapshot=_make_snapshot(downstream_count=24, upstream_count=4),
+    )
+    prior = BondState(baseline_downstream=23, baseline_upstream=4)
+
+    with (
+        patch(
+            "custom_components.cable_modem_monitor.async_load_bond_state",
+            AsyncMock(return_value=prior),
+        ),
+        patch(
+            "custom_components.cable_modem_monitor.async_save_bond_state",
+            AsyncMock(),
+        ) as mock_save,
+    ):
+        await _check_channel_bond_change(hass, entry, snapshot, orchestrator, "TPS-2000")
+
+    mock_save.assert_not_awaited()
+    hass.services.async_call.assert_not_called()
 
 
 async def test_channel_bond_steady_counts_no_op():

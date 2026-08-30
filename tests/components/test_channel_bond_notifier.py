@@ -1,7 +1,7 @@
-"""Tests for the pure channel-bond change detection logic.
+"""Tests for the pure channel-bond onboarding detection logic.
 
 Pure logic — no HA dependency. Exercises every branch of ``evaluate``
-with a table plus focused checks on the message formatters.
+with a table plus a focused check on the onboarding message formatter.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ import pytest
 from custom_components.cable_modem_monitor.channel_bond_notifier import (
     ChannelTotals,
     evaluate,
-    format_change_message,
     format_onboarding_message,
 )
 from custom_components.cable_modem_monitor.channel_bond_storage import BondState
@@ -37,9 +36,20 @@ EVAL_CASES = [
     ("upgraded_entry_no_stored", None, False, False, "silent_init"),
     ("onboarded_steady", _MATCHING_STATE, True, False, "none"),
     ("upgraded_steady_after_silent_init", _MATCHING_STATE, False, False, "none"),
-    ("ds_changed", _STALE_DS_STATE, True, False, "change"),
-    ("us_changed", _STALE_US_STATE, True, False, "change"),
-    ("both_changed", _STALE_BOTH_STATE, True, False, "change"),
+    # Totals differing from the stored baseline is no longer an action.
+    # The comparison watched bonded totals rather than entities, which is
+    # the wrong value in both directions: a DOCSIS 3.1 OFDM carrier that
+    # briefly drops and returns produced two notifications for a single
+    # poll of missing data, while an ID-mode channel reassignment — the
+    # case it was built for — can leave the totals unchanged and go
+    # undetected. Removed in 3.14.1 (#197).
+    ("ds_differs_not_actionable", _STALE_DS_STATE, True, False, "none"),
+    ("us_differs_not_actionable", _STALE_US_STATE, True, False, "none"),
+    ("both_differ_not_actionable", _STALE_BOTH_STATE, True, False, "none"),
+    # Onboarding must still fire on a fresh entry whose totals happen to
+    # differ from nothing at all — the stored-is-None branch is what
+    # distinguishes a fresh entry, not the totals.
+    ("fresh_setup_ignores_totals", None, True, False, "onboarding"),
 ]
 
 
@@ -58,6 +68,25 @@ def test_evaluate(desc, stored, onboarding_eligible, recovery_active, expected):
     assert result == expected
 
 
+def test_evaluate_never_returns_change():
+    """No combination of inputs produces a change action.
+
+    Belt and braces alongside the table: the action was removed rather
+    than made harder to reach, so nothing should be able to surface it.
+    """
+    stored_options = [None, _MATCHING_STATE, _STALE_DS_STATE, _STALE_US_STATE, _STALE_BOTH_STATE]
+    for stored in stored_options:
+        for eligible in (True, False):
+            for recovery in (True, False):
+                result = evaluate(
+                    current=_CURRENT,
+                    stored=stored,
+                    onboarding_eligible=eligible,
+                    recovery_active=recovery,
+                )
+                assert result in {"none", "onboarding", "silent_init"}
+
+
 # ---------------------------------------------------------------------
 # evaluate() — zero-totals guard
 #
@@ -67,6 +96,10 @@ def test_evaluate(desc, stored, onboarding_eligible, recovery_active, expected):
 # exists. Regression: a ~1h45m outage outlived the time-boxed recovery
 # window, so a transient 0-channel reading was stored as baseline and the
 # subsequent recovery looked like a 0 → 24 change. (MB7621, v3.14.0-beta.11)
+#
+# The change action is gone as of 3.14.1 (#197), so the recovery half of
+# that regression can no longer notify — but the guard still has to keep
+# (0, 0) out of the Store, which is what these cases assert.
 # ---------------------------------------------------------------------
 
 _ZERO = ChannelTotals(downstream=0, upstream=0)
@@ -107,18 +140,8 @@ def test_onboarding_message_includes_counts_and_service():
     assert "cable_modem_monitor.generate_dashboard" in message
 
 
-def test_change_message_reports_only_changed_direction():
-    prior = BondState(baseline_downstream=24, baseline_upstream=4)
-    current = ChannelTotals(downstream=23, upstream=4)
-    message = format_change_message(model="TPS-2000", prior=prior, current=current)
-    assert "downstream 24 → 23" in message
-    assert "upstream" not in message
-    assert "cable_modem_monitor.generate_dashboard" in message
+def test_change_message_formatter_is_gone():
+    """The change formatter no longer exists (#197)."""
+    from custom_components.cable_modem_monitor import channel_bond_notifier
 
-
-def test_change_message_reports_both_when_both_shift():
-    prior = BondState(baseline_downstream=24, baseline_upstream=4)
-    current = ChannelTotals(downstream=23, upstream=5)
-    message = format_change_message(model="TPS-2000", prior=prior, current=current)
-    assert "downstream 24 → 23" in message
-    assert "upstream 4 → 5" in message
+    assert not hasattr(channel_bond_notifier, "format_change_message")

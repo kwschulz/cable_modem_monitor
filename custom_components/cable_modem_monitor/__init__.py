@@ -57,7 +57,6 @@ from solentlabs.cable_modem_monitor_core.post_processor import (
 from .channel_bond_notifier import (
     ChannelTotals,
     evaluate,
-    format_change_message,
     format_onboarding_message,
 )
 from .channel_bond_storage import (
@@ -136,12 +135,16 @@ async def _check_channel_bond_change(
     orchestrator: Orchestrator,
     model: str,
 ) -> None:
-    """Detect channel-bond total changes and fire the appropriate notification.
+    """Fire the one-time onboarding notification once the modem is online.
 
     Silent on the first post-upgrade poll (no retroactive onboarding) and
-    while a recovery window is open (transient count flux is expected).
-    Persists the baseline to a dedicated ``Store`` — not entry data —
-    so baseline updates don't trip the integration's update listener.
+    while a recovery window is open. Persists the baseline to a dedicated
+    ``Store`` — not entry data — so writes don't trip the integration's
+    update listener.
+
+    Totals changing after onboarding is deliberately not reported; see
+    HA_ADAPTER_SPEC.md § Notifications and #197. The counts stay on the
+    DS and US Channel Count sensors every poll.
     """
     modem_data = snapshot.modem_data
     if not modem_data:
@@ -172,21 +175,15 @@ async def _check_channel_bond_change(
     if action == "silent_init":
         return
 
-    if action == "onboarding":
-        title = "Cable Modem Monitor: Modem online"
-        message = format_onboarding_message(model=model, current=current)
-        notification_id = f"cable_modem_monitor_onboarding_{entry.entry_id}"
-    else:
-        # "change" — evaluate only returns this when stored is not None.
-        assert stored is not None
-        title = "Cable Modem Monitor: Channel bond changed"
-        message = format_change_message(model=model, prior=stored, current=current)
-        notification_id = f"cable_modem_monitor_channel_change_{entry.entry_id}"
-
+    # Only "onboarding" reaches here — "none" and "silent_init" returned above.
     await hass.services.async_call(
         "persistent_notification",
         "create",
-        {"title": title, "message": message, "notification_id": notification_id},
+        {
+            "title": "Cable Modem Monitor: Modem online",
+            "message": format_onboarding_message(model=model, current=current),
+            "notification_id": f"cable_modem_monitor_onboarding_{entry.entry_id}",
+        },
     )
 
 
