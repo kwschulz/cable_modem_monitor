@@ -73,7 +73,11 @@ def _poll(login_body: str) -> tuple[CollectorSignal, ConnectionStatus, SignalPol
     """Run one poll whose login answers *login_body*, then apply policy."""
     collector = ModemDataCollector(_cbn_config(), None, None, _BASE_URL, "admin", "pw")
     policy = SignalPolicy(collector, model="T200")
-    return (*_apply(collector, policy, login_body), policy)
+    # Unpacked rather than starred into the return tuple: CodeQL cannot
+    # resolve the arity of *_apply(...) and reads every three-variable
+    # unpack of this helper as a mismatch against a two-tuple.
+    signal, status = _apply(collector, policy, login_body)
+    return signal, status, policy
 
 
 def _apply(
