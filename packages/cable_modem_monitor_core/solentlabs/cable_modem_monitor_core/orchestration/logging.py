@@ -115,8 +115,12 @@ def _format(event: OrchestratorEvent) -> str:  # noqa: PLR0911, C901
 
     if isinstance(event, AuthFailed):
         if event.method is None:
-            # Connection error — no HTTP response.
-            return f"Auth failed [{event.model}] strategy={event.strategy} — {event.error}"
+            # Connection error, so there is no HTTP response and the modem
+            # judged no credential. Naming this "Auth failed" sent users to
+            # their password for what is a reachability problem (#200); the
+            # ConnectivityFailureDetected line that follows carries the
+            # streak and backoff.
+            return f"Connection failed during auth [{event.model}] strategy={event.strategy} — {event.error}"
         body = event.response_body or ""
         if len(body) > _AUTH_BODY_MAX:
             body = body[:_AUTH_BODY_MAX] + "... (truncated)"
