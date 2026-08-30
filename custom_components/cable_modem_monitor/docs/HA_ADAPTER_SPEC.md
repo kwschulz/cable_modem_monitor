@@ -1328,19 +1328,30 @@ automation:
 
 ---
 
-## Channel Bond Change Notifications
+## Notifications
 
-The data coordinator fires persistent notifications when bonded channel
-totals shift between polls. Two triggers share one mechanism; both
-point the user at `generate_dashboard` so they can refresh a stale
-Lovelace dashboard.
+A persistent notification is warranted only when the user has something to act
+on, or to confirm an action they just took. Before adding one, name which of
+the two it is. If it is neither, use an entity or the
+`cable_modem_monitor_data_updated` event instead, which automations can consume
+without interrupting anyone.
 
-**Triggers:**
+The integration raises five. The auth lockout asks you to fix your credentials.
+Restart sent, restart failed and entity reset complete each confirm a button
+press. The onboarding message confirms the modem came online after you added
+it, and fires once per config entry. Channel bond totals changing is neither of
+those, and the totals are already on the DS and US Channel Count sensors, which
+is why it is being removed in 3.14.1 (#197).
+
+### Channel bond onboarding
+
+The data coordinator fires one persistent notification per config entry, the
+first time a successful poll reports channel totals. It points the user at
+`generate_dashboard` so they can build a Lovelace dashboard for the modem.
 
 | Trigger | When it fires | Notification ID |
 |---------|---------------|-----------------|
 | Onboarding | First successful poll after setup | `cable_modem_monitor_onboarding_{entry_id}` |
-| Change | Downstream or upstream total differs from the persisted baseline | `cable_modem_monitor_channel_change_{entry_id}` |
 
 Stable IDs per entry mean re-firing replaces rather than stacks.
 
@@ -1356,13 +1367,13 @@ Stable IDs per entry mean re-firing replaces rather than stacks.
   `{baseline_downstream: int, baseline_upstream: int}`. Presence of a
   Store payload means the entry has already been onboarded (fresh) or
   silently baselined (upgrade); absence means the next successful poll
-  should run first-time logic.
+  should run first-time logic. The totals themselves are no longer
+  compared — presence is what carries the meaning.
 
 **Why Store, not entry data.** The integration's update listener
-reloads the integration on **any** entry-data mutation. If baseline
-totals were stored on the entry, every real channel-count change
-would fire a reload — exactly when the user wants stability. The
-Store helper persists per-entry state without tripping listeners.
+reloads the integration on **any** entry-data mutation, so per-entry
+state that changes at runtime cannot live there. The Store helper
+persists it without tripping listeners.
 
 **Suppression rules:**
 
@@ -1370,17 +1381,13 @@ Store helper persists per-entry state without tripping listeners.
   yet" — a booting or `no_signal` page returns empty channel tables,
   not a real bond. The notifier returns `none` and the coordinator
   never persists it as a baseline. An operational modem always reports
-  channels, so a zero total is never a legitimate bond change. This is
-  the primary guard because it holds regardless of outage length:
+  channels, so a zero total is never a legitimate reading. This is the
+  primary guard because it holds regardless of outage length:
   `recovery_active` is time-boxed, and a real outage can outlive the
-  window, at which point a transient `0` would otherwise be read as a
-  `24 → 0` change, persisted as the baseline, and then re-fire as a
-  `0 → 24` change once channels return.
-- **Recovery guard (secondary).** Comparison is skipped while
-  `orchestrator.recovery_active` is `True`. Non-zero counts can still
-  flux while a recovery window is open (channels renegotiate the bond,
-  e.g. `24 → 23`); the baseline is preserved so a transient that
-  resolves back to the prior totals produces no notification.
+  window, at which point a transient `0` would otherwise be stored as
+  the baseline.
+- **Recovery guard (secondary).** Skipped while
+  `orchestrator.recovery_active` is `True`.
 
 **Upgrade path:** entries created before this feature lack
 `CONF_CHANNEL_ONBOARDING_ELIGIBLE`. On first post-upgrade poll the
@@ -1390,20 +1397,20 @@ retroactive onboarding notification.
 **Cleanup.** `async_remove_entry` in `__init__.py` removes the Store
 payload when the config entry is deleted.
 
-**Known gap — totals only.** The notifier tracks summed downstream and
-upstream counts, not per-channel-type (QAM/OFDM/ATDMA/OFDMA).
-A reshuffle that leaves the total unchanged (e.g. QAM −1, OFDM +1 on
-DOCSIS 3.1 provisioning changes) is not detected. This is a
-deliberate simplification; per-type tracking can be added later if
-field reports indicate real misses.
+**Removed in 3.14.1 — the change notification.** Bonded totals differing
+from the stored baseline used to fire a second notification. It watched
+the wrong value in both directions: a DOCSIS 3.1 OFDM carrier that
+briefly drops and returns cost two notifications for a single poll of
+missing data, while an ID-mode channel reassignment — the case it was
+built for — can leave the totals unchanged and go undetected. Defaulting
+identity mode to channel number was the real fix for the latter. See
+#197.
 
 **Pure logic lives in `channel_bond_notifier.py`** (no HA imports), so
 the decision tree is unit-testable without mocks. The coordinator owns
 the HA integration: reading `system_info`, reading
-`orchestrator.recovery_active`, persisting entry data, and calling
+`orchestrator.recovery_active`, persisting the Store payload, and calling
 `persistent_notification.create`.
-
----
 
 ## Config Entry Migration
 
