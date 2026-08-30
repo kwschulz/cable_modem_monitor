@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.1-beta.1] - 2026-08-30
+
 ### Fixed
 
 - **Arris S33v3 stopped polling after a single transient login response
@@ -55,6 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because the HTTP loader's connection-error branch was the only raise that
   left the path unset. The other four raises in that loader and both in the
   CBN loader already carried it.
+
+- **An unreachable modem was logged as an authentication failure.** A
+  connection error during the auth phase carries no HTTP response and no
+  verdict on the credential, but the warning still read `Auth failed
+  [MODEL] strategy=...`, pointing at a password for what is a
+  reachability problem. It now reads `Connection failed during auth`,
+  which is also the line the bundled log analyser had always looked for
+  and never been able to match. A modem that answers and rejects the
+  credential still reports `Auth failed` with the request and response
+  detail.
 
 ### Added
 
