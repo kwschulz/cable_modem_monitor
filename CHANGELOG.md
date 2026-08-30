@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported the way the HTTP transport already reports it, rather than
   counting toward the authentication failure streak.
 
+- **A connection failure did not name the resource it failed on.** The
+  warning rendered as `Resource load error [MB7621] — : Failed to fetch
+  /MotoSwInfo.asp`, with an empty field where the resource path belongs,
+  because the HTTP loader's connection-error branch was the only raise that
+  left the path unset. The other four raises in that loader and both in the
+  CBN loader already carried it.
+
 ### Added
 
 - **Catalog gate: HNAP login outcomes are checked against firmware.**
