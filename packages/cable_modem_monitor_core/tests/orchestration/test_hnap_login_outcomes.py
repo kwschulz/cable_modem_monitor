@@ -41,7 +41,7 @@ def _hnap_config() -> Any:
     config = MagicMock()
     config.transport = "hnap"
     config.timeout = 10
-    config.model = "S33"
+    config.model = "T100"
     config.auth = HnapAuth(strategy="hnap", hmac_algorithm="sha256")
     # No logout action, matching every arris/s33* entry. Keeps the
     # teardown paths out of a test about login classification.
@@ -93,7 +93,7 @@ def _poll(login_result: str | None) -> tuple[CollectorSignal, ConnectionStatus, 
         mock_post.side_effect = [_challenge_response(), _login_response(login_result)]
         result = collector.execute()
 
-    policy = SignalPolicy(collector, model="S33")
+    policy = SignalPolicy(collector, model="T100")
     return result.signal, policy.apply(result), policy
 
 
@@ -165,7 +165,7 @@ def test_reload_never_trips_however_often_it_repeats() -> None:
     is well past any streak the breaker reads.
     """
     collector = ModemDataCollector(_hnap_config(), None, None, "http://192.0.2.1", "admin", "pw")
-    policy = SignalPolicy(collector, model="S33")
+    policy = SignalPolicy(collector, model="T100")
 
     for _ in range(policy._threshold * 10):
         with patch.object(collector._session, "post") as mock_post:
@@ -183,7 +183,7 @@ def test_reload_does_not_clear_the_session() -> None:
     whose anti-brute-force counts login attempts (§ Lockout behaviour).
     """
     collector = ModemDataCollector(_hnap_config(), None, None, "http://192.0.2.1", "admin", "pw")
-    policy = SignalPolicy(collector, model="S33")
+    policy = SignalPolicy(collector, model="T100")
 
     with (
         patch.object(collector._session, "post") as mock_post,

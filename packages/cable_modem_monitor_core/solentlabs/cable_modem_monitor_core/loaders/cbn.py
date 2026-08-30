@@ -97,14 +97,7 @@ class CBNLoader:
         return resources
 
     def _fetch_one(self, fun: str) -> Element | None:
-        """Fetch a single resource by fun parameter.
-
-        Args:
-            fun: The ``fun`` parameter value (e.g., ``"10"``).
-
-        Returns:
-            Parsed XML root Element, or None on failure.
-        """
+        """Fetch one resource, returning None only when its body will not decode."""
         token = self._session.cookies.get(self._cookie_name) or ""
         post_body = f"token={token}&fun={fun}"
 

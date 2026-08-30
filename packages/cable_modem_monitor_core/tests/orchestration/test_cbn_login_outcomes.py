@@ -43,7 +43,7 @@ def _cbn_config() -> Any:
     config = MagicMock()
     config.transport = "cbn"
     config.timeout = 10
-    config.model = "CH7465MT"
+    config.model = "T200"
     config.auth = FormCbnAuth(strategy="form_cbn")
     # No logout action: keeps the teardown paths out of a test about login
     # classification. Both shipping CBN entries declare one, but it runs
@@ -72,7 +72,7 @@ def _response(text: str, url: str, method: str) -> MagicMock:
 def _poll(login_body: str) -> tuple[CollectorSignal, ConnectionStatus, SignalPolicy]:
     """Run one poll whose login answers *login_body*, then apply policy."""
     collector = ModemDataCollector(_cbn_config(), None, None, _BASE_URL, "admin", "pw")
-    policy = SignalPolicy(collector, model="CH7465MT")
+    policy = SignalPolicy(collector, model="T200")
     return (*_apply(collector, policy, login_body), policy)
 
 
@@ -173,7 +173,7 @@ def test_restart_never_trips_however_often_it_repeats(login_body: str) -> None:
     is well past any streak the breaker reads.
     """
     collector = ModemDataCollector(_cbn_config(), None, None, _BASE_URL, "admin", "pw")
-    policy = SignalPolicy(collector, model="CH7465MT")
+    policy = SignalPolicy(collector, model="T200")
 
     for _ in range(policy._threshold * 10):
         _apply(collector, policy, login_body)
@@ -190,7 +190,7 @@ def test_restart_does_not_clear_the_session() -> None:
     that counts login attempts toward its own lockout.
     """
     collector = ModemDataCollector(_cbn_config(), None, None, _BASE_URL, "admin", "pw")
-    policy = SignalPolicy(collector, model="CH7465MT")
+    policy = SignalPolicy(collector, model="T200")
 
     with patch.object(collector, "clear_session") as mock_clear:
         _apply(collector, policy, "cbnLogin")

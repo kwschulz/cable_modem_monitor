@@ -111,16 +111,14 @@ def _classify_login_failure(body: str, response: requests.Response) -> AuthResul
 
 
 def _send(send: Callable[[], requests.Response], context: str) -> requests.Response | AuthResult:
-    """Send a request, letting a connectivity failure through unconverted.
-
-    ``ConnectionError`` and ``Timeout`` mean the modem never answered, so
-    they belong to the collector as ``CONNECTIVITY`` (UC-30/UC-31).
-    Everything else is a real answer this strategy can report on. Mirrors
-    the contract ``auth/response.py`` states for the JSON strategies.
-    """
+    """Send a request, letting a connectivity failure through unconverted."""
     try:
         return send()
     except requests.RequestException as exc:
+        # ConnectionError and Timeout mean the modem never answered, so they
+        # belong to the collector as CONNECTIVITY (UC-30/UC-31). Everything
+        # else is a real answer this strategy can report on. Mirrors the
+        # contract auth/response.py states for the JSON strategies.
         if isinstance(exc, requests.ConnectionError | requests.Timeout):
             raise
         return AuthResult(success=False, error=f"{context}: {type(exc).__name__}: {exc}")
