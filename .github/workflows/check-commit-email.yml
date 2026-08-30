@@ -46,7 +46,7 @@ jobs:
 
           # Check each commit
           FOUND_PERSONAL=0
-          PERSONAL_EMAILS=""
+          PERSONAL_EMAIL_COMMITS=""
 
           for commit in $(git rev-list origin/${{ github.base_ref }}..pr-head); do
             EMAIL=$(git log -1 --format='%ae' $commit)
@@ -62,15 +62,21 @@ jobs:
             done
 
             if [ $ALLOWED -eq 0 ]; then
+              # The address is never carried past this step. Naming a commit
+              # and its author is enough for the contributor to act, and the
+              # comment is permanently public, so printing the address there
+              # creates the exposure the check exists to warn about. The mask
+              # keeps a later debug echo from reintroducing it via the log.
+              echo "::add-mask::$EMAIL"
               FOUND_PERSONAL=1
-              PERSONAL_EMAILS="${PERSONAL_EMAILS}\n- \`${SHORT}\` by ${AUTHOR} <${EMAIL}>"
+              PERSONAL_EMAIL_COMMITS="${PERSONAL_EMAIL_COMMITS}\n- \`${SHORT}\` by ${AUTHOR}"
             fi
           done
 
           if [ $FOUND_PERSONAL -eq 1 ]; then
             echo "found_personal=true" >> $GITHUB_OUTPUT
-            echo "emails<<EOF" >> $GITHUB_OUTPUT
-            echo -e "$PERSONAL_EMAILS" >> $GITHUB_OUTPUT
+            echo "commits<<EOF" >> $GITHUB_OUTPUT
+            echo -e "$PERSONAL_EMAIL_COMMITS" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
             echo ""
             echo "⚠️  Personal email(s) detected in commits (informational only)"
@@ -84,17 +90,19 @@ jobs:
         if: steps.check-emails.outputs.found_personal == 'true'
         uses: actions/github-script@v9
         env:
-          PERSONAL_EMAILS: ${{ steps.check-emails.outputs.emails }}
+          PERSONAL_EMAIL_COMMITS: ${{ steps.check-emails.outputs.commits }}
         with:
           script: |
-            // Check if we already commented on this PR to avoid spam
-            const comments = await github.rest.issues.listComments({
+            // Check if we already commented on this PR to avoid spam.
+            // Paginated: an unpaginated read stops at 30 comments, and missing
+            // the existing comment on a long thread posts the address twice.
+            const comments = await github.paginate(github.rest.issues.listComments, {
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
             });
 
-            const botComment = comments.data.find(comment =>
+            const botComment = comments.find(comment =>
               comment.body.includes('Personal Email Detected in Commits') &&
               comment.user.type === 'Bot'
             );
@@ -104,15 +112,19 @@ jobs:
               return;
             }
 
-            const emails = process.env.PERSONAL_EMAILS;
+            const commits = process.env.PERSONAL_EMAIL_COMMITS;
 
             const message = [
               '## :information_source: Personal Email Detected in Commits',
               '',
               '> **Note:** This is an informational check only. It does **not** block your PR.',
               '',
-              'One or more commits in this PR contain personal email addresses:',
-              emails,
+              'These commits were authored with a personal email address rather than',
+              'a GitHub noreply address:',
+              commits,
+              '',
+              'The address is deliberately not repeated here, because this comment is',
+              'public. To see it: `git log --format=\'%h %ae\' -2`',
               '',
               '### Why This Matters',
               'Personal emails in git history are **permanently public** and can be harvested by spammers.',
@@ -138,9 +150,46 @@ jobs:
               '*This check helps protect contributor privacy. Feel free to merge if you\'re okay with the email being public.*',
             ].join('\n');
 
-            github.rest.issues.createComment({
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: message
             });
+
+      # The comment must not outlive the fix it asks for. Once the contributor
+      # has rewritten their commits the check passes, but the comment stays on
+      # the PR with the address in plain text and only a maintainer can remove
+      # it. Deleting it here closes that gap without anyone having to ask.
+      - name: Remove the comment once the emails are fixed
+        if: steps.check-emails.outputs.found_personal == 'false'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.body.includes('Personal Email Detected in Commits') &&
+              comment.user.type === 'Bot'
+            );
+
+            if (!botComment) {
+              return;
+            }
+
+            // Best effort: a cleanup failure must not turn the check red for a
+            // contributor whose commits are already correct.
+            try {
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+              });
+              console.log(`Removed the stale comment ${botComment.id}`);
+            } catch (error) {
+              core.warning(`Could not remove the stale comment: ${error.message}`);
+            }
