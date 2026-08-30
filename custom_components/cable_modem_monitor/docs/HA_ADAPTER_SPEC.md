@@ -41,7 +41,7 @@ Core, it should.
 | [Reauth Flow](#reauth-flow) | Circuit breaker → `async_step_reauth` |
 | [Diagnostics Platform](#diagnostics-platform) | Core diagnostics + HA-side data |
 | [Services](#services) | `generate_dashboard`, `request_refresh`, `request_health_check` |
-| [Channel Bond Change Notifications](#channel-bond-change-notifications) | First-poll onboarding + totals-change detection with `generate_dashboard` hint |
+| [Notifications](#notifications) | When one is warranted; first-poll onboarding with `generate_dashboard` hint |
 | [Config Entry Migration](#config-entry-migration) | Version-keyed migration with auto-discovery |
 | [Testing](#testing) | No modem-specific names, dynamic catalog discovery |
 | [Distribution](#distribution) | HACS zip, PyPI packages, version pinning, release tiers |
@@ -1336,12 +1336,18 @@ the two it is. If it is neither, use an entity or the
 `cable_modem_monitor_data_updated` event instead, which automations can consume
 without interrupting anyone.
 
-The integration raises five. The auth lockout asks you to fix your credentials.
-Restart sent, restart failed and entity reset complete each confirm a button
-press. The onboarding message confirms the modem came online after you added
-it, and fires once per config entry. Channel bond totals changing is neither of
-those, and the totals are already on the DS and US Channel Count sensors, which
-is why it is being removed in 3.14.1 (#197).
+Each notification the integration raises is one or the other. The auth lockout
+asks you to fix your credentials. Restart sent, restart failed and entity reset
+complete each confirm a button press. The onboarding message confirms the modem
+came online after you added it, and fires once per config entry.
+
+Bonded channel totals changing is neither, so it raises nothing. The totals are
+published on the DS and US Channel Count sensors every poll, which an automation
+can watch directly. Watching the totals was also the wrong signal in both
+directions: a DOCSIS 3.1 OFDM carrier that briefly drops and returns moves them
+twice for a single poll of missing data, while an ID-mode channel reassignment,
+the case it was built for, can leave them unchanged. Defaulting identity mode to
+channel number addressed the latter (#197).
 
 ### Channel bond onboarding
 
@@ -1396,15 +1402,6 @@ retroactive onboarding notification.
 
 **Cleanup.** `async_remove_entry` in `__init__.py` removes the Store
 payload when the config entry is deleted.
-
-**Removed in 3.14.1 — the change notification.** Bonded totals differing
-from the stored baseline used to fire a second notification. It watched
-the wrong value in both directions: a DOCSIS 3.1 OFDM carrier that
-briefly drops and returns cost two notifications for a single poll of
-missing data, while an ID-mode channel reassignment — the case it was
-built for — can leave the totals unchanged and go undetected. Defaulting
-identity mode to channel number was the real fix for the latter. See
-#197.
 
 **Pure logic lives in `channel_bond_notifier.py`** (no HA imports), so
 the decision tree is unit-testable without mocks. The coordinator owns
@@ -1527,7 +1524,7 @@ The HA adapter layer consists of these modules:
 | `coordinator.py` | `CableModemRuntimeData` dataclass + `CableModemConfigEntry` type alias |
 | `recovery_adapter.py` | Recovery cadence listener — observer into Core + dispatcher signal that flips `update_interval` while a window is open |
 | `mapping_manager.py` | Channel identity mapping (`ChannelMap`) — builds per-poll mapping between channel number/id and entity unique_id |
-| `channel_bond_notifier.py` | Pure logic for channel-bond change detection — selects `NotifierAction` given totals, stored baseline, and recovery state |
+| `channel_bond_notifier.py` | Pure logic for channel-bond onboarding — selects `NotifierAction` given totals, whether state is stored, and recovery state |
 | `channel_bond_storage.py` | Store-backed persistence for channel-bond baseline totals — per-entry load / save / remove |
 | `sensor.py` | Entity classes for all sensor types |
 | `button.py` | Restart, Update, Reset Entities buttons |

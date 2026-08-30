@@ -10,10 +10,9 @@ HA-free so tests can run without mocks. Persistence is handled by
 fires the HA ``persistent_notification.create`` service.
 
 Tracks bonded channel totals only (downstream + upstream). Changes to
-those totals no longer notify — see ``docs/HA_ADAPTER_SPEC.md``
-§ Notifications and #197. The totals remain available every poll on the
-DS and US Channel Count sensors, which automations can consume without
-interrupting anyone.
+those totals do not notify; they are published on the DS and US Channel
+Count sensors every poll instead. Reasoning:
+``docs/HA_ADAPTER_SPEC.md`` § Notifications (#197).
 """
 
 from __future__ import annotations
@@ -71,12 +70,8 @@ def evaluate(
         return "onboarding" if onboarding_eligible else "silent_init"
 
     # Totals differing from the stored baseline is deliberately not an
-    # action. The comparison watched bonded totals rather than entities,
-    # which is the wrong value in both directions: a DOCSIS 3.1 OFDM
-    # carrier that briefly drops and returns produces two notifications
-    # for a single poll of missing data, while an ID-mode channel
-    # reassignment — the case this was built for — can leave the totals
-    # unchanged and go undetected. See #197.
+    # action; bonded totals were the wrong signal in both directions.
+    # Reasoning: HA_ADAPTER_SPEC.md § Notifications (#197).
     return "none"
 
 

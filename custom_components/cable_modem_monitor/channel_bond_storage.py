@@ -1,9 +1,9 @@
-"""Per-entry persistence for the channel-bond change notifier.
+"""Per-entry persistence for the channel-bond onboarding notifier.
 
 Backs the notifier with HA's ``Store`` helper instead of config-entry
-data. Entry-data writes trigger the integration's update listener
-(which reloads the integration); that would turn every real channel
-change into a reload. Store writes don't fire the listener.
+data. Entry-data writes trigger the integration's update listener, which
+reloads the integration, so per-entry state that changes at runtime
+cannot live there. Store writes don't fire the listener.
 
 Payload schema::
 

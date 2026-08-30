@@ -31,7 +31,7 @@ from solentlabs.cable_modem_monitor_core.orchestration.signals import (
 from custom_components.cable_modem_monitor import (
     _announce_auth_stop,
     _async_update_listener,
-    _check_channel_bond_change,
+    _check_channel_bond_onboarding,
     _create_core_components,
     _get_package_versions,
     _log_operational_summary,
@@ -676,7 +676,7 @@ async def test_update_listener_reloads():
 
 
 # -----------------------------------------------------------------------
-# _check_channel_bond_change — onboarding + totals change detection
+# _check_channel_bond_onboarding — onboarding notification
 # -----------------------------------------------------------------------
 
 
@@ -740,7 +740,7 @@ async def test_channel_bond_fresh_setup_fires_onboarding():
             AsyncMock(),
         ) as mock_save,
     ):
-        await _check_channel_bond_change(hass, entry, snapshot, orchestrator, "TPS-2000")
+        await _check_channel_bond_onboarding(hass, entry, snapshot, orchestrator, "TPS-2000")
 
     # Baseline persisted via Store, not entry data.
     hass.config_entries.async_update_entry.assert_not_called()
@@ -774,7 +774,7 @@ async def test_channel_bond_upgraded_entry_silent_init():
             AsyncMock(),
         ) as mock_save,
     ):
-        await _check_channel_bond_change(hass, entry, snapshot, orchestrator, "TPS-2000")
+        await _check_channel_bond_onboarding(hass, entry, snapshot, orchestrator, "TPS-2000")
 
     hass.config_entries.async_update_entry.assert_not_called()
     mock_save.assert_awaited_once()
@@ -783,14 +783,7 @@ async def test_channel_bond_upgraded_entry_silent_init():
 
 
 async def test_channel_bond_change_no_longer_notifies():
-    """Totals differing from baseline produce no notification and no Store write.
-
-    The change notification was removed in 3.14.1 (#197). A DOCSIS 3.1
-    OFDM carrier that drops for a single poll and returns used to produce
-    two notifications — one for the fall, one when the baseline moved
-    back — on a line that was never degraded. The counts remain on the
-    DS and US Channel Count sensors.
-    """
+    """Totals differing from baseline produce no notification and no Store write."""
     from custom_components.cable_modem_monitor.channel_bond_storage import BondState
 
     entry_data = {"channel_onboarding_eligible": True}
@@ -810,7 +803,7 @@ async def test_channel_bond_change_no_longer_notifies():
             AsyncMock(),
         ) as mock_save,
     ):
-        await _check_channel_bond_change(hass, entry, snapshot, orchestrator, "TPS-2000")
+        await _check_channel_bond_onboarding(hass, entry, snapshot, orchestrator, "TPS-2000")
 
     hass.config_entries.async_update_entry.assert_not_called()
     # No re-baseline: the Store is untouched, so the entry stays "onboarded"
@@ -820,12 +813,7 @@ async def test_channel_bond_change_no_longer_notifies():
 
 
 async def test_channel_bond_recovered_totals_no_longer_notify():
-    """The other half of the OFDM blink — totals returning to baseline.
-
-    The old behaviour re-baselined on the drop, so the recovery read as a
-    second change and notified again. With no re-baseline on either side,
-    neither poll does anything.
-    """
+    """The other half of an OFDM blink: totals returning to baseline still do nothing."""
     from custom_components.cable_modem_monitor.channel_bond_storage import BondState
 
     entry_data = {"channel_onboarding_eligible": True}
@@ -845,7 +833,7 @@ async def test_channel_bond_recovered_totals_no_longer_notify():
             AsyncMock(),
         ) as mock_save,
     ):
-        await _check_channel_bond_change(hass, entry, snapshot, orchestrator, "TPS-2000")
+        await _check_channel_bond_onboarding(hass, entry, snapshot, orchestrator, "TPS-2000")
 
     mock_save.assert_not_awaited()
     hass.services.async_call.assert_not_called()
@@ -869,7 +857,7 @@ async def test_channel_bond_steady_counts_no_op():
             AsyncMock(),
         ) as mock_save,
     ):
-        await _check_channel_bond_change(hass, entry, snapshot, orchestrator, "TPS-2000")
+        await _check_channel_bond_onboarding(hass, entry, snapshot, orchestrator, "TPS-2000")
 
     hass.config_entries.async_update_entry.assert_not_called()
     mock_save.assert_not_awaited()
@@ -898,7 +886,7 @@ async def test_channel_bond_recovery_suppresses_change():
             AsyncMock(),
         ) as mock_save,
     ):
-        await _check_channel_bond_change(hass, entry, snapshot, orchestrator, "TPS-2000")
+        await _check_channel_bond_onboarding(hass, entry, snapshot, orchestrator, "TPS-2000")
 
     hass.config_entries.async_update_entry.assert_not_called()
     mock_save.assert_not_awaited()
@@ -921,7 +909,7 @@ async def test_channel_bond_missing_snapshot_data_no_op():
             AsyncMock(),
         ) as mock_save,
     ):
-        await _check_channel_bond_change(hass, entry, snapshot, orchestrator, "TPS-2000")
+        await _check_channel_bond_onboarding(hass, entry, snapshot, orchestrator, "TPS-2000")
 
     mock_load.assert_not_awaited()
     mock_save.assert_not_awaited()
@@ -945,7 +933,7 @@ async def test_async_remove_entry_clears_bond_store():
 
 
 # -----------------------------------------------------------------------
-# _check_channel_bond_change — early-out branches
+# _check_channel_bond_onboarding — early-out branches
 # -----------------------------------------------------------------------
 
 
@@ -972,7 +960,7 @@ async def test_channel_bond_no_modem_data_no_op():
         "custom_components.cable_modem_monitor.async_load_bond_state",
         AsyncMock(),
     ) as mock_load:
-        await _check_channel_bond_change(hass, entry, snapshot, orchestrator, "TPS-2000")
+        await _check_channel_bond_onboarding(hass, entry, snapshot, orchestrator, "TPS-2000")
 
     mock_load.assert_not_awaited()
     hass.services.async_call.assert_not_called()

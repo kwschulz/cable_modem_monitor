@@ -36,13 +36,8 @@ EVAL_CASES = [
     ("upgraded_entry_no_stored", None, False, False, "silent_init"),
     ("onboarded_steady", _MATCHING_STATE, True, False, "none"),
     ("upgraded_steady_after_silent_init", _MATCHING_STATE, False, False, "none"),
-    # Totals differing from the stored baseline is no longer an action.
-    # The comparison watched bonded totals rather than entities, which is
-    # the wrong value in both directions: a DOCSIS 3.1 OFDM carrier that
-    # briefly drops and returns produced two notifications for a single
-    # poll of missing data, while an ID-mode channel reassignment — the
-    # case it was built for — can leave the totals unchanged and go
-    # undetected. Removed in 3.14.1 (#197).
+    # Totals differing from the stored baseline is not an action.
+    # Reasoning: HA_ADAPTER_SPEC.md § Notifications (#197).
     ("ds_differs_not_actionable", _STALE_DS_STATE, True, False, "none"),
     ("us_differs_not_actionable", _STALE_US_STATE, True, False, "none"),
     ("both_differ_not_actionable", _STALE_BOTH_STATE, True, False, "none"),

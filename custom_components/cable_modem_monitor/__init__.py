@@ -128,7 +128,7 @@ def _get_package_versions() -> str:
     return ", ".join(parts)
 
 
-async def _check_channel_bond_change(
+async def _check_channel_bond_onboarding(
     hass: HomeAssistant,
     entry: CableModemConfigEntry,
     snapshot: ModemSnapshot,
@@ -514,7 +514,7 @@ async def async_setup_entry(
         _log_availability_transition(snapshot, model, reported_unavailable)
         await _announce_auth_stop(hass, entry, snapshot, orchestrator, model, lockout_reported)
         _rebuild_channel_map(entry, snapshot, identity_mode)
-        await _check_channel_bond_change(hass, entry, snapshot, orchestrator, model)
+        await _check_channel_bond_onboarding(hass, entry, snapshot, orchestrator, model)
         hass.bus.async_fire(
             "cable_modem_monitor_data_updated",
             _build_snapshot_payload(snapshot),
