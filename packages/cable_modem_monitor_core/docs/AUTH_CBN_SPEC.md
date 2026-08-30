@@ -62,6 +62,21 @@ These encoding rules are derived from `encrypt_cryptoJS.js` in the modem firmwar
    subsequent authenticated requests
 ```
 
+## Transport Failures
+
+A connection error or timeout during either request is re-raised, not
+converted to a failed login: the modem never answered, so it judged no
+credential. The collector classifies it `CONNECTIVITY` (UC-30/UC-31),
+which backs off and recovers unattended. Reporting one as a failed login
+is `AUTH_FAILED`, which trips the circuit breaker on its first
+occurrence and stops polling until the user reconfigures (#200).
+
+The same rule governs the data path: `loaders/cbn.py` surfaces every
+transport failure rather than omitting the resource, because an omitted
+resource reaches the parse layer as a stub page and counts toward the
+auth streak. Only a body that will not decode is skipped. See
+RESOURCE_LOADING_SPEC.md § Error Signals.
+
 ## Firmware Assumptions
 
 What's hardcoded in `auth/form_cbn.py` and `protocol/cbn.py` that is specific to Compal firmware, not inherent to CryptoJS:

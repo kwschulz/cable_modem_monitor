@@ -30,7 +30,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -427,3 +427,68 @@ def test_form_http_error_fails_login_whatever_the_criteria(always_401_server: st
 
     assert result.success is False
     assert "401" in result.error
+
+
+# ---------------------------------------------------------------------------
+# One rule — a connectivity failure escapes authenticate(), it is not a verdict
+# ---------------------------------------------------------------------------
+
+# A modem that is unreachable has judged nothing. UC-30/UC-31 require the
+# collector to see the exception so it can report CONNECTIVITY, which
+# carries the backoff and leaves the auth streak alone. A strategy that
+# converts it to AuthResult(success=False, response=None) instead makes
+# collector.py read status=None, mint AUTH_FAILED, and trip the breaker on
+# the first occurrence (#200) — polling stops and the user is sent to
+# reconfigure a password that was never wrong.
+#
+# auth/response.py states the contract for the shared helpers:
+# "ConnectionError and Timeout are re-raised for the collector to
+# classify as CONNECTIVITY."
+
+
+@pytest.fixture()
+def unreachable_url() -> Any:
+    """A URL whose port is bound and released, so connecting refuses immediately."""
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    return f"http://127.0.0.1:{port}"
+
+
+@pytest.mark.parametrize("strategy", sorted(DECLARED_MODES), ids=sorted(DECLARED_MODES))
+def test_connection_error_escapes_authenticate(strategy: str, unreachable_url: str) -> None:
+    """No strategy converts an unreachable modem into a credential verdict."""
+    manager = _manager_for(strategy)
+
+    if strategy in _NO_LOGIN_REQUEST:
+        result = manager.authenticate(requests.Session(), unreachable_url, "admin", "pw")
+        assert result.success is True, f"{strategy} {_NO_LOGIN_REQUEST[strategy]}"
+        return
+
+    with pytest.raises(requests.ConnectionError):
+        manager.authenticate(requests.Session(), unreachable_url, "admin", "pw")
+
+
+@pytest.mark.parametrize("strategy", sorted(DECLARED_MODES), ids=sorted(DECLARED_MODES))
+def test_timeout_escapes_authenticate(strategy: str, unreachable_url: str) -> None:
+    """Same rule for a modem too slow to answer, which is equally not a verdict.
+
+    Patched rather than served: a real timeout would cost the suite one
+    request timeout per strategy, and the guard under test is an
+    isinstance check that cannot tell a raised Timeout from a real one.
+    """
+    session = requests.Session()
+    # Session.get and Session.post both delegate here, and FormAuth's
+    # method is configurable, so this is the one seam that covers every
+    # strategy's verb.
+    session.request = MagicMock(side_effect=requests.Timeout("too slow"))  # type: ignore[method-assign]  # rationale: patching the bound method on one throwaway Session is the only seam every strategy's verb passes through; subclassing Session to override request() would change the object under test
+    manager = _manager_for(strategy)
+
+    if strategy in _NO_LOGIN_REQUEST:
+        assert manager.authenticate(session, unreachable_url, "admin", "pw").success is True
+        return
+
+    with pytest.raises(requests.Timeout):
+        manager.authenticate(session, unreachable_url, "admin", "pw")

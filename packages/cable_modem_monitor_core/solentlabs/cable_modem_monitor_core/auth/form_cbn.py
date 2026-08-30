@@ -10,6 +10,11 @@ Replicates the browser-side login flow from Compal modem firmware:
 4. **Check response** — body contains ``"successful"`` and ``SID=<N>``.
 5. **Set SID cookie** — extracted from response body, stored on session.
 
+``ConnectionError`` and ``Timeout`` are re-raised for the collector to
+classify as ``CONNECTIVITY`` (UC-30/UC-31). An unreachable modem has
+judged no credential, and reporting one as a failed login trips the
+circuit breaker on the first occurrence (#200).
+
 Requires the ``cryptography`` package: install Core with ``[cbn]``.
 
 See MODEM_YAML_SPEC.md ``form_cbn`` strategy.
@@ -19,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 import requests
@@ -30,6 +36,22 @@ from .base import AuthContext, AuthResult, BaseAuthManager
 _logger = logging.getLogger(__name__)
 
 _SID_RE = re.compile(r"SID=(\d+)")
+
+
+def _send(send: Callable[[], requests.Response], context: str) -> requests.Response | AuthResult:
+    """Send a request, letting a connectivity failure through unconverted.
+
+    ``ConnectionError`` and ``Timeout`` mean the modem never answered, so
+    they belong to the collector as ``CONNECTIVITY`` (UC-30/UC-31).
+    Everything else is a real answer this strategy can report on. Mirrors
+    the contract ``auth/response.py`` states for the JSON strategies.
+    """
+    try:
+        return send()
+    except requests.RequestException as exc:
+        if isinstance(exc, requests.ConnectionError | requests.Timeout):
+            raise
+        return AuthResult(success=False, error=f"{context}: {type(exc).__name__}: {exc}")
 
 
 class FormCbnAuthManager(BaseAuthManager):
@@ -71,13 +93,10 @@ class FormCbnAuthManager(BaseAuthManager):
         # Step 1: GET login page to receive sessionToken cookie
         login_page_url = f"{base_url}{config.login_page}"
         log(log_level, "CBN auth: fetching login page %s", login_page_url)
-        try:
-            response = session.get(login_page_url, timeout=timeout)
-        except requests.RequestException as exc:
-            return AuthResult(
-                success=False,
-                error=f"Failed to fetch login page: {type(exc).__name__}: {exc}",
-            )
+        outcome = _send(lambda: session.get(login_page_url, timeout=timeout), "Failed to fetch login page")
+        if isinstance(outcome, AuthResult):
+            return outcome
+        response = outcome
 
         if not response.ok:
             return AuthResult(
@@ -110,19 +129,19 @@ class FormCbnAuthManager(BaseAuthManager):
             f"&Password={encrypted}"
         )
         log(log_level, "CBN auth: posting login to %s", setter_url)
-        try:
-            login_response = session.post(
+        outcome = _send(
+            lambda: session.post(
                 setter_url,
                 data=post_body,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
                 timeout=timeout,
                 allow_redirects=False,
-            )
-        except requests.RequestException as exc:
-            return AuthResult(
-                success=False,
-                error=f"Login POST failed: {type(exc).__name__}: {exc}",
-            )
+            ),
+            "Login POST failed",
+        )
+        if isinstance(outcome, AuthResult):
+            return outcome
+        login_response = outcome
 
         # Step 5: Check response for success + extract SID
         # Status must be 200 — a 302 redirect to the login page would

@@ -5,7 +5,6 @@ Table-driven for error scenarios. Mock HTTP session for all tests.
 
 from __future__ import annotations
 
-import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,6 +12,7 @@ import requests
 from requests.cookies import RequestsCookieJar
 from solentlabs.cable_modem_monitor_core.fetch_list import ResourceTarget
 from solentlabs.cable_modem_monitor_core.loaders.cbn import CBNLoader
+from solentlabs.cable_modem_monitor_core.loaders.http import ResourceLoadError
 
 _SAMPLE_XML = "<downstream_table><downstream><freq>500</freq></downstream></downstream_table>"
 _MALFORMED_XML = "this is not xml {{"
@@ -138,69 +138,43 @@ class TestSuccessfulFetch:
 class TestErrorHandling:
     """Errors are logged, targets skipped, fetch continues."""
 
-    def test_non_200_skipped(self) -> None:
-        """Non-200 response skips the target."""
-        session = _make_session()
+    # Skip-and-continue was replaced by surface-and-let-policy-decide
+    # (#200). Coverage for what escapes now lives in
+    # TestConnectivityIsNotAMissingResource: the non-2xx case is
+    # test_http_error_raises_with_status, and "one failure stops the
+    # poll" is test_connection_error_stops_the_poll.
 
-        bad_resp = _mock_response(status_code=500, ok=False)
-        good_resp = _mock_response()
-        session.post.side_effect = [bad_resp, good_resp]
-
-        loader = _make_loader(session)
-        result = loader.fetch(_targets("10", "11"))
-
-        assert "10" not in result
-        assert "11" in result
-
-    def test_network_error_skipped(self) -> None:
-        """ConnectionError on one target doesn't stop others."""
-        session = _make_session()
-
-        session.post.side_effect = [
-            requests.ConnectionError("refused"),
-            _mock_response(),
-        ]
-
-        loader = _make_loader(session)
-        result = loader.fetch(_targets("10", "11"))
-
-        assert "10" not in result
-        assert "11" in result
-
-    # Each row: (exception_class, exception_arg, expected_type_name).
-    # CBN warns and skips on transport errors instead of raising, so
-    # the assertion is on the captured WARNING log record.
-    _FETCH_EXCEPTIONS = [
-        (requests.ConnectionError, "refused", "ConnectionError"),
-        (requests.Timeout, "timed out", "Timeout"),
-        (requests.exceptions.SSLError, "handshake", "SSLError"),
-        (requests.HTTPError, "bad response", "HTTPError"),
+    # Each row: (exception_class, exception_arg, what escapes fetch()).
+    # SSLError subclasses requests.ConnectionError, so it travels the
+    # connectivity path and the collector reads it as CONNECTIVITY
+    # (RESOURCE_LOADING_SPEC § Error Signals). HTTPError does not, so it
+    # becomes LOAD_ERROR the same way loaders/http.py converts it.
+    _FETCH_EXCEPTIONS: list[tuple[type[Exception], str, type[Exception]]] = [
+        (requests.ConnectionError, "refused", requests.ConnectionError),
+        (requests.Timeout, "timed out", requests.Timeout),
+        (requests.exceptions.SSLError, "handshake", requests.ConnectionError),
+        (requests.HTTPError, "bad response", ResourceLoadError),
     ]
 
     @pytest.mark.parametrize(
-        "exc_class,exc_arg,expected_type_name",
+        "exc_class,exc_arg,escapes_as",
         _FETCH_EXCEPTIONS,
-        ids=[c[2] for c in _FETCH_EXCEPTIONS],
+        ids=[c[0].__name__ for c in _FETCH_EXCEPTIONS],
     )
-    def test_fetch_warning_includes_exception_class_name(
+    def test_transport_error_escapes_for_the_collector_to_classify(
         self,
-        caplog: pytest.LogCaptureFixture,
         exc_class: type[Exception],
         exc_arg: str,
-        expected_type_name: str,
+        escapes_as: type[Exception],
     ) -> None:
-        """CBN fetch failure warning includes the exception class name."""
+        """Every transport failure leaves the loader; none is silently skipped."""
         session = _make_session()
         session.post.side_effect = exc_class(exc_arg)
 
         loader = _make_loader(session)
-        with caplog.at_level(logging.WARNING):
-            result = loader.fetch(_targets("10"))
 
-        assert "10" not in result
-        warnings = [r for r in caplog.records if "CBN fetch failed" in r.message]
-        assert warnings, "expected a CBN fetch failure warning"
-        assert any(expected_type_name in r.message for r in warnings)
+        with pytest.raises(escapes_as):
+            loader.fetch(_targets("10"))
 
     def test_malformed_xml_skipped(self) -> None:
         """Malformed XML response skips the target."""
@@ -209,6 +183,92 @@ class TestErrorHandling:
         bad_xml = _mock_response(text=_MALFORMED_XML, content=_MALFORMED_XML.encode())
         good_xml = _mock_response()
         session.post.side_effect = [bad_xml, good_xml]
+
+        loader = _make_loader(session)
+        result = loader.fetch(_targets("10", "11"))
+
+        assert "10" not in result
+        assert "11" in result
+
+
+class TestConnectivityIsNotAMissingResource:
+    """A fetch failure the loader swallows becomes a stub-page verdict (#200).
+
+    RESOURCE_LOADING_SPEC § Error Signals gives the loader one job on a
+    transport failure: surface it. Returning ``None`` drops the key from
+    the resource dict, the coordinator counts 0/N anchors, and the poll
+    ends as LOAD_INTEGRITY — which increments the auth streak and reports
+    AUTH_FAILED. On the CH7465MT that turned a few seconds of
+    unreachability into a stopped integration and a reauth prompt.
+
+    Skipping stays correct for the one case it was built for: a body that
+    will not decode (d6cd3246). That path is unchanged below.
+    """
+
+    def test_connection_error_propagates(self) -> None:
+        """An unreachable modem raises, so the collector can report CONNECTIVITY (UC-30)."""
+        session = _make_session()
+        session.post.side_effect = requests.ConnectionError("refused")
+
+        loader = _make_loader(session)
+
+        with pytest.raises(requests.ConnectionError):
+            loader.fetch(_targets("10", "11"))
+
+    def test_timeout_propagates(self) -> None:
+        """Same for a modem too slow to answer (UC-31)."""
+        session = _make_session()
+        session.post.side_effect = requests.Timeout("timed out")
+
+        loader = _make_loader(session)
+
+        with pytest.raises(requests.Timeout):
+            loader.fetch(_targets("10"))
+
+    def test_connection_error_stops_the_poll(self) -> None:
+        """The first failure aborts; the remaining targets are not attempted.
+
+        Discriminating: a loader that raised only after working through
+        every target would satisfy the test above while still spending
+        four round trips on a modem known to be unreachable.
+        """
+        session = _make_session()
+        session.post.side_effect = requests.ConnectionError("refused")
+
+        loader = _make_loader(session)
+
+        with pytest.raises(requests.ConnectionError):
+            loader.fetch(_targets("10", "11", "2", "144"))
+
+        assert session.post.call_count == 1
+
+    # Each row: (status, expected signal the collector derives from it).
+    # 401/403 is a stale session (LOAD_AUTH); everything else is the
+    # modem declining to serve (LOAD_ERROR, no auth streak). Skipping
+    # the target instead routes both to LOAD_INTEGRITY, which counts
+    # toward the auth streak the 5xx is explicitly not supposed to touch.
+    _STATUS_CASES = [(401, "stale session"), (403, "stale session"), (500, "server error"), (503, "declining")]
+
+    @pytest.mark.parametrize("status,why", _STATUS_CASES, ids=[str(c[0]) for c in _STATUS_CASES])
+    def test_http_error_raises_with_status(self, status: int, why: str) -> None:
+        """A non-2xx carries its status out, so the collector can classify it (UC-32)."""
+        session = _make_session()
+        session.post.side_effect = [_mock_response(status_code=status, ok=False)]
+
+        loader = _make_loader(session)
+
+        with pytest.raises(ResourceLoadError) as exc_info:
+            loader.fetch(_targets("10"))
+
+        assert exc_info.value.status_code == status, why
+
+    def test_malformed_xml_still_skips(self) -> None:
+        """Unchanged: a body that will not decode is the case skipping exists for."""
+        session = _make_session()
+        session.post.side_effect = [
+            _mock_response(text=_MALFORMED_XML, content=_MALFORMED_XML.encode()),
+            _mock_response(),
+        ]
 
         loader = _make_loader(session)
         result = loader.fetch(_targets("10", "11"))

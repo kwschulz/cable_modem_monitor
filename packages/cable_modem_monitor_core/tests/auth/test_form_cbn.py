@@ -111,10 +111,8 @@ class TestSuccessfulLogin:
 # ├────────────────────────────┼────────────────────────────────────────────┤
 # │ login page HTTP error      │ "Login page returned HTTP 500"             │
 # │ missing session cookie     │ "did not set 'sessionToken' cookie"        │
-# │ login POST failed          │ "Login POST failed"                        │
 # │ login body not successful  │ "Login failed: idloginincorrect"           │
 # │ no SID in response         │ "SID not found in response"                │
-# │ login page network error   │ "Failed to fetch login page"               │
 # │ login POST 302 redirect    │ "Login POST returned HTTP 302"             │
 # └────────────────────────────┴────────────────────────────────────────────┘
 
@@ -193,6 +191,8 @@ def _setup_login_post_redirect(session: requests.Session) -> None:
 
 
 # fmt: off
+# Connectivity failures are absent by design: they raise rather than
+# returning an AuthResult, so they live in CONNECTIVITY_SITES below.
 FAILURE_CASES = [
     # (description, setup_fn, expected_error_substring, expects_response)
     # expects_response: True when a Response was in scope at failure
@@ -201,10 +201,8 @@ FAILURE_CASES = [
     # any response object existed.
     ("login_page_http_error",   _setup_login_page_error,    "Login page returned HTTP 500",                 True),
     ("missing_session_cookie",  _setup_missing_cookie,      "did not set 'sessionToken' cookie",            True),
-    ("login_post_failed",       _setup_post_failure,        "Login POST failed: ConnectionError",           False),
     ("login_body_rejected",     _setup_login_rejected,      "Login failed: idloginincorrect",               True),
     ("no_sid_in_response",      _setup_no_sid,              "SID not found in response",                    True),
-    ("login_page_network_error", _setup_network_error,      "Failed to fetch login page: ConnectionError",  False),
     ("login_post_302_redirect",  _setup_login_post_redirect, "Login POST returned HTTP 302",                True),
 ]
 # fmt: on
@@ -302,3 +300,46 @@ class TestPostBody:
         manager.authenticate(session, "http://192.168.0.1", "", "pw")
 
         assert captured_data[0].startswith(f"token={token}")
+
+
+# ---------------------------------------------------------------------------
+# Connectivity is not a credential verdict (#200)
+# ---------------------------------------------------------------------------
+
+# form_cbn was the only strategy converting an unreachable modem into
+# AuthResult(success=False, response=None). The collector reads that as
+# status=None -> AUTH_FAILED, which trips the circuit breaker on the first
+# occurrence: polling stops and the user is sent to reconfigure a password
+# that was never wrong. UC-30/UC-31 want CONNECTIVITY, which backs off and
+# recovers unattended.
+#
+# Both request sites need their own row. The cross-strategy gate in
+# test_auth_failure_modes.py only ever reaches the first one, because auth
+# never gets past a login page it cannot fetch.
+#
+# fmt: off
+CONNECTIVITY_SITES = [
+    # (description,      setup_fn,             raised)
+    ("login_page_get",   _setup_network_error, requests.ConnectionError),
+    ("login_post",       _setup_post_failure,  requests.ConnectionError),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(
+    "desc,setup_fn,raised",
+    CONNECTIVITY_SITES,
+    ids=[c[0] for c in CONNECTIVITY_SITES],
+)
+def test_connectivity_propagates_from_every_request_site(
+    session: requests.Session,
+    desc: str,
+    setup_fn: Any,
+    raised: type[Exception],
+) -> None:
+    """A network failure at either request leaves authenticate() unconverted."""
+    setup_fn(session)
+    manager = FormCbnAuthManager(FormCbnAuth(strategy="form_cbn"))
+
+    with pytest.raises(raised):
+        manager.authenticate(session, "http://192.168.100.1", "admin", "pw")

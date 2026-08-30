@@ -22,6 +22,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AT01.01.*` firmware line emits this token; the other Arris and
   Motorola HNAP entries are unaffected.
 
+- **CBN modems stopped polling after a few seconds of unreachability
+  (#200).** On a Compal CH7465MT that briefly drops off the network, a
+  connection error during a poll was reported as an authentication
+  failure, so the circuit breaker stopped polling on the first
+  occurrence and Home Assistant asked for credentials that were never
+  wrong. Two places converted the error: `form_cbn` was the only auth
+  strategy that turned an unreachable modem into a failed login, and the
+  CBN loader turned a failed data fetch into a missing resource, which
+  the parse layer then read as a stub page. Both now surface the error
+  so it is classified as a connectivity failure, which backs off and
+  recovers on its own. A CBN data fetch answered 4xx or 5xx is also
+  reported the way the HTTP transport already reports it, rather than
+  counting toward the authentication failure streak.
+
 ### Added
 
 - **Catalog gate: HNAP login outcomes are checked against firmware.**
