@@ -73,6 +73,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   vocabulary rests on a single capture, so the gate ships with an
   extractor test that fails if it silently stops matching.
 
+### Removed
+
+- **The channel-bond change notification (#197).** A persistent
+  notification fired whenever the bonded channel totals moved away from
+  the stored baseline. It watched the wrong value in both directions: a
+  DOCSIS 3.1 OFDM carrier that briefly drops and returns produced two
+  notifications for a single poll of missing data, while the case it was
+  built for, an ID-mode channel reassignment, can leave the totals
+  unchanged and go undetected entirely. The DS and US Channel Count
+  sensors still publish the totals on every poll, so an automation can
+  watch them directly. The one-time onboarding notification is
+  unaffected.
+
+### Upgrade Notes
+
+**Coming from v3.14.0.** The channel-bond change notification is gone. If
+you built an automation that triggers on it, move the trigger to the DS
+Channel Count and US Channel Count sensors, which carry the same totals
+on every poll.
+
 ## [3.14.0] - 2026-08-28
 
 ### Overview

@@ -1,8 +1,8 @@
 # Alert when downstream or upstream channel count changes.
 # DOCSIS bonding totals are stable in normal operation; a change
 # usually means re-bonding (good) or partial lock (bad). The integration
-# also raises a persistent_notification on bond changes — this
-# automation is for users who want a phone push too.
+# does not notify on bond changes, so this automation is how to be told
+# about them.
 automation:
   - alias: "Cable Modem - Channel Count Changed"
     trigger:
