@@ -1100,10 +1100,10 @@ def _login_failure(status: int | None, *, busy: bool = False) -> dict[str, Any]:
 # LoginResult "FAILED", the CGA6444VF refuses a second session with 200
 # and MSG_LOGIN_150 (#120), and the S33v3 answers 200 with LoginResult
 # "RELOAD" (#201). Status alone cannot split the two 200 rows; only the
-# strategy's busy flag can. Two strategies set it, from different
+# strategy's busy flag can. Three strategies set it, from different
 # evidence: form_pbkdf2 from the entry's declared login_busy body, hnap
-# from a protocol token. auth_status_code carries the 2xx through, so
-# only a 404 changes the blocked-poll message (UC-87b).
+# and form_cbn from a protocol token. auth_status_code carries the 2xx
+# through, so only a 404 changes the blocked-poll message (UC-87b).
 #
 # fmt: off
 LOGIN_STATUS_CASES = [

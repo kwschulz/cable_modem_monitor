@@ -36,6 +36,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported the way the HTTP transport already reports it, rather than
   counting toward the authentication failure streak.
 
+- **CBN modems stopped polling on a lockout or a restart-the-login
+  response.** Compal CBN firmware answers a login five different ways,
+  and Core recognised only one of them: any body without `successful`
+  was reported as a wrong password. So a modem saying it had locked
+  itself out after too many attempts, or asking the client to start the
+  login over, tripped the auth circuit breaker on the first occurrence,
+  stopped polling, and asked for credentials that were never judged.
+  The four other outcomes are now read as the firmware's own handler
+  reads them: `lockedout` and `cbnAccessDenied` report a firmware
+  lockout, whose remedy is waiting rather than a new password;
+  `cbnLogin` and `cbnFirstInstall` are the modem declining to serve the
+  login, so polling continues and the condition clears on its own.
+
 - **A connection failure did not name the resource it failed on.** The
   warning rendered as `Resource load error [MB7621] — : Failed to fetch
   /MotoSwInfo.asp`, with an empty field where the resource path belongs,
@@ -52,6 +65,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   committed capture since 2026-07-10 while the spec listed the same
   file as its source. A firmware line that adds a token now fails a
   test instead of a user's integration.
+
+- **Catalog gate: CBN login outcomes are checked against firmware.**
+  The same gate for the CBN fleet: every `form_cbn` entry whose capture
+  includes the firmware's login JavaScript now has the tokens it
+  branches on read back out and compared with what Core handles. The
+  vocabulary rests on a single capture, so the gate ships with an
+  extractor test that fails if it silently stops matching.
 
 ## [3.14.0] - 2026-08-28
 

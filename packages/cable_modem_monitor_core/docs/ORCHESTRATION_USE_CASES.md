@@ -2316,6 +2316,16 @@ declared per entry, so the strategy sets `busy` directly
 this use case's exact anti-pattern: one occurrence, breaker tripped,
 polling stopped, and a reauth form for a password that was never wrong.
 
+**A fourth route, on the same reasoning.** The CBN firmware line
+(Compal CH7465MT capture) answers HTTP 200 with `cbnLogin` or
+`cbnFirstInstall`. Its own `common_api.js` handles both by navigating
+back to `login.html`, the branch that neither blames the credential nor
+reports a lock. `form_cbn` read every body without `"successful"` as a
+wrong password, so these produced this use case's exact anti-pattern.
+Like HNAP, the token set comes from firmware shared across the platform
+rather than from entry config, so the strategy sets `busy` directly
+(AUTH_CBN_SPEC.md § Login Token Vocabulary).
+
 **Why a declared body criterion, not a Core error table:** firmware
 that refuses under HTTP 200 gives the status rule nothing to read, and
 before `login_busy` existed the CGA6444VF's refusal failed the
@@ -2353,9 +2363,10 @@ in about 20 s, so classification alone breaks the loop.
 > **Status:** Implemented. The collector classifies a 5xx login
 > response, or an `AuthResult` the strategy marked `busy`, as
 > `AUTH_UNAVAILABLE`; `SignalPolicy.apply` maps it to `UNREACHABLE`
-> with no side effects, matching `LOAD_ERROR`. Two strategies mark
+> with no side effects, matching `LOAD_ERROR`. Three strategies mark
 > busy: `form_pbkdf2` when the body matches the entry's `login_busy`,
-> and `hnap` on `LoginResult: "RELOAD"`.
+> `hnap` on `LoginResult: "RELOAD"`, and `form_cbn` on a `cbnLogin` or
+> `cbnFirstInstall` login body.
 
 ---
 

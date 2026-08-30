@@ -246,8 +246,10 @@ by doing what the firmware asked.
 
 `busy` is set in the strategy, not declared per entry: HNAP's token set
 is fixed by the protocol, so there is nothing for a catalog entry to
-declare (§ Config Reference). This is the one structural difference
-from `form_pbkdf2`, whose busy body is entry data (`login_busy`).
+declare (§ Config Reference). `form_cbn` sets it the same way and for
+the same reason (AUTH_CBN_SPEC.md § Login Token Vocabulary). The
+structural difference is with `form_pbkdf2`, whose busy body is entry
+data (`login_busy`).
 
 ## Firmware Assumptions
 
