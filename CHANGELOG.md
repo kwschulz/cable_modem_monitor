@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Generated dashboards pointed at entities that do not exist (#205).**
+  The dashboard generator built entity IDs from the configured entity
+  prefix. Home Assistant composes entity IDs from the device name, so
+  renaming the device renames them, and every generated reference then
+  read "Entity not found". Entity IDs now come from the entity registry
+  and match whatever the entities are actually called. A reference that
+  cannot be resolved, including one for an entity you have disabled, is
+  left out instead of emitted broken. The channel identity converter and
+  the orphaned statistics tool read the same source, so on a renamed
+  device they now find the statistics they previously skipped.
+
 ## [3.14.1-beta.1] - 2026-08-30
 
 ### Fixed
