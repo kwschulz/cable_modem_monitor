@@ -8,7 +8,7 @@ from homeassistant.const import Platform
 
 # IMPORTANT: Do not edit VERSION manually!
 # Use: python scripts/release.py <version>
-VERSION = "3.14.1-beta.1"
+VERSION = "3.14.1-beta.2"
 
 DOMAIN = "cable_modem_monitor"
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]

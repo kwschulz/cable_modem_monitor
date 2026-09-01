@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.1-beta.2] - 2026-09-01
+
 ### Fixed
 
 - **Generated dashboards pointed at entities that do not exist (#205).**
