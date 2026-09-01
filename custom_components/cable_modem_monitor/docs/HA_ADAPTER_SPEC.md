@@ -1246,8 +1246,39 @@ form, as a single global readability preference.
 
 1. Resolves target modem from `device_id` or falls back to first entry
 2. Reads current channel data from `entry.runtime_data.data_coordinator`
-3. Generates entity references for actual channels
-4. Returns YAML string the user pastes into a manual dashboard card
+3. Decides which entities belong on the dashboard from that data
+4. Resolves each one's entity ID from the entity registry by unique ID
+5. Returns YAML string the user pastes into a manual dashboard card
+
+**Entity IDs come from the registry, never from the entity prefix.**
+Steps 3 and 4 answer different questions. Whether an entity *belongs* is
+answered by the modem data: no `total_corrected` in `system_info` means no
+error rows. What it is *called* is answered only by the registry, because
+`has_entity_name = True` composes entity IDs from the device name, so
+renaming the device renames them. An ID assembled from `entity_prefix`
+holds only for a default-named, never-renamed install (#205).
+
+Every entity carries a unique ID the integration owns, making the lookup
+exact: `er.async_get_entity_id(domain, DOMAIN, unique_id)`. Unique IDs are
+not derivable from entity IDs — `sensor.{prefix}_ds_channel_count` is
+`{entry_id}_cable_modem_downstream_channel_count`,
+`button.{prefix}_update_modem_data` is `{entry_id}_update_data_button` — so
+the mapping is written out explicitly and tested against the entity classes
+that mint it.
+
+An unresolved reference is **omitted**, covering a disabled entity
+(`disabled_by` set: an ID but no state) and one never created. `hidden_by`
+is not consulted; hidden entities still render when named directly. A card
+with no rows is dropped, and if nothing at all resolves the service raises
+`ServiceValidationError` rather than return a `vertical-stack` whose empty
+`cards:` list is invalid Lovelace.
+
+`convert_channel_identity` and `orphaned_statistics` cannot use this lookup:
+recorder statistic IDs are historical strings that outlive their entities.
+They need the prefix itself, and probe it from the Status sensor, falling
+back to the settings-derived name only before any entity registers. On a
+renamed install this is a behavior change — both previously matched zero
+statistic IDs and silently did nothing.
 
 ### `request_refresh`
 

@@ -20,6 +20,7 @@ import homeassistant.helpers.device_registry as dr
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.recorder import get_instance
 from homeassistant.util import slugify as ha_slugify
 
@@ -78,16 +79,66 @@ def _resolve_config_entry_for_device(
 
 
 # ------------------------------------------------------------------
-# Entity ID prefix — matches _update_device_registry in __init__.py
+# Entity ID resolution — the registry is the authority (#205)
 # ------------------------------------------------------------------
 
+# Probe for the live prefix: every install has a Status sensor, and its
+# unique ID suffix and entity ID suffix are both "status".
+_PREFIX_PROBE_SUFFIX = "status"
 
-def _get_entity_prefix(entry: CableModemConfigEntry) -> str:
-    """Derive the entity ID prefix from config entry settings.
 
-    Must match the device_name logic in get_device_name() so
-    generated entity IDs match what HA actually creates.
+class _EntityResolver:
+    """Maps a dashboard reference to the entity ID HA actually assigned.
+
+    ``has_entity_name = True`` composes entity IDs from the device name, so
+    renaming the device renames them. Only the unique ID is ours and stable,
+    so that is the key (#205).
     """
+
+    def __init__(self, hass: HomeAssistant, entry: CableModemConfigEntry) -> None:
+        self._registry = er.async_get(hass)
+        self._entry_id = entry.entry_id
+
+    def sensor(self, unique_suffix: str) -> str | None:
+        """Entity ID for a sensor, or None when absent or disabled."""
+        return self._lookup("sensor", f"{self._entry_id}_cable_modem_{unique_suffix}")
+
+    def button(self, unique_suffix: str) -> str | None:
+        """Entity ID for a button, or None when absent or disabled."""
+        # Buttons carry no ``cable_modem_`` infix.
+        return self._lookup("button", f"{self._entry_id}_{unique_suffix}")
+
+    def _lookup(self, domain: str, unique_id: str) -> str | None:
+        entity_id = self._registry.async_get_entity_id(domain, DOMAIN, unique_id)
+        if entity_id is None:
+            return None
+        record = self._registry.async_get(entity_id)
+        # Disabled keeps an ID but carries no state, so the row renders
+        # empty. hidden_by is not checked: hidden entities still have state
+        # and render when a card names them directly.
+        if record is not None and record.disabled_by is not None:
+            return None
+        return entity_id
+
+
+def _emit(lines: list[str], entity_id: str | None, *rows: str) -> None:
+    """Append an entity row plus its trailing *rows*, or nothing if unresolved."""
+    if entity_id is None:
+        return
+    lines.append(f"      - entity: {entity_id}")
+    lines.extend(rows)
+
+
+def _get_entity_prefix(entry: CableModemConfigEntry, resolver: _EntityResolver | None = None) -> str:
+    """The live entity ID prefix, probed from the registry, else settings.
+
+    Statistic IDs are historical strings with no unique ID to look up, so
+    the statistic tools need the prefix itself.
+    """
+    if resolver is not None:
+        probe = resolver.sensor(_PREFIX_PROBE_SUFFIX)
+        if probe is not None:
+            return probe.split(".", 1)[1].removesuffix(f"_{_PREFIX_PROBE_SUFFIX}")
     data = entry.data
     device_name = get_device_name(
         data.get(CONF_ENTITY_PREFIX, "default"),
@@ -263,8 +314,46 @@ def _format_channel_label(
     return f"{ch_type.upper()} Ch {ch_id}"
 
 
+def _status_row_yaml(resolver: _EntityResolver, status_id: str | None) -> list[str]:
+    """The Status row, with a refresh tap target when that button resolves."""
+    if status_id is None:
+        return []
+    rows = [f"      - entity: {status_id}", "        name: Status"]
+    refresh_id = resolver.button("update_data_button")
+    # Without the tap target the row still works, minus the refresh shortcut.
+    if refresh_id is not None:
+        rows.extend(
+            [
+                "        tap_action:",
+                "          action: call-service",
+                "          service: button.press",
+                "          target:",
+                f"            entity_id: {refresh_id}",
+            ]
+        )
+    return rows
+
+
+def _passthrough_rows(
+    resolver: _EntityResolver,
+    system_info: dict[str, Any],
+    exclude_fields: frozenset[str],
+) -> list[str]:
+    """Rows for system_info fields with no dedicated sensor class (tier 2/3)."""
+    rows: list[str] = []
+    for field in sorted(system_info):
+        if (
+            field in CONSUMED_SYSTEM_INFO_FIELDS  # includes docsis_status (attribute row above)
+            or field in DISPLAY_ONLY_SYSTEM_INFO_FIELDS
+            or field in exclude_fields
+        ):
+            continue
+        _emit(rows, resolver.sensor(field), f"        name: {field.replace('_', ' ').title()}")
+    return rows
+
+
 def _build_status_card_yaml(
-    entity_prefix: str,
+    resolver: _EntityResolver,
     system_info: dict[str, Any],
     *,
     has_icmp: bool,
@@ -273,124 +362,84 @@ def _build_status_card_yaml(
 ) -> list[str]:
     """Build YAML for the status entities card.
 
-    Only includes entities for fields the modem actually provides.
-    Channel counts and status are always present; everything else is
-    gated on system_info field presence (matching sensor.py gating).
-
-    Args:
-        entity_prefix: Entity ID prefix (e.g., "cable_modem").
-        system_info: The system_info dict from modem data.
-        has_icmp: Whether ICMP ping latency entity exists.
-        has_head: Whether the HTTP HEAD latency entity exists
-            (only created on supports_head=True modems).
-        exclude_fields: Pass-through fields to omit from the card;
-            defaults to STATUS_CARD_DEFAULT_EXCLUDE.
+    ``system_info`` decides which entities belong, mirroring sensor.py's
+    gating; the resolver decides what they are called.
     """
     if exclude_fields is None:
         exclude_fields = frozenset(STATUS_CARD_DEFAULT_EXCLUDE)
-    lines = [
-        "  - type: entities",
-        "    title: Cable Modem Status",
-        "    entities:",
-        f"      - entity: sensor.{entity_prefix}_status",
-        "        name: Status",
-        "        tap_action:",
-        "          action: call-service",
-        "          service: button.press",
-        "          target:",
-        f"            entity_id: button.{entity_prefix}_update_modem_data",
-    ]
+    status_id = resolver.sensor("status")
+    lines: list[str] = list(_status_row_yaml(resolver, status_id))
     if has_icmp:
-        lines.append(f"      - entity: sensor.{entity_prefix}_ping_latency")
-        lines.append("        name: Ping")
-    lines.extend(
-        [
-            f"      - entity: sensor.{entity_prefix}_tcp_latency",
-            "        name: TCP",
-            "        icon: mdi:transit-connection-variant",
-        ]
+        _emit(lines, resolver.sensor("ping_latency"), "        name: Ping")
+    _emit(
+        lines,
+        resolver.sensor("tcp_latency"),
+        "        name: TCP",
+        "        icon: mdi:transit-connection-variant",
     )
     if has_head:
-        lines.extend(
-            [
-                f"      - entity: sensor.{entity_prefix}_http_latency",
-                "        name: HTTP",
-                "        icon: mdi:speedometer",
-            ]
+        _emit(
+            lines,
+            resolver.sensor("http_latency"),
+            "        name: HTTP",
+            "        icon: mdi:speedometer",
         )
     # DOCSIS status renders as an `attribute` row off the Status sensor
     # (the standalone sensor was retired, #178) at its historical
     # position (the pre-beta.12 "Modem Status" spot). The row shows the
     # raw value (e.g. `operational`); prettifying needs a template card.
-    if "docsis_status" in system_info and "docsis_status" not in exclude_fields:
+    if "docsis_status" in system_info and "docsis_status" not in exclude_fields and status_id is not None:
         lines.append("      - type: attribute")
-        lines.append(f"        entity: sensor.{entity_prefix}_status")
+        lines.append(f"        entity: {status_id}")
         lines.append("        attribute: docsis_status")
         lines.append("        name: DOCSIS Status")
     if "software_version" in system_info:
-        lines.append(f"      - entity: sensor.{entity_prefix}_software_version")
-        lines.append("        name: Software Version")
+        _emit(lines, resolver.sensor("software_version"), "        name: Software Version")
     # Uptime is a display-time calculation, not a sensor (#178): both
     # rows render Last Boot Time — relative ("5 days ago") for uptime,
     # absolute for the boot instant. Gate mirrors sensor.py's Last
     # Boot Time creation gate.
     if "system_uptime" in system_info or "total_corrected" in system_info or "total_uncorrected" in system_info:
-        lines.extend(
-            [
-                f"      - entity: sensor.{entity_prefix}_last_boot_time",
-                "        name: Uptime",
-                "        format: relative",
-                f"      - entity: sensor.{entity_prefix}_last_boot_time",
-                "        name: Last Boot",
-                "        format: datetime",
-            ]
-        )
-    lines.extend(
-        [
-            f"      - entity: sensor.{entity_prefix}_ds_channel_count",
-            "        name: Downstream Channel Count",
-            f"      - entity: sensor.{entity_prefix}_us_channel_count",
-            "        name: Upstream Channel Count",
-        ]
-    )
+        boot_id = resolver.sensor("last_boot_time")
+        _emit(lines, boot_id, "        name: Uptime", "        format: relative")
+        _emit(lines, boot_id, "        name: Last Boot", "        format: datetime")
+    _emit(lines, resolver.sensor("downstream_channel_count"), "        name: Downstream Channel Count")
+    _emit(lines, resolver.sensor("upstream_channel_count"), "        name: Upstream Channel Count")
     # Error totals only — the rate sensors exist as HA entities but
     # are intentionally omitted from the status entities row. Rates
     # are point-in-time MEASUREMENT values that jitter poll-to-poll;
     # the summary row is for stable identity/state, the rate trend
     # belongs in a history graph (see include_error_rates).
     if "total_corrected" in system_info:
-        lines.extend(
-            [
-                f"      - entity: sensor.{entity_prefix}_total_corrected_errors",
-                "        name: Total Corrected Errors",
-                f"      - entity: sensor.{entity_prefix}_total_uncorrected_errors",
-                "        name: Total Uncorrected Errors",
-            ]
-        )
-    for field in sorted(system_info):
-        if (
-            field in CONSUMED_SYSTEM_INFO_FIELDS  # includes docsis_status (attribute row above)
-            or field in DISPLAY_ONLY_SYSTEM_INFO_FIELDS
-            or field in exclude_fields
-        ):
-            continue
-        lines.append(f"      - entity: sensor.{entity_prefix}_{field}")
-        lines.append(f"        name: {field.replace('_', ' ').title()}")
-    lines.append("    show_header_toggle: false")
-    lines.append("    state_color: false")
-    return lines
+        _emit(lines, resolver.sensor("total_corrected"), "        name: Total Corrected Errors")
+        _emit(lines, resolver.sensor("total_uncorrected"), "        name: Total Uncorrected Errors")
+    lines.extend(_passthrough_rows(resolver, system_info, exclude_fields))
+    # Drop the card rather than emit an empty shell, as the graphs do.
+    if not lines:
+        return []
+    return [
+        "  - type: entities",
+        "    title: Cable Modem Status",
+        "    entities:",
+        *lines,
+        "    show_header_toggle: false",
+        "    state_color: false",
+    ]
 
 
-def _build_restart_button_card_yaml(entity_prefix: str) -> list[str]:
+def _build_restart_button_card_yaml(resolver: _EntityResolver) -> list[str]:
     """Build YAML for the standalone restart button card.
 
     A dedicated `button` card is used instead of an entities-row so the
     confirmation dialog reliably guards every tap. In an entities card,
     clicking the button widget bypasses the row's tap_action.
     """
+    restart_id = resolver.button("restart_button")
+    if restart_id is None:
+        return []
     return [
         "  - type: button",
-        f"    entity: button.{entity_prefix}_restart_modem",
+        f"    entity: {restart_id}",
         "    name: Restart Modem",
         "    icon: mdi:restart",
         "    show_state: false",
@@ -398,36 +447,55 @@ def _build_restart_button_card_yaml(entity_prefix: str) -> list[str]:
         "      action: call-service",
         "      service: button.press",
         "      target:",
-        f"        entity_id: button.{entity_prefix}_restart_modem",
+        f"        entity_id: {restart_id}",
         "      confirmation:",
         "        text: This will restart your modem and temporarily disconnect your internet.",
     ]
 
 
 def _build_channel_graph_yaml(
+    resolver: _EntityResolver,
     title: str,
     hours: int,
     channel_info: list[tuple[str, int]],
-    entity_pattern: str,
+    unique_pattern: str,
     channel_label: str,
 ) -> list[str]:
-    """Build YAML for a channel history graph card."""
-    yaml_parts = [
+    """Build YAML for a channel history graph card.
+
+    *unique_pattern* is a unique ID suffix template, not an entity ID.
+    """
+    rows: list[str] = []
+    for ch_type, ch_id in channel_info:
+        entity_id = resolver.sensor(unique_pattern.format(ch_type=ch_type, ch_id=ch_id))
+        _emit(rows, entity_id, f"        name: {_format_channel_label(ch_type, ch_id, channel_label)}")
+    if not rows:
+        return []
+    return [
         "  - type: history-graph",
         f"    title: {title}",
         f"    hours_to_show: {hours}",
         "    entities:",
+        *rows,
     ]
-    for ch_type, ch_id in channel_info:
-        entity_id = entity_pattern.format(ch_type=ch_type, ch_id=ch_id)
-        label = _format_channel_label(ch_type, ch_id, channel_label)
-        yaml_parts.append(f"      - entity: {entity_id}")
-        yaml_parts.append(f"        name: {label}")
-    return yaml_parts
+
+
+def _single_entity_graph(entity_id: str | None, title: str, hours: int, label: str) -> list[str]:
+    """A one-line history graph, or nothing when the entity does not resolve."""
+    if entity_id is None:
+        return []
+    return [
+        "  - type: history-graph",
+        f"    title: {title}",
+        f"    hours_to_show: {hours}",
+        "    entities:",
+        f"      - entity: {entity_id}",
+        f"        name: {label}",
+    ]
 
 
 def _build_error_graphs_yaml(
-    entity_prefix: str,
+    resolver: _EntityResolver,
     titles: dict[str, str],
     *,
     include_rates: bool = False,
@@ -441,41 +509,27 @@ def _build_error_graphs_yaml(
     trend over time enable ``include_error_rates`` on the service call.
     """
     lines = [
-        "  - type: history-graph",
-        f"    title: {titles['corrected']}",
-        "    hours_to_show: 168",
-        "    entities:",
-        f"      - entity: sensor.{entity_prefix}_total_corrected_errors",
-        "        name: Corrected Error Count",
-        "  - type: history-graph",
-        f"    title: {titles['uncorrected']}",
-        "    hours_to_show: 168",
-        "    entities:",
-        f"      - entity: sensor.{entity_prefix}_total_uncorrected_errors",
-        "        name: Uncorrected Error Count",
+        *_single_entity_graph(resolver.sensor("total_corrected"), titles["corrected"], 168, "Corrected Error Count"),
+        *_single_entity_graph(
+            resolver.sensor("total_uncorrected"), titles["uncorrected"], 168, "Uncorrected Error Count"
+        ),
     ]
     if include_rates:
         lines.extend(
             [
-                "  - type: history-graph",
-                f"    title: {titles['corrected_rate']}",
-                "    hours_to_show: 168",
-                "    entities:",
-                f"      - entity: sensor.{entity_prefix}_rate_corrected_errors",
-                "        name: Corrected Error Rate",
-                "  - type: history-graph",
-                f"    title: {titles['uncorrected_rate']}",
-                "    hours_to_show: 168",
-                "    entities:",
-                f"      - entity: sensor.{entity_prefix}_rate_uncorrected_errors",
-                "        name: Uncorrected Error Rate",
+                *_single_entity_graph(
+                    resolver.sensor("rate_corrected"), titles["corrected_rate"], 168, "Corrected Error Rate"
+                ),
+                *_single_entity_graph(
+                    resolver.sensor("rate_uncorrected"), titles["uncorrected_rate"], 168, "Uncorrected Error Rate"
+                ),
             ]
         )
     return lines
 
 
 def _build_latency_graph_yaml(
-    entity_prefix: str,
+    resolver: _EntityResolver,
     *,
     has_icmp: bool,
     has_head: bool,
@@ -485,28 +539,29 @@ def _build_latency_graph_yaml(
     Always graphs TCP latency (the L4 reachability signal). Adds Ping
     and HTTP HEAD lines only when those entities exist for this modem.
     """
-    lines = [
+    rows: list[str] = []
+    if has_icmp:
+        _emit(rows, resolver.sensor("ping_latency"), "        name: Ping")
+    _emit(rows, resolver.sensor("tcp_latency"), "        name: TCP")
+    if has_head:
+        _emit(rows, resolver.sensor("http_latency"), "        name: HTTP")
+    if not rows:
+        return []
+    return [
         "  - type: history-graph",
         "    title: Latency",
         "    hours_to_show: 6",
         "    entities:",
+        *rows,
     ]
-    if has_icmp:
-        lines.append(f"      - entity: sensor.{entity_prefix}_ping_latency")
-        lines.append("        name: Ping")
-    lines.append(f"      - entity: sensor.{entity_prefix}_tcp_latency")
-    lines.append("        name: TCP")
-    if has_head:
-        lines.append(f"      - entity: sensor.{entity_prefix}_http_latency")
-        lines.append("        name: HTTP")
-    return lines
 
 
 def _add_channel_graphs(
     yaml_parts: list[str],
+    resolver: _EntityResolver,
     channel_info: list[tuple[str, int]],
     base_title: str,
-    entity_pattern: str,
+    unique_pattern: str,
     graph_hours: int,
     channel_label: str,
     channel_grouping: str,
@@ -530,10 +585,11 @@ def _add_channel_graphs(
             effective_label = "id_only" if channel_label == "auto" else channel_label
             yaml_parts.extend(
                 _build_channel_graph_yaml(
+                    resolver,
                     title,
                     graph_hours,
                     channels,
-                    entity_pattern,
+                    unique_pattern,
                     effective_label,
                 )
             )
@@ -547,32 +603,32 @@ def _add_channel_graphs(
             effective_label = "full" if channel_label == "auto" else channel_label
         yaml_parts.extend(
             _build_channel_graph_yaml(
+                resolver,
                 title,
                 graph_hours,
                 channel_info,
-                entity_pattern,
+                unique_pattern,
                 effective_label,
             )
         )
 
 
 def _build_channel_graph_defs(
-    entity_prefix: str,
     identity_mode: ChannelIdentity,
     downstream_info: list[tuple[str, int]],
     upstream_info: list[tuple[str, int]],
 ) -> list[tuple[str, list[tuple[str, int]], str, str]]:
     """Build the channel graph definitions for the dashboard.
 
-    Returns (opt_key, channel_info, title_key, entity_pattern) tuples.
+    Returns (opt_key, channel_info, title_key, unique_pattern) tuples,
+    the pattern being a ChannelSensor unique ID suffix.
     """
-    p = entity_prefix
     if identity_mode == ChannelIdentity.NUMBER:
-        ds = f"sensor.{p}_ds_ch_{{ch_id}}"
-        us = f"sensor.{p}_us_ch_{{ch_id}}"
+        ds = "ds_ch_{ch_id}"
+        us = "us_ch_{ch_id}"
     else:
-        ds = f"sensor.{p}_ds_{{ch_type}}_ch_{{ch_id}}"
-        us = f"sensor.{p}_us_{{ch_type}}_ch_{{ch_id}}"
+        ds = "ds_{ch_type}_ch_{ch_id}"
+        us = "us_{ch_type}_ch_{ch_id}"
     # fmt: off
     return [
         ("ds_power", downstream_info, "ds_power", f"{ds}_power"),
@@ -612,7 +668,7 @@ def create_generate_dashboard_handler(
         """Handle the generate_dashboard service call."""
         entry, modem_data = _resolve_dashboard_target(hass, call)
 
-        entity_prefix = _get_entity_prefix(entry)
+        resolver = _EntityResolver(hass, entry)
         has_icmp = bool(entry.data.get(CONF_SUPPORTS_ICMP, False))
         has_head = bool(entry.data.get(CONF_SUPPORTS_HEAD, False))
         has_restart = entry.runtime_data.orchestrator.supports_restart
@@ -638,17 +694,13 @@ def create_generate_dashboard_handler(
         identity_mode = ChannelIdentity(entry.data.get(CONF_CHANNEL_IDENTITY, ChannelIdentity.ID))
         downstream_info, upstream_info = _get_channel_info(modem_data, identity_mode)
 
-        yaml_parts = [
-            "# Cable Modem Dashboard",
-            "# Copy from here, paste into: Dashboard > Add Card > Manual",
-            "type: vertical-stack",
-            "cards:",
-        ]
+        # Kept apart from the header so an empty result is detectable.
+        yaml_parts: list[str] = []
 
         if opts["status"]:
             yaml_parts.extend(
                 _build_status_card_yaml(
-                    entity_prefix,
+                    resolver,
                     system_info,
                     has_icmp=has_icmp,
                     has_head=has_head,
@@ -657,22 +709,22 @@ def create_generate_dashboard_handler(
             )
 
         if has_restart:
-            yaml_parts.extend(_build_restart_button_card_yaml(entity_prefix))
+            yaml_parts.extend(_build_restart_button_card_yaml(resolver))
 
         channel_graphs = _build_channel_graph_defs(
-            entity_prefix,
             identity_mode,
             downstream_info,
             upstream_info,
         )
 
-        for opt_key, ch_info, title_key, entity_pattern in channel_graphs:
+        for opt_key, ch_info, title_key, unique_pattern in channel_graphs:
             if opts[opt_key]:
                 _add_channel_graphs(
                     yaml_parts,
+                    resolver,
                     ch_info,
                     titles[title_key],
-                    entity_pattern,
+                    unique_pattern,
                     graph_hours,
                     channel_label,
                     channel_grouping,
@@ -682,7 +734,7 @@ def create_generate_dashboard_handler(
         if opts["errors"] and "total_corrected" in system_info:
             yaml_parts.extend(
                 _build_error_graphs_yaml(
-                    entity_prefix,
+                    resolver,
                     titles,
                     include_rates=opts["error_rates"],
                 )
@@ -691,19 +743,35 @@ def create_generate_dashboard_handler(
         if opts["latency"]:
             yaml_parts.extend(
                 _build_latency_graph_yaml(
-                    entity_prefix,
+                    resolver,
                     has_icmp=has_icmp,
                     has_head=has_head,
                 )
+            )
+
+        if not yaml_parts:
+            # An empty cards: list is invalid Lovelace and explains nothing.
+            raise ServiceValidationError(
+                "No entities found for this modem — it may still be starting up, " "or its entities may be disabled"
             )
 
         _LOGGER.info(
             "Generated dashboard: %d DS channels, %d US channels, prefix=%s",
             len(downstream_info),
             len(upstream_info),
-            entity_prefix,
+            _get_entity_prefix(entry, resolver),
         )
-        return {"yaml": "\n".join(yaml_parts)}
+        return {
+            "yaml": "\n".join(
+                [
+                    "# Cable Modem Dashboard",
+                    "# Copy from here, paste into: Dashboard > Add Card > Manual",
+                    "type: vertical-stack",
+                    "cards:",
+                    *yaml_parts,
+                ]
+            )
+        }
 
     return handle_generate_dashboard
 
@@ -847,7 +915,7 @@ def create_convert_channel_identity_handler(
             raise ServiceValidationError("No modem data available — the modem must be online")
 
         channels = _build_channel_lookup(snapshot.modem_data)
-        prefix = _get_entity_prefix(entry)
+        prefix = _get_entity_prefix(entry, _EntityResolver(hass, entry))
 
         # Query recorder for all statistic IDs.
         from homeassistant.components.recorder.statistics import (
@@ -925,7 +993,7 @@ def create_orphaned_statistics_handler(
         if entry is None:
             raise ServiceValidationError("No cable modem configured")
 
-        prefix = _get_entity_prefix(entry)
+        prefix = _get_entity_prefix(entry, _EntityResolver(hass, entry))
 
         from homeassistant.components.recorder.statistics import (
             async_list_statistic_ids,

@@ -33,8 +33,11 @@ Releases follow a PR-based workflow:
 
 ### 1. Prepare the Release (on feature branch)
 
-Run `scripts/check_owned_deps.py` and batch-update anything shown —
-releases shouldn't ship with stale declared deps.
+`make validate-ci` ends with `scripts/check_owned_deps.py`. It is
+informational and always exits 0: it compares the local venv against
+PyPI, so a package it lists may already be permitted by our declared
+floor. Read it, and open a separate deps commit if something we declare
+is genuinely behind. It does not gate a release.
 
 ```bash
 # Ensure you're on your feature branch with all changes committed
@@ -76,24 +79,40 @@ gh pr create --title "feat: v3.14.0 - Your Release Title" --body "..."
 ### 3. Review and Merge
 
 - Wait for CI to pass
-- Review the changes
-- Merge the PR (squash or merge commit)
+- Review the changes, including the PR **description**: `make
+  autoclose-check` scans commit bodies only, so a `Fixes #N` in the body
+  is the one auto-close vector nothing catches
+- Merge with a **merge commit, never a squash**. **Where tags live**
+  tags the merge commit, and a squash produces none; a squash also
+  rewrites the head SHAs GitHub uses to mark a PR merged, which costs a
+  fork contributor their merged badge and authorship
+- `require-pr-approval` cannot be satisfied by the author, so this is a
+  `gh pr merge --merge --admin` in practice. Confirm every check is
+  green first: the admin flag overrides required status checks too, not
+  just the review requirement
 
 ### 4. Tag Main and Push
 
 After the PR is merged:
 
+Tag the merge commit by SHA. Don't `git checkout main` first: local
+`main` never moves in this workflow (see **Where tags live**), so a
+checkout-then-tag risks tagging a stale commit, and it disturbs the
+working tree for no gain.
+
 ```bash
-# Switch to main and pull the merged changes
-git checkout main
-git pull origin main
+git fetch origin
 
-# Create the release tag on main
-git tag -a v3.14.0 -m "Cable Modem Monitor v3.14.0
+# The merge commit the PR produced, straight from GitHub
+MERGE_SHA=$(gh api repos/solentlabs/cable_modem_monitor/pulls/204 -q .merge_commit_sha)
 
-Key features:
-- Feature 1
-- Feature 2
+# Confirm it is what main points at before tagging it
+git rev-parse origin/main
+
+git tag -a v3.14.0 "$MERGE_SHA" -m "Cable Modem Monitor v3.14.0
+
+- Highlight 1
+- Highlight 2
 - See CHANGELOG.md for details"
 
 # Push the tag (triggers release workflow)
@@ -104,8 +123,12 @@ git push origin v3.14.0
 
 The tag push triggers `.github/workflows/release.yml` which:
 
-- Creates a GitHub Release
-- Attaches release notes from the tag message
+- Creates a GitHub Release, `prerelease` for a beta tag
+- Builds the release body from the matching `## [X.Y.Z]` section of
+  `CHANGELOG.md`, **not** from the tag message. The tag message is for
+  readers of `git`; what users see is the changelog section, so that
+  section has to be right before the tag is pushed.
+- Attaches the `cable_modem_monitor.zip` asset HACS installs from
 
 Verify at: <https://github.com/solentlabs/cable_modem_monitor/releases>
 

@@ -27,6 +27,7 @@ from custom_components.cable_modem_monitor.dev_tools import (
     _build_latency_graph_yaml,
     _build_restart_button_card_yaml,
     _build_status_card_yaml,
+    _EntityResolver,
     _find_loaded_entry,
     _format_channel_label,
     _format_title_with_type,
@@ -214,7 +215,7 @@ def test_build_status_card_yaml_full():
         "rate_uncorrected": 0.0,
     }
     lines = _build_status_card_yaml(
-        "cable_modem",
+        _resolver_for(),
         system_info,
         has_icmp=True,
         has_head=True,
@@ -241,7 +242,7 @@ def test_build_status_card_yaml_minimal():
     """Status card omits entities when modem data is sparse and HEAD unsupported."""
     system_info = {}
     lines = _build_status_card_yaml(
-        "cable_modem",
+        _resolver_for(),
         system_info,
         has_icmp=False,
         has_head=False,
@@ -271,7 +272,7 @@ def test_build_status_card_yaml_passthrough_fields():
         "total_uncorrected": 0,
         "rate_corrected": 5.0,
     }
-    lines = _build_status_card_yaml("cable_modem", system_info, has_icmp=False, has_head=False)
+    lines = _build_status_card_yaml(_resolver_for(), system_info, has_icmp=False, has_head=False)
     yaml = "\n".join(lines)
     assert "sensor.cable_modem_ds_power_status" in yaml
     assert "sensor.cable_modem_ds_snr_status" in yaml
@@ -312,7 +313,9 @@ def test_passthrough_formerly_explicit_fields(system_info: dict[str, Any], expec
     Exclusion is disabled here — this test asserts loop reach, not the
     default exclusion policy (covered below).
     """
-    lines = _build_status_card_yaml("modem", system_info, has_icmp=False, has_head=False, exclude_fields=frozenset())
+    lines = _build_status_card_yaml(
+        _resolver_for("modem"), system_info, has_icmp=False, has_head=False, exclude_fields=frozenset()
+    )
     assert expected_entity in "\n".join(lines)
 
 
@@ -325,7 +328,7 @@ def test_status_card_display_only_fields_never_appear():
         "software_version": "1.0",
         "ds_power_status": "Good",
     }
-    lines = _build_status_card_yaml("modem", system_info, has_icmp=False, has_head=False)
+    lines = _build_status_card_yaml(_resolver_for("modem"), system_info, has_icmp=False, has_head=False)
     yaml = "\n".join(lines)
     assert "hardware_version" not in yaml
     assert "model_name" not in yaml
@@ -350,7 +353,7 @@ def test_status_card_exclude_override():
     }
     yaml = "\n".join(
         _build_status_card_yaml(
-            "modem",
+            _resolver_for("modem"),
             system_info,
             has_icmp=False,
             has_head=False,
@@ -367,7 +370,7 @@ def test_status_card_exclude_drops_docsis_row():
     system_info = {"docsis_status": "Operational"}
     yaml = "\n".join(
         _build_status_card_yaml(
-            "modem",
+            _resolver_for("modem"),
             system_info,
             has_icmp=False,
             has_head=False,
@@ -379,7 +382,7 @@ def test_status_card_exclude_drops_docsis_row():
 
 def test_build_restart_button_card_yaml():
     """Restart button is a dedicated `button` card so confirmation always fires."""
-    lines = _build_restart_button_card_yaml("cable_modem")
+    lines = _build_restart_button_card_yaml(_resolver_for())
     yaml = "\n".join(lines)
     assert "type: button" in yaml
     assert "entity: button.cable_modem_restart_modem" in yaml
@@ -396,10 +399,11 @@ def test_build_channel_graph_yaml():
     """Channel graph card has correct entity IDs and labels."""
     info = [("qam", 1), ("qam", 2)]
     lines = _build_channel_graph_yaml(
+        _resolver_for("cm"),
         "DS Power",
         24,
         info,
-        "sensor.cm_ds_{ch_type}_ch_{ch_id}_power",
+        "ds_{ch_type}_ch_{ch_id}_power",
         "full",
     )
     yaml = "\n".join(lines)
@@ -412,7 +416,7 @@ def test_build_channel_graph_yaml():
 def test_build_error_graphs_yaml_counts_only_by_default():
     """Default: counts only — rate graphs are opt-in via include_rates."""
     titles = _get_dashboard_titles(False)
-    lines = _build_error_graphs_yaml("cm", titles)
+    lines = _build_error_graphs_yaml(_resolver_for("cm"), titles)
     yaml = "\n".join(lines)
     assert "sensor.cm_total_corrected_errors" in yaml
     assert "sensor.cm_total_uncorrected_errors" in yaml
@@ -423,7 +427,7 @@ def test_build_error_graphs_yaml_counts_only_by_default():
 def test_build_error_graphs_yaml_with_rates_opt_in():
     """include_rates=True appends rate history graphs after counts."""
     titles = _get_dashboard_titles(False)
-    lines = _build_error_graphs_yaml("cm", titles, include_rates=True)
+    lines = _build_error_graphs_yaml(_resolver_for("cm"), titles, include_rates=True)
     yaml = "\n".join(lines)
     assert "sensor.cm_total_corrected_errors" in yaml
     assert "sensor.cm_total_uncorrected_errors" in yaml
@@ -433,7 +437,7 @@ def test_build_error_graphs_yaml_with_rates_opt_in():
 
 def test_build_latency_graph_yaml_with_icmp_and_head():
     """Latency graph includes Ping, TCP, and HTTP HEAD when all available."""
-    lines = _build_latency_graph_yaml("cm", has_icmp=True, has_head=True)
+    lines = _build_latency_graph_yaml(_resolver_for("cm"), has_icmp=True, has_head=True)
     yaml = "\n".join(lines)
     assert "sensor.cm_ping_latency" in yaml
     assert "sensor.cm_tcp_latency" in yaml
@@ -442,7 +446,7 @@ def test_build_latency_graph_yaml_with_icmp_and_head():
 
 def test_build_latency_graph_yaml_no_icmp_no_head():
     """Latency graph omits Ping and HTTP when unavailable; TCP always present."""
-    lines = _build_latency_graph_yaml("cm", has_icmp=False, has_head=False)
+    lines = _build_latency_graph_yaml(_resolver_for("cm"), has_icmp=False, has_head=False)
     yaml = "\n".join(lines)
     assert "ping_latency" not in yaml
     assert "sensor.cm_tcp_latency" in yaml
@@ -451,7 +455,7 @@ def test_build_latency_graph_yaml_no_icmp_no_head():
 
 def test_build_latency_graph_yaml_icmp_only():
     """Latency graph: ICMP supported but HEAD not — no HTTP line."""
-    lines = _build_latency_graph_yaml("cm", has_icmp=True, has_head=False)
+    lines = _build_latency_graph_yaml(_resolver_for("cm"), has_icmp=True, has_head=False)
     yaml = "\n".join(lines)
     assert "sensor.cm_ping_latency" in yaml
     assert "sensor.cm_tcp_latency" in yaml
@@ -469,9 +473,10 @@ def test_add_channel_graphs_by_direction_single_type():
     info = [("qam", 1), ("qam", 2)]
     _add_channel_graphs(
         parts,
+        _resolver_for("cm"),
         info,
         "Downstream Power Levels (dBmV)",
-        "sensor.cm_ds_{ch_type}_ch_{ch_id}_power",
+        "ds_{ch_type}_ch_{ch_id}_power",
         24,
         "auto",
         "by_direction",
@@ -488,9 +493,10 @@ def test_add_channel_graphs_by_type():
     info = [("qam", 1), ("ofdm", 33)]
     _add_channel_graphs(
         parts,
+        _resolver_for("cm"),
         info,
         "DS Power",
-        "sensor.cm_ds_{ch_type}_ch_{ch_id}_power",
+        "ds_{ch_type}_ch_{ch_id}_power",
         24,
         "auto",
         "by_type",
@@ -506,9 +512,10 @@ def test_add_channel_graphs_empty():
     parts: list[str] = []
     _add_channel_graphs(
         parts,
+        _resolver_for("cm"),
         [],
         "DS Power",
-        "sensor.cm_ds_{ch_type}_ch_{ch_id}_power",
+        "ds_{ch_type}_ch_{ch_id}_power",
         24,
         "auto",
         "by_direction",
@@ -880,12 +887,34 @@ async def test_request_health_check_no_entries_raises() -> None:
 
 
 def test_get_entity_prefix() -> None:
-    """Entity prefix derived from device name via slugification."""
+    """With no resolver, the prefix falls back to the device name slug."""
     entry = MagicMock()
     entry.data = {"entity_prefix": "none", "host": "192.168.100.1"}
     entry.runtime_data.modem_identity.model = "TPS-2000"
 
     assert _get_entity_prefix(entry) == "cable_modem"
+
+
+def test_get_entity_prefix_reads_registry_over_settings() -> None:
+    """A registered Status sensor wins over the settings-derived name (#205)."""
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.data = {"entity_prefix": "none", "host": "192.168.100.1"}
+    entry.runtime_data.modem_identity.model = "TPS-2000"
+
+    resolver = _resolver_for("dan_room_arris_cable_modem")
+
+    assert _get_entity_prefix(entry, resolver) == "dan_room_arris_cable_modem"
+
+
+def test_get_entity_prefix_falls_back_when_nothing_registered() -> None:
+    """Before any entity registers, the probe misses and settings answer."""
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.data = {"entity_prefix": "none", "host": "192.168.100.1"}
+    entry.runtime_data.modem_identity.model = "TPS-2000"
+
+    assert _get_entity_prefix(entry, _resolver_for(empty=True)) == "cable_modem"
 
 
 # -----------------------------------------------------------------------
@@ -923,9 +952,10 @@ def test_add_channel_graphs_multi_type_by_direction() -> None:
     info = [("qam", 1), ("ofdm", 33)]
     _add_channel_graphs(
         parts,
+        _resolver_for("cm"),
         info,
         "Downstream Power Levels (dBmV)",
-        "sensor.cm_ds_{ch_type}_ch_{ch_id}_power",
+        "ds_{ch_type}_ch_{ch_id}_power",
         24,
         "auto",
         "by_direction",
@@ -995,6 +1025,197 @@ def test_generate_dashboard_handler(
     assert "sensor.cable_modem_tcp_latency" in yaml
     assert "sensor.cable_modem_http_latency" in yaml
     assert "entity: button.cable_modem_restart_modem" in yaml
+
+
+# Suffixes where the entity ID and unique ID spellings diverge (#205).
+_SENSOR_UID_TO_EID = {
+    "downstream_channel_count": "ds_channel_count",
+    "upstream_channel_count": "us_channel_count",
+    "total_corrected": "total_corrected_errors",
+    "total_uncorrected": "total_uncorrected_errors",
+    "rate_corrected": "rate_corrected_errors",
+    "rate_uncorrected": "rate_uncorrected_errors",
+}
+_BUTTON_UID_TO_EID = {
+    "restart_button": "restart_modem",
+    "update_data_button": "update_modem_data",
+    "reset_entities_button": "reset_entities",
+}
+
+
+class _FakeRegistryEntry:
+    """Minimal stand-in for a registry entry — only `disabled_by` is read."""
+
+    def __init__(self, disabled_by: str | None = None) -> None:
+        self.disabled_by = disabled_by
+
+
+class _FakeEntityRegistry:
+    """Registry double where every entity the integration mints is registered.
+
+    ``disabled`` and ``empty`` carve exceptions out of that default.
+    """
+
+    def __init__(
+        self,
+        entry_id: str = "test_entry",
+        prefix: str = "cable_modem",
+        disabled: set[str] | None = None,
+        empty: bool = False,
+    ) -> None:
+        self._entry_id = entry_id
+        self._prefix = prefix
+        self._disabled = disabled or set()
+        self._empty = empty
+        self._known: set[str] = set()
+
+    def async_get_entity_id(self, domain: str, platform: str, unique_id: str) -> str | None:
+        if self._empty or platform != DOMAIN or not unique_id.startswith(f"{self._entry_id}_"):
+            return None
+        suffix = unique_id[len(self._entry_id) + 1 :]
+        if domain == "button":
+            eid_suffix = _BUTTON_UID_TO_EID.get(suffix)
+        elif domain == "sensor" and suffix.startswith("cable_modem_"):
+            uid_suffix = suffix[len("cable_modem_") :]
+            eid_suffix = _SENSOR_UID_TO_EID.get(uid_suffix, uid_suffix)
+        else:
+            eid_suffix = None
+        if eid_suffix is None:
+            return None
+        entity_id = f"{domain}.{self._prefix}_{eid_suffix}"
+        self._known.add(entity_id)
+        return entity_id
+
+    def async_get(self, entity_id: str) -> _FakeRegistryEntry | None:
+        if entity_id not in self._known:
+            return None
+        return _FakeRegistryEntry("user" if entity_id in self._disabled else None)
+
+
+def _registry_for(entry_id: str, prefix: str, disabled: set[str] | None = None) -> _FakeEntityRegistry:
+    """Registry double whose entity IDs carry *prefix*."""
+    return _FakeEntityRegistry(entry_id=entry_id, prefix=prefix, disabled=disabled)
+
+
+@pytest.fixture(autouse=True)
+def _default_entity_registry():
+    """Every entity registered under `cable_modem`, as a default install gets.
+
+    Tests needing a renamed, disabled, or empty registry patch over this.
+    """
+    with patch(
+        "custom_components.cable_modem_monitor.dev_tools.er.async_get",
+        return_value=_FakeEntityRegistry(),
+    ):
+        yield
+
+
+def _resolver_for(
+    prefix: str = "cable_modem",
+    entry_id: str = "test_entry",
+    **kwargs: Any,
+) -> _EntityResolver:
+    """An `_EntityResolver` backed by the registry double."""
+    entry = MagicMock()
+    entry.entry_id = entry_id
+    with patch(
+        "custom_components.cable_modem_monitor.dev_tools.er.async_get",
+        return_value=_FakeEntityRegistry(entry_id=entry_id, prefix=prefix, **kwargs),
+    ):
+        return _EntityResolver(MagicMock(), entry)
+
+
+def test_generate_dashboard_uses_registry_entity_ids(
+    mock_runtime_data: CableModemRuntimeData,
+) -> None:
+    """A renamed device yields registry entity IDs, not assembled ones (#205).
+
+    The reported install renamed the device, so every assembled
+    `sensor.cable_modem_*` reference rendered "Entity not found".
+    """
+    entry = _make_mock_entry(mock_runtime_data)
+    entry.data = {
+        "entity_prefix": "none",
+        "host": "192.168.100.1",
+        "supports_icmp": True,
+        "supports_head": True,
+    }
+
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [entry]
+
+    registry = _registry_for(entry.entry_id, "dan_room_arris_cable_modem")
+    with patch(
+        "custom_components.cable_modem_monitor.dev_tools.er.async_get",
+        return_value=registry,
+    ):
+        handler = create_generate_dashboard_handler(hass)
+        yaml = handler(_make_mock_call({"include_status_card": True}))["yaml"]
+
+    assert "sensor.dan_room_arris_cable_modem_status" in yaml
+    assert "sensor.dan_room_arris_cable_modem_ds_channel_count" in yaml
+    assert "sensor.dan_room_arris_cable_modem_total_corrected_errors" in yaml
+    assert "button.dan_room_arris_cable_modem_update_modem_data" in yaml
+    # The assembled form must not survive anywhere in the output.
+    assert "sensor.cable_modem_" not in yaml
+    assert "button.cable_modem_" not in yaml
+
+
+def test_generate_dashboard_omits_disabled_entities(
+    mock_runtime_data: CableModemRuntimeData,
+) -> None:
+    """An entity the user disabled has a registry ID but no state, so it is omitted."""
+    entry = _make_mock_entry(mock_runtime_data)
+    entry.data = {
+        "entity_prefix": "none",
+        "host": "192.168.100.1",
+        "supports_icmp": True,
+        "supports_head": True,
+    }
+
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [entry]
+
+    registry = _registry_for(
+        entry.entry_id,
+        "cable_modem",
+        disabled={"sensor.cable_modem_http_latency"},
+    )
+    with patch(
+        "custom_components.cable_modem_monitor.dev_tools.er.async_get",
+        return_value=registry,
+    ):
+        handler = create_generate_dashboard_handler(hass)
+        yaml = handler(_make_mock_call({"include_status_card": True, "include_latency": True}))["yaml"]
+
+    assert "sensor.cable_modem_tcp_latency" in yaml
+    assert "sensor.cable_modem_http_latency" not in yaml
+
+
+def test_generate_dashboard_raises_when_nothing_resolves(
+    mock_runtime_data: CableModemRuntimeData,
+) -> None:
+    """Nothing resolvable → raise; an empty `cards:` is invalid Lovelace."""
+    entry = _make_mock_entry(mock_runtime_data)
+    entry.data = {
+        "entity_prefix": "none",
+        "host": "192.168.100.1",
+        "supports_icmp": True,
+        "supports_head": True,
+    }
+
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [entry]
+
+    with (
+        patch(
+            "custom_components.cable_modem_monitor.dev_tools.er.async_get",
+            return_value=_FakeEntityRegistry(entry.entry_id, empty=True),
+        ),
+        pytest.raises(ServiceValidationError, match="No entities found for this modem"),
+    ):
+        handler = create_generate_dashboard_handler(hass)
+        handler(_make_mock_call({"include_status_card": True}))
 
 
 def test_generate_dashboard_handler_with_error_rates_opt_in(
@@ -1415,6 +1636,39 @@ async def test_convert_to_id_mode_migrates(mock_runtime_data) -> None:
     hass.async_create_task.assert_called_once()
 
 
+async def test_convert_uses_renamed_prefix_from_registry(mock_runtime_data) -> None:
+    """Renamed device: the conversion finds its statistics, not nothing (#205).
+
+    These stats carry only the renamed prefix, which "cable_modem" misses.
+    """
+    entry = _make_convert_runtime(mock_runtime_data, target_mode="id")
+    hass = MagicMock()
+    hass.config_entries.async_entries.return_value = [entry]
+
+    recorder = MagicMock()
+    renamed_stats = [
+        {"statistic_id": "sensor.dan_room_arris_cable_modem_ds_ch_1_power"},
+        {"statistic_id": "sensor.dan_room_arris_cable_modem_ds_ch_2_power"},
+    ]
+
+    with (
+        patch(
+            "custom_components.cable_modem_monitor.dev_tools.er.async_get",
+            return_value=_FakeEntityRegistry(entry.entry_id, "dan_room_arris_cable_modem"),
+        ),
+        patch(
+            "homeassistant.components.recorder.statistics.async_list_statistic_ids",
+            new_callable=AsyncMock,
+            return_value=renamed_stats,
+        ),
+        patch("homeassistant.helpers.recorder.get_instance", return_value=recorder),
+    ):
+        handler = create_convert_channel_identity_handler(hass)
+        result = await handler(_make_mock_call())
+
+    assert result["renamed"] >= 1
+
+
 async def test_convert_to_number_mode_migrates(mock_runtime_data) -> None:
     """ID-mode stats present + target=number → migrates via _plan_stat_renames_to_number."""
     entry = _make_convert_runtime(mock_runtime_data, target_mode="number")
@@ -1537,13 +1791,13 @@ def test_build_channel_graph_defs_number_mode_omits_channel_type() -> None:
     )
 
     defs = _build_channel_graph_defs(
-        entity_prefix="modem",
         identity_mode=ChannelIdentity.NUMBER,
         downstream_info=[("", 1)],
         upstream_info=[("", 1)],
     )
     patterns = [pattern for (_key, _info, _title, pattern) in defs]
-    # Every pattern uses the number-mode shape: sensor.{prefix}_{dir}_ch_{ch_id}_{metric}
+    # Every pattern is a unique ID suffix in the number-mode shape:
+    # {dir}_ch_{ch_id}_{metric}, with no channel type segment.
     for p in patterns:
         assert "{ch_type}" not in p
         assert "_ch_{ch_id}" in p
