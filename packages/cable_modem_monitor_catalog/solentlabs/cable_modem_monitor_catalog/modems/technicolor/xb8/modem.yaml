@@ -24,9 +24,26 @@ actions:
     method: GET
     endpoint: "/home_loggedout.jst"
     # source_inferred from the toolbar Logout link present on every
-    # captured page and from global.js (no logout request in the capture).
+    # captured page and from global.js. The fixture reaches this path
+    # only as the pre-login landing page, never as a logout.
     # requires_session not set (defaults to false) pending contributor
     # confirmation whether a Cookie header appears in the logout request.
+  restart:
+    type: http
+    method: POST
+    endpoint: "/actionHandler/ajaxSet_Reset_Restore.jst"
+    params:
+      resetInfo: '["btn1","Device","admin"]'
+      csrfp_token: "{cookie:csrfp_token}"
+    headers:
+      X-Requested-With: "XMLHttpRequest"
+    # Observed in the fixture HAR, unlike the XB10 entry that declares
+    # the same endpoint source_inferred.
+    # csrfp_token: OWASP CSRFP double submit; the POST body echoes the
+    # cookie. The login landing page /at_a_glance.jst issues it, so it
+    # is in the jar by action time and no pre_fetch_url is needed.
+    # /restore_reboot.jst, which the browser loads first, sets DUKSID
+    # only and cannot refresh the token.
 
 hardware:
   docsis_version: "3.1"
@@ -38,6 +55,7 @@ sources:
   brands: "Xfinity: [FCC XB8/CGM4981COM user guide](https://fcc.report/FCC-ID/G954981X/5542915.pdf); Panoramic Wifi: [Cox Technicolor CGM4981 support page](https://www.cox.com/residential/support/technicolor-cgm4981.html)"
   model_aliases: "[FCC XB8/CGM4981COM user guide](https://fcc.report/FCC-ID/G954981X/5542915.pdf); [DSLReports — Next Gateway XB8 Technicolor CGM4981COM](https://www.dslreports.com/forum/r33227126-Next-Gateway-XB8-Technicolor-CGM4981COM-Wi-Fi-6E)"
   auth_config: "[#194 XB8 error graphs](https://github.com/solentlabs/cable_modem_monitor/issues/194) HAR capture (POST /check.jst with plain username and password fields, 302 to at_a_glance.jst, DUKSID session cookie)"
+  restart: '[#194 XB8 error graphs](https://github.com/solentlabs/cable_modem_monitor/issues/194) fixture HAR (GET /restore_reboot.jst, then POST /actionHandler/ajaxSet_Reset_Restore.jst carrying resetInfo and the csrfp_token cookie echoed in the body; modem answered {"reboot":true})'
   release_date: "Xfinity rollout began 2022: [DSLReports — Next Gateway XB8](https://www.dslreports.com/forum/r33227126-Next-Gateway-XB8-Technicolor-CGM4981COM-Wi-Fi-6E); [Xfinity Community Forum — NEW xFi Gateway XB8](https://forums.xfinity.com/conversations/your-home-network/new-xfi-gateway-xb8/6216d91580db9c3cdd5e96fc)"
 attribution:
   contributors:
@@ -48,7 +66,8 @@ attribution:
     - github: https://github.com/Boby360
       contribution:
         "[Issue #194](https://github.com/solentlabs/cable_modem_monitor/issues/194)
-        first XB8 wire capture and hardware confirmation diagnostics"
+        first XB8 wire capture, hardware confirmation diagnostics, and the
+        reboot capture behind the Restart action"
 
 isps:
   - Rogers
@@ -65,19 +84,20 @@ notes: |
   upstream channels (upstream channel 4 reports Modulation OFDMA with
   Channel Type TDMA, symbol rate 0).
   Quirk, error count duplication, observed on XB8 as on XB7: QAM
-  channel 29 reports correctable and uncorrectable codeword counts
-  identical to OFDM channel 34 (1811327204 and 137079716 on both).
+  channel 29 reports unerrored, correctable and uncorrectable codeword
+  counts identical to OFDM channel 34 (3309689161 correctable and
+  310472831 uncorrectable on both in the fixture). Two captures ten
+  days apart duplicate at different values, so this is firmware
+  behaviour, not a transient read.
   Aggregate intentionally omitted for the same reason as the XB7 entry:
-  a downstream.qam sum reads 1.81 billion against a true QAM total of
-  841 thousand, so the modem exposes no error-total or error-rate
+  a downstream.qam sum reads 3.31 billion against a true QAM total of
+  1.57 million, so the modem exposes no error-total or error-rate
   sensors. Per-channel error counts are unaffected.
-  The Logout endpoint is source_inferred; the capture contains no
-  logout request. No reboot control was captured, so the entry ships
-  without a restart action.
-  The factory Wi-Fi SSID, default password, WPS PIN and serial number
-  in the Device Label Information block on network_setup.jst were
-  redacted by hand: har-capture had no labeled-credential detector at
-  capture time.
+  The Logout endpoint is source_inferred: the fixture reaches
+  /home_loggedout.jst as the pre-login landing page, body not captured,
+  and never as the answer to a logout. Restart is HAR-observed: the fixture records the
+  reboot POST and the modem's success response. The integration's
+  Restart button has not been pressed on XB8 hardware.
 references:
   issues:
     - "[#101 — [Modem Request] Technicolor CGM4981COM](https://github.com/solentlabs/cable_modem_monitor/issues/101)"
