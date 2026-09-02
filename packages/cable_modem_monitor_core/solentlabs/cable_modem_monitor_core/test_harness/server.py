@@ -530,10 +530,10 @@ class HARMockServer(HTTPServer):
         host: str = "127.0.0.1",
         port: int = 0,
     ) -> None:
-        self.routes = build_routes(har_entries)
+        self.login_action = normalize_path(_extract_login_action(modem_config))
+        self.routes = build_routes(har_entries, login_path=self.login_action)
         self.json_body_keys = build_json_body_keys(har_entries)
         self.auth_handler = create_auth_handler(modem_config, har_entries)
-        self.login_action = normalize_path(_extract_login_action(modem_config))
         self.login_query_shapes = build_login_query_shapes(har_entries, self.login_action)
         self.login_page = _extract_login_page(modem_config)
         self.token_prefix = _extract_token_prefix(modem_config)

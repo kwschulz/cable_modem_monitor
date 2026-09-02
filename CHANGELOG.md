@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.14.1-beta.3] - 2026-09-02
+
+### Added
+
+- **Restart button for the Technicolor XB8 (#194).** The reporter sent a
+  second capture that records the gateway's reboot request and the
+  success it answered with, so the entry ships a Restart action. The
+  capture also settles how the request is authorized: the login landing
+  page issues the CSRF token the reboot body echoes, so nothing has to
+  be fetched beforehand. The button has not been pressed on XB8
+  hardware yet.
+
+### Changed
+
+- **The Technicolor XB8 fixture is the newer capture.** It carries the
+  reboot exchange, so the restart action is now replayed against the
+  modem's own response rather than a synthesized one, and its Wi-Fi
+  credentials were removed by har-capture instead of by hand. The
+  golden file moves with it. Channel counts, field coverage and the
+  QAM/OFDM error duplication are unchanged; the duplication reappears
+  at different counter values ten days on, which settles it as firmware
+  behaviour rather than one bad read.
+
+### Fixed
+
+- **Replay could serve a refused login as the accepted one.** For a path
+  captured more than once the harness prefers a 200, which is right for
+  a page re-read after logout and backwards on firmware that re-renders
+  the login form with 200 when the password is wrong and redirects when
+  it is right. The login endpoint now keeps the last exchange whatever
+  its status; every other path keeps the existing preference. Test
+  harness only, no change to how Core talks to a modem.
+
 ## [3.14.1-beta.2] - 2026-09-01
 
 ### Fixed

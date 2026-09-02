@@ -30,6 +30,8 @@ class RouteEntry:
 
 def build_routes(
     har_entries: list[dict[str, Any]],
+    *,
+    login_path: str = "",
 ) -> dict[tuple[str, str], RouteEntry]:
     """Build route table from HAR entries.
 
@@ -40,13 +42,23 @@ def build_routes(
     records two 302s under one key; keeping the first would replay the
     refusal as the login.
 
+    A POST to ``login_path`` is exempt from the status preference and
+    keeps the last exchange outright. The status rule reads a 200 as
+    the better answer, which holds for a data page re-fetched after
+    logout but inverts on a firmware that re-renders the login form
+    with 200 on refusal and redirects with 302 on acceptance (XB8).
+    Callers that leave ``login_path`` empty get the status rule on
+    every key, as before.
+
     Args:
         har_entries: List of HAR ``log.entries`` dicts.
+        login_path: Auth POST endpoint from ``auth.action``, when known.
 
     Returns:
         Route table mapping ``(method, path)`` to response.
     """
     routes: dict[tuple[str, str], RouteEntry] = {}
+    login_key = ("POST", normalize_path(login_path)) if login_path else None
 
     for entry in har_entries:
         request = entry.get("request", {})
@@ -82,8 +94,10 @@ def build_routes(
         key = (method, route_path)
         existing = routes.get(key)
 
-        # A 200 is never displaced by a later failure; otherwise later wins.
-        if existing is None or status == 200 or existing.status != 200:
+        # A 200 is never displaced by a later failure; otherwise later
+        # wins. On the login POST the status says nothing about
+        # acceptance, so the last exchange wins outright.
+        if existing is None or key == login_key or status == 200 or existing.status != 200:
             routes[key] = RouteEntry(status=status, headers=headers, body=body)
 
     return routes

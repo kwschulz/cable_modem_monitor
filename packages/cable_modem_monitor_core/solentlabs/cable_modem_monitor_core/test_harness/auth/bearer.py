@@ -115,7 +115,7 @@ def _captured_login_response(
     """Return the captured POST response for the login endpoint, if the capture has one."""
     if not har_entries:
         return None
-    return build_routes(har_entries).get(("POST", normalize_path(login_path)))
+    return build_routes(har_entries, login_path=login_path).get(("POST", normalize_path(login_path)))
 
 
 def create_handler(

@@ -162,6 +162,60 @@ class TestBuildRoutes:
         ]
         assert build_routes(entries)[("GET", "/status.html")].status == 200
 
+    def test_login_post_keeps_the_last_exchange_over_a_200(self) -> None:
+        """On the login path a 200 refusal does not outrank a later redirect.
+
+        The XB8 re-renders the login form with 200 when the password is
+        wrong and answers the accepted login with a 302 (#194). The
+        status preference would replay the refusal as the login.
+        """
+        entries = [
+            {
+                "request": {"method": "POST", "url": "http://192.168.100.1/check.jst"},
+                "response": {"status": 200, "headers": [], "content": {"text": "<html>login form</html>"}},
+            },
+            {
+                "request": {"method": "POST", "url": "http://192.168.100.1/check.jst"},
+                "response": {
+                    "status": 302,
+                    "headers": [{"name": "location", "value": "at_a_glance.jst"}],
+                    "content": {},
+                },
+            },
+        ]
+        routes = build_routes(entries, login_path="/check.jst")
+        assert routes[("POST", "/check.jst")].status == 302
+
+    def test_login_exemption_does_not_reach_other_paths(self) -> None:
+        """Naming a login path leaves the status preference on every other key."""
+        entries = [
+            {
+                "request": {"method": "GET", "url": "http://192.168.100.1/status.html"},
+                "response": {"status": 200, "headers": [], "content": {"text": "<html>data</html>"}},
+            },
+            {
+                "request": {"method": "GET", "url": "http://192.168.100.1/status.html"},
+                "response": {"status": 401, "headers": [], "content": {"text": "Unauthorized"}},
+            },
+        ]
+        routes = build_routes(entries, login_path="/check.jst")
+        assert routes[("GET", "/status.html")].status == 200
+
+    def test_login_exemption_does_not_reach_another_post(self) -> None:
+        """A POST to any other path keeps the status preference."""
+        entries = [
+            {
+                "request": {"method": "POST", "url": "http://192.168.100.1/goform/reboot"},
+                "response": {"status": 200, "headers": [], "content": {"text": "ok"}},
+            },
+            {
+                "request": {"method": "POST", "url": "http://192.168.100.1/goform/reboot"},
+                "response": {"status": 500, "headers": [], "content": {"text": "boom"}},
+            },
+        ]
+        routes = build_routes(entries, login_path="/check.jst")
+        assert routes[("POST", "/goform/reboot")].status == 200
+
     def test_entry_without_a_response_is_not_a_route(self) -> None:
         """A request that never got a response cannot be replayed as one.
 
