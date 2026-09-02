@@ -45,6 +45,10 @@ attribution:
   contributors:
     - github: https://github.com/Dinth
       contribution: "Initial Hub 5 support and REST API documentation"
+    - github: https://github.com/edent
+      contribution: "Bearer login and reboot flow, confirmed via curl"
+    - github: https://github.com/dcninja
+      contribution: "Hardware confirmation of monitoring and dashboard"
 
 isps:
   - Virgin Media UK
@@ -55,6 +59,10 @@ notes: |
   32 SC-QAM downstream + 1 OFDM, 5 ATDMA upstream + 1 OFDMA.
   bootFilename shows "vmdg660" (Virgin's internal designation).
   Default IP: 192.168.100.1 (modem mode) or 192.168.0.1 (router mode).
+
+  Restart is unconfirmed on hardware. Two contributors pressed the
+  button and the modem did not reboot (#82); the fix that followed
+  has not been retested.
 
   modem.har is a SYNTHESIZED fixture (MODEM_INTAKE_WORKFLOW
   § Assembled fixtures) — data, login, and reboot entries built from
