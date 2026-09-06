@@ -400,6 +400,21 @@ feat(catalog): add support for Arris TG1682G
 Valid types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
 `build`, `ci`, `chore`, `revert`, `deps`.
 
+The check reads every commit in the PR, so a bad commit below the tip
+fails it and `git commit --amend` does not reach it. AI coding agents
+leave scaffolding commits (`Initial plan`) that fail this way. Squash
+the branch to one commit before pushing:
+
+```bash
+git reset --soft HEAD~<n>   # n = commits in the PR
+git commit -m "type(scope): description"
+git push --force-with-lease
+```
+
+A failing check is fixed in the commits or code it flags, never by
+editing the check. A PR that changes `.github/workflows/` to pass its
+own gate is closed.
+
 ## Issue Labels
 
 State labels (`needs-triage`, `in-development`, `needs-testing`,

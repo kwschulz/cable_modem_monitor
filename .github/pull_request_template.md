@@ -32,6 +32,7 @@ Related to #
 - [ ] Tested against real modem hardware (catalog PRs and Core parsing/auth changes)
 - [ ] Catalog PR: used `/modem-intake` (or `skills/modem-intake.md` with another AI tool) or output matches its structure
 - [ ] Breaking change? Migration path described in the Description above
+- [ ] Every commit is `type(scope): description` and AI-agent scaffolding commits are squashed (CI checks each commit, see [CONTRIBUTING § Commit Message Format](../CONTRIBUTING.md#commit-message-format))
 
 ---
 

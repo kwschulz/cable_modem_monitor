@@ -32,11 +32,13 @@ jobs:
 
       - name: Validate PR commits
         run: |
-          # Get the list of commits in this PR
           git fetch origin ${{ github.base_ref }}
 
-          # Validate each commit message
-          npx commitlint --from origin/${{ github.base_ref }} --to HEAD --verbose
+          # Every commit in the range is checked, not just the tip. The
+          # output is kept so the failure summary can replay it; pipefail
+          # keeps the tee from masking commitlint's exit code.
+          set -o pipefail
+          npx commitlint --from origin/${{ github.base_ref }} --to HEAD --verbose 2>&1 | tee commitlint.log
 
       # Reported through the run summary rather than a PR comment: a fork's
       # token is read-only, so createComment 403s and the contributor sees a
@@ -46,6 +48,12 @@ jobs:
         run: |
           {
             echo "## Commit message validation failed"
+            echo ""
+            echo "Every commit in the PR is checked, not just the latest. commitlint reported:"
+            echo ""
+            echo '```'
+            if [ -f commitlint.log ]; then cat commitlint.log; fi
+            echo '```'
             echo ""
             echo "Commits follow Conventional Commits:"
             echo ""
@@ -62,8 +70,17 @@ jobs:
             echo "feat(catalog): add Arris SB8200"
             echo '```'
             echo ""
-            echo "Amend with \`git commit --amend\`, then push with \`--force-with-lease\`."
-            echo "See CONTRIBUTING.md section Commit Message Format."
+            echo "If only the latest commit failed: \`git commit --amend\`, then push with \`--force-with-lease\`."
+            echo ""
+            echo "If an earlier commit failed (an AI agent's scaffolding commit, for example), squash the branch to one commit:"
+            echo ""
+            echo '```'
+            echo "git reset --soft HEAD~<n>   # n = commits in the PR"
+            echo 'git commit -m "type(scope): description"'
+            echo "git push --force-with-lease"
+            echo '```'
+            echo ""
+            echo "Fix the commits, not this workflow. See CONTRIBUTING.md section Commit Message Format."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Success message
