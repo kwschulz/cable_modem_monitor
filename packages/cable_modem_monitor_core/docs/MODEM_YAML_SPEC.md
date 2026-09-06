@@ -69,8 +69,8 @@ for the contract.
 | [Session](#session) | Cookie, single-session, SPA patterns |
 | [Actions](#actions) | Restart and logout — http and hnap types |
 | [Hardware](#hardware) | DOCSIS version, hw_version, firmware, chipset |
-| [Timeout](#timeout) | Per-request override |
 | [Health](#health) | Health probe configuration (fragile modems) |
+| [Timeout](#timeout) | Per-request override |
 | [Metadata](#metadata) | Status, attribution, sources, ISPs, notes |
 | [Validation Rules](#validation-rules) | Transport constraints, required fields, consistency checks |
 | [Multi-Variant Modems](#multi-variant-modems) | Naming, shared files, assembly |
@@ -120,14 +120,14 @@ hardware:
   docsis_version: "3.1"
   chipset: "Broadcom BCM3390"
 
-# Timeout (optional, default 10)
-timeout: 15
-
 # Health (optional, defaults are correct for most modems)
 health:
   http_probe: false      # disable TCP/HEAD probes for fragile modems
   supports_head: false   # modem rejects HTTP HEAD (HEAD probe skipped, no fallback)
   supports_icmp: true    # hint; auto-detection overrides at setup
+
+# Timeout (optional, default 10)
+timeout: 15
 
 # Metadata
 status: confirmed
@@ -1374,22 +1374,6 @@ hardware:
 
 ---
 
-## Timeout
-
-```yaml
-timeout: 15
-```
-
-Per-request timeout in seconds. Applies to each individual HTTP request
-(page fetch, HNAP call), not to the total poll cycle. Default: 10
-seconds.
-
-Override for slow modems — some cable modems take 12-20 seconds to
-render data pages, particularly those with older chipsets or HTTPS
-endpoints.
-
----
-
 ## Health
 
 ```yaml
@@ -1431,6 +1415,22 @@ overrides at setup → user options (highest priority).
 
 Most modems omit this section — defaults are correct. Only declare it
 when a modem is known to be fragile.
+
+---
+
+## Timeout
+
+```yaml
+timeout: 15
+```
+
+Per-request timeout in seconds. Applies to each individual HTTP request
+(page fetch, HNAP call), not to the total poll cycle. Default: 10
+seconds.
+
+Override for slow modems — some cable modems take 12-20 seconds to
+render data pages, particularly those with older chipsets or HTTPS
+endpoints.
 
 ---
 
