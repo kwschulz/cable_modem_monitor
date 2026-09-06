@@ -32,11 +32,30 @@ jobs:
 
       - name: Validate PR commits
         run: |
-          # Get the list of commits in this PR
           git fetch origin ${{ github.base_ref }}
+          commit_range="origin/${{ github.base_ref }}..HEAD"
+          failures=0
+          linted=0
 
-          # Validate each commit message
-          npx commitlint --from origin/${{ github.base_ref }} --to HEAD --verbose
+          while IFS= read -r sha; do
+            author_name="$(git show -s --format='%an' "$sha")"
+            if [[ "$author_name" == *"[bot]" ]]; then
+              echo "Skipping bot-authored commit $sha ($author_name)"
+              continue
+            fi
+
+            linted=$((linted + 1))
+            commit_message="$(git show -s --format=%B "$sha")"
+            echo "$commit_message" | npx commitlint --verbose || failures=1
+          done < <(git rev-list --reverse "$commit_range")
+
+          if [[ "$linted" -eq 0 ]]; then
+            echo "No non-bot commits to lint."
+          fi
+
+          if [[ "$failures" -ne 0 ]]; then
+            exit 1
+          fi
 
       # Reported through the run summary rather than a PR comment: a fork's
       # token is read-only, so createComment 403s and the contributor sees a
