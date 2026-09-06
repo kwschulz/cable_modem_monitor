@@ -8,6 +8,8 @@ brands:
 transport: http
 default_host: "10.0.0.1"
 
+timeout: 25
+
 auth:
   strategy: form
   action: "/check.jst"
